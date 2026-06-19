@@ -530,13 +530,13 @@ export default function Editor() {
     setIsExporting(true)
     try {
       const html2pdf = (await import('html2pdf.js')).default
-      const element = document.querySelector('.tiptap')
+      const element = document.querySelector('.tiptap') as HTMLElement
       if (!element) {
         alert('Editor canvas element not found.')
         return
       }
 
-      const opt = {
+      const opt: any = {
         margin: [1.0, 0.75, 1.0, 0.75] as [number, number, number, number], // Increased top/bottom margins to make space for headers and footers
         filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
@@ -554,7 +554,7 @@ export default function Editor() {
       }
 
       // Stream PDF and hook into the underlying jsPDF instance to draw layout headers and footers
-      await html2pdf().set(opt).from(element).toPdf().get('pdf').then((pdf: any) => {
+      await (html2pdf().set(opt).from(element).toPdf().get('pdf').then((pdf: any) => {
         const totalPages = pdf.internal.getNumberOfPages()
         for (let i = 1; i <= totalPages; i++) {
           pdf.setPage(i)
@@ -571,7 +571,7 @@ export default function Editor() {
           const footerText = docFooter ? `${docFooter} | Page ${i} of ${totalPages}` : `Page ${i} of ${totalPages}`
           pdf.text(footerText, 4.25, 10.5, { align: 'center' })
         }
-      }).save()
+      }) as any).save()
     } catch (err: any) {
       console.error('PDF export error:', err)
       alert(`Failed to export PDF: ${err.message || err}`)
@@ -596,7 +596,7 @@ export default function Editor() {
       const getAlignment = (align?: string) => {
         if (align === 'center') return AlignmentType.CENTER
         if (align === 'right') return AlignmentType.RIGHT
-        if (align === 'justify') return AlignmentType.JUSTIFY
+        if (align === 'justify') return AlignmentType.JUSTIFIED
         return AlignmentType.LEFT
       }
 
@@ -650,8 +650,7 @@ export default function Editor() {
             new Paragraph({
               children: runs,
               alignment: align,
-              spacing: { after: 120 },
-              lineSpacing: { val: 360 } // 1.5 line height spacing
+              spacing: { after: 120, line: 360 } // 1.5 line height spacing
             })
           )
         } else if (node.type === 'bulletList' || node.type === 'orderedList') {
@@ -783,13 +782,15 @@ export default function Editor() {
 
       let slideTitle = ''
       let slideContent: string[] = []
+      let hasSlidesCreated = false
 
       const createSlide = () => {
         if (slideTitle || slideContent.length > 0) {
           const slide = pptx.addSlide()
+          hasSlidesCreated = true
 
           // Slide title header background banner
-          slide.addShape(pptx.shapes.RECTANGLE, {
+          slide.addShape('rect' as any, {
             x: 0,
             y: 0,
             w: '100%',
@@ -861,7 +862,7 @@ export default function Editor() {
       createSlide()
 
       // Create fallback title slide if empty
-      if (pptx.slides.length === 0) {
+      if (!hasSlidesCreated) {
         const slide = pptx.addSlide()
         slide.addText(documentTitle, { 
           x: 1, 
