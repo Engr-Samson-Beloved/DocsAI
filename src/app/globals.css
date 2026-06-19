@@ -40,8 +40,10 @@ body {
   font-size: 16px;
   line-height: inherit;
   color: inherit;
-  
-  /* Visual automatic page break guidelines */
+}
+
+/* Visual automatic page break guidelines on the stacked paper sheets */
+.paper-sheet {
   background-image: linear-gradient(
     to bottom,
     transparent 1055px,
@@ -51,7 +53,7 @@ body {
   background-size: 100% 1056px;
 }
 
-.dark .tiptap {
+.dark .paper-sheet {
   background-image: linear-gradient(
     to bottom,
     transparent 1055px,

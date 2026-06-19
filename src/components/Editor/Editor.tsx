@@ -2068,7 +2068,7 @@ export default function Editor() {
           {/* Document Sheet Container */}
           <div 
             onClick={() => editor.commands.focus()}
-            className="w-full max-w-[816px] bg-[var(--paper-bg)] border border-[var(--paper-border)] shadow-[var(--paper-shadow)] rounded-lg p-16 md:p-20 min-h-[1056px] text-zinc-850 dark:text-zinc-100 cursor-text transition-all duration-300"
+            className="w-full max-w-[816px] bg-[var(--paper-bg)] border border-[var(--paper-border)] shadow-[var(--paper-shadow)] rounded-lg p-16 md:p-20 min-h-[1056px] text-zinc-850 dark:text-zinc-100 cursor-text transition-all duration-300 paper-sheet"
           >
             <EditorContent editor={editor} />
           </div>
