@@ -44,22 +44,7 @@ body {
 
 /* Visual automatic page break guidelines on the stacked paper sheets */
 .paper-sheet {
-  background-image: linear-gradient(
-    to bottom,
-    transparent 1055px,
-    #e2e8f0 1055px,
-    #e2e8f0 1056px
-  );
-  background-size: 100% 1056px;
-}
-
-.dark .paper-sheet {
-  background-image: linear-gradient(
-    to bottom,
-    transparent 1055px,
-    #27272a 1055px,
-    #27272a 1056px
-  );
+  position: relative;
 }
 
 .tiptap p {

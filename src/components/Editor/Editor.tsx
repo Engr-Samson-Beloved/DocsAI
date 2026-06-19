@@ -2068,8 +2068,29 @@ export default function Editor() {
           {/* Document Sheet Container */}
           <div 
             onClick={() => editor.commands.focus()}
-            className="w-full max-w-[816px] bg-[var(--paper-bg)] border border-[var(--paper-border)] shadow-[var(--paper-shadow)] rounded-lg p-16 md:p-20 min-h-[1056px] text-zinc-850 dark:text-zinc-100 cursor-text transition-all duration-300 paper-sheet"
+            className="w-full max-w-[816px] bg-[var(--paper-bg)] border border-[var(--paper-border)] shadow-[var(--paper-shadow)] rounded-lg p-16 md:p-20 min-h-[1056px] text-zinc-850 dark:text-zinc-100 cursor-text transition-all duration-300 paper-sheet relative"
           >
+            {/* Visual Page Separators */}
+            {totalPages > 1 && Array.from({ length: totalPages - 1 }).map((_, index) => {
+              const pageNum = index + 1
+              const topOffset = pageNum * 1056
+              return (
+                <div 
+                  key={index}
+                  style={{ top: `${topOffset - 12}px` }}
+                  className="absolute left-0 right-0 h-6 bg-zinc-100 dark:bg-zinc-950 border-t border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-8 select-none z-10 pointer-events-none print:hidden shadow-xs"
+                >
+                  <span className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 tracking-wider">
+                    PAGE {pageNum}
+                  </span>
+                  <div className="flex-1 border-t border-dashed border-zinc-200 dark:border-zinc-800 mx-4"></div>
+                  <span className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 tracking-wider">
+                    PAGE {pageNum + 1}
+                  </span>
+                </div>
+              )
+            })}
+
             <EditorContent editor={editor} />
           </div>
         </div>
