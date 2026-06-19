@@ -306,6 +306,13 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
   return { isReplacementMode: true, originalText, replacementText }
 }
 
+interface OutlineItem {
+  text: string;
+  level: number;
+  id: string;
+  page: number;
+}
+
 export default function Editor() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document')
   const [isSaved, setIsSaved] = useState(true)
@@ -333,6 +340,15 @@ export default function Editor() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const popupRef = useRef<HTMLDivElement | null>(null)
 
+  // Document Outline Left Sidebar States
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
+  const [outline, setOutline] = useState<OutlineItem[]>([])
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [activeHeadingIndex, setActiveHeadingIndex] = useState<number | null>(null)
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+
   // Project Pilot Setup Wizard & Context Window States
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(1) // 1: Welcome/Details, 2: Ingestion, 3: Setup Choice
@@ -359,6 +375,137 @@ export default function Editor() {
     if (docTitle) {
       setDocumentTitle(docTitle)
     }
+  }, [])
+
+  // Document Outline Calculations
+  const updateOutline = () => {
+    if (!editor) return
+    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
+    const editorEl = document.querySelector('.tiptap') as HTMLElement
+    if (!editorEl) return
+
+    const pageHeight = 1056 // Standard Letter page height in pixels
+    const items: OutlineItem[] = []
+
+    headingElements.forEach((el, index) => {
+      const htmlEl = el as HTMLElement
+      let offset = 0
+      let curr: HTMLElement | null = htmlEl
+      while (curr && curr !== editorEl) {
+        offset += curr.offsetTop
+        curr = curr.offsetParent as HTMLElement | null
+      }
+      
+      const page = Math.floor(offset / pageHeight) + 1
+      items.push({
+        text: htmlEl.textContent || '',
+        level: parseInt(htmlEl.tagName.substring(1)),
+        id: `heading-${index}`,
+        page
+      })
+    })
+
+    setOutline(items)
+  }
+
+  const handleScroll = () => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const editorEl = document.querySelector('.tiptap') as HTMLElement
+    if (!editorEl) return
+
+    const pageHeight = 1056
+    const scrollTop = container.scrollTop
+    const clientHeight = container.clientHeight
+
+    // Calculate current page based on midpoint scroll offset relative to editor container
+    const relativeScrollTop = Math.max(0, scrollTop + clientHeight / 2 - editorEl.offsetTop)
+    const pageNum = Math.floor(relativeScrollTop / pageHeight) + 1
+    setCurrentPage(pageNum)
+
+    // Calculate total pages
+    const totalH = editorEl.scrollHeight
+    const totalP = Math.max(1, Math.ceil(totalH / pageHeight))
+    setTotalPages(totalP)
+
+    // Calculate which heading is active (visible on screen)
+    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
+    let currentActiveIdx: number | null = null
+    let minDiff = Infinity
+
+    headingElements.forEach((el, index) => {
+      const htmlEl = el as HTMLElement
+      let offset = 0
+      let curr: HTMLElement | null = htmlEl
+      while (curr && curr !== editorEl) {
+        offset += curr.offsetTop
+        curr = curr.offsetParent as HTMLElement | null
+      }
+
+      // Check distance from current scroll position
+      const diff = Math.abs(offset - (scrollTop + 100))
+      if (offset <= scrollTop + 200 && diff < minDiff) {
+        minDiff = diff
+        currentActiveIdx = index
+      }
+    })
+
+    setActiveHeadingIndex(currentActiveIdx)
+  }
+
+  const scrollToHeading = (index: number) => {
+    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
+    const target = headingElements[index] as HTMLElement
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      
+      // Visual feedback highlight
+      target.classList.add('bg-indigo-50', 'dark:bg-indigo-950/40', 'transition-all', 'duration-500')
+      setTimeout(() => {
+        target.classList.remove('bg-indigo-50', 'dark:bg-indigo-950/40')
+      }, 1500)
+    }
+  }
+
+  // Listen to scroll events to update current page and active outline item
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const listener = () => handleScroll()
+    container.addEventListener('scroll', listener)
+    
+    // Initial run
+    setTimeout(() => {
+      handleScroll()
+    }, 200)
+
+    return () => {
+      container.removeEventListener('scroll', listener)
+    }
+  }, [outline])
+
+  // Screen size check for sidebars auto-collapsing
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth
+      if (width < 1440) {
+        setSidebarOpen(false)
+      } else {
+        setSidebarOpen(true)
+      }
+      
+      if (width < 1024) {
+        setLeftSidebarOpen(false)
+      } else {
+        setLeftSidebarOpen(true)
+      }
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // Click outside handler for floating AI popup
@@ -435,6 +582,12 @@ export default function Editor() {
       // Local storage draft save trigger on edit
       const contentJSON = editor.getJSON()
       localStorage.setItem('tiptap-content', JSON.stringify(contentJSON))
+
+      // Update outline dynamic values
+      setTimeout(() => {
+        updateOutline()
+        handleScroll()
+      }, 50)
     },
     onSelectionUpdate: ({ editor }) => {
       // Clear existing idle timer
@@ -505,6 +658,8 @@ export default function Editor() {
       setCharCount(text.length)
       setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0)
       setReadTime(Math.ceil((text.trim() ? text.trim().split(/\s+/).length : 0) / 200))
+      updateOutline()
+      handleScroll()
     }, 100)
   }, [editor])
 
@@ -1595,8 +1750,18 @@ export default function Editor() {
           </button>
 
           <button
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 rounded-md transition-colors border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+            title={leftSidebarOpen ? "Hide Outline" : "Show Outline"}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Outline</span>
+            {leftSidebarOpen ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          </button>
+
+          <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-md transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-md transition-colors cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
             <span>AI Sidebar</span>
@@ -1607,7 +1772,86 @@ export default function Editor() {
 
       {/* Editor Main Canvas & Layout */}
       <div className="flex flex-1 overflow-hidden relative">
-        <div className="flex flex-col flex-1 overflow-y-auto items-center py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950">
+        {/* Left Sidebar (Document Outline & Page Navigator) */}
+        <aside 
+          className={`flex-shrink-0 h-full bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-all duration-300 z-20 flex flex-col ${
+            leftSidebarOpen ? 'w-64 border-opacity-100' : 'w-0 border-opacity-0 overflow-hidden'
+          }`}
+        >
+          {leftSidebarOpen && (
+            <div className="flex flex-col h-full w-64 select-none animate-fade-in">
+              <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-semibold text-xs uppercase tracking-wider">
+                  <FileText className="w-4 h-4 text-indigo-500" />
+                  <span>Document Outline</span>
+                </div>
+                <button
+                  onClick={() => setLeftSidebarOpen(false)}
+                  className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded cursor-pointer"
+                >
+                  <Minimize2 className="w-4 h-4 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300" />
+                </button>
+              </div>
+
+              {/* Page indicator header */}
+              <div className="p-4 bg-zinc-50/50 dark:bg-zinc-900/50 border-b border-zinc-150 dark:border-zinc-850 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5 text-zinc-650 dark:text-zinc-350">
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">Page {currentPage}</span>
+                  <span>of {totalPages}</span>
+                </div>
+                {/* Visual mini progress bar */}
+                <div className="w-24 bg-zinc-200 dark:bg-zinc-750 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-indigo-650 h-full transition-all duration-300" 
+                    style={{ width: `${Math.min(100, (currentPage / totalPages) * 100)}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Outline Navigation items */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-1">
+                {outline.length === 0 ? (
+                  <div className="text-center py-8 px-2 space-y-2">
+                    <FileText className="w-8 h-8 text-zinc-300 dark:text-zinc-750 mx-auto" />
+                    <p className="text-xs text-zinc-400 leading-normal">
+                      Headings you add to the document will appear here to format your outline.
+                    </p>
+                  </div>
+                ) : (
+                  <nav className="space-y-0.5">
+                    {outline.map((item, index) => {
+                      const isActive = activeHeadingIndex === index
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => scrollToHeading(index)}
+                          className={`w-full text-left px-2.5 py-1.5 rounded text-xs transition-all flex items-center justify-between cursor-pointer group ${
+                            isActive
+                              ? 'bg-indigo-50 text-indigo-750 font-bold dark:bg-indigo-950/30 dark:text-indigo-400 border-l-2 border-indigo-600 dark:border-indigo-400 pl-2'
+                              : 'text-zinc-600 hover:text-zinc-850 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-850 pl-2.5'
+                          }`}
+                          style={{
+                            paddingLeft: `${Math.max(10, item.level * 12)}px`
+                          }}
+                        >
+                          <span className="truncate pr-2">{item.text}</span>
+                          <span className={`text-[9px] text-zinc-400 dark:text-zinc-500 font-mono opacity-0 group-hover:opacity-100 transition-opacity ${isActive ? 'opacity-100 font-semibold' : ''}`}>
+                            p. {item.page}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </nav>
+                )}
+              </div>
+            </div>
+          )}
+        </aside>
+
+        <div 
+          ref={scrollContainerRef}
+          className="flex flex-col flex-1 overflow-y-auto items-center py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950"
+        >
           
           {/* Formatting Toolbar */}
           <div className="w-full max-w-[816px] sticky top-0 flex flex-wrap gap-1 items-center p-2 mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-md z-30 justify-start sm:justify-between">
