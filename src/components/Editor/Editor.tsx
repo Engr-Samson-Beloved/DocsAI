@@ -61,7 +61,14 @@ const DEFAULT_CONTENT = `
 // Helper function to format raw markdown or code-blocked AI outputs to clean HTML tags.
 // This ensures content inserts cleanly into the Tiptap document tree with proper styles.
 const formatAiResponseToHtml = (text: string): string => {
-  let cleaned = text.trim()
+  // Strip any raw replacement tags that might leak
+  let cleaned = text
+    .replace(/<<<ORIGINAL>>>/g, '')
+    .replace(/<<<REPLACEMENT>>>/g, '')
+    .replace(/<<<END>>>/g, '')
+    .replace(/<<</g, '')
+    .replace(/>>>/g, '')
+    .trim()
 
   // Remove markdown code block wraps (e.g., ```html ... ``` or ``` ... ```)
   if (cleaned.startsWith('```')) {
@@ -1141,6 +1148,7 @@ export default function Editor() {
 
       const decoder = new TextDecoder()
       let accumulatedText = ''
+      let detectedOriginalMode = false
 
       while (true) {
         const { value, done } = await reader.read()
@@ -1161,7 +1169,42 @@ export default function Editor() {
               } else if (data.text) {
                 accumulatedText += data.text
               }
-              setSimulatedAiResult(accumulatedText)
+
+              // Check if model returned replacement format
+              if (accumulatedText.includes('<<<ORIGINAL>>>')) {
+                detectedOriginalMode = true
+                const origIndex = accumulatedText.indexOf('<<<ORIGINAL>>>')
+                const replIndex = accumulatedText.indexOf('<<<REPLACEMENT>>>')
+
+                if (replIndex !== -1) {
+                  const origText = accumulatedText.substring(origIndex + 14, replIndex).trim()
+                  setAiSelectedText(origText)
+
+                  // Try to find and select it in the editor
+                  const range = findTextRange(editor, origText)
+                  if (range) {
+                    setAiSelectionRange(range)
+                    editor.chain().setTextSelection(range).scrollIntoView().run()
+                  } else if (popupContextRange) {
+                    setAiSelectionRange(popupContextRange)
+                  }
+
+                  const endIndex = accumulatedText.indexOf('<<<END>>>')
+                  let replText = ''
+                  if (endIndex !== -1) {
+                    replText = accumulatedText.substring(replIndex + 17, endIndex).trim()
+                  } else {
+                    replText = accumulatedText.substring(replIndex + 17).trim()
+                  }
+                  setSimulatedAiResult(replText)
+                } else {
+                  const origText = accumulatedText.substring(origIndex + 14).trim()
+                  setAiSelectedText(origText)
+                  setSimulatedAiResult('') // Wait for replacement text
+                }
+              } else if (!detectedOriginalMode) {
+                setSimulatedAiResult(accumulatedText)
+              }
             } catch (e) {}
           }
         }
