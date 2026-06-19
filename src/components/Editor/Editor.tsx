@@ -43,9 +43,9 @@ import {
 // Default template content for the editor
 const DEFAULT_CONTENT = `
 <h1>An Analysis of AI-Assisted Document Editing for Academic Workflows</h1>
-<p>This document is created using <strong>DocuAI</strong>, a client-side word processor optimized for educational and research tasks. It is running entirely in your browser without requiring a backend server.</p>
+<p>This document is created using <strong>Project Pilot</strong>, a client-side word processor optimized for educational and research tasks. It is running entirely in your browser without requiring a backend server.</p>
 <h2>1. Project Vision</h2>
-<p>Students face significant hurdles when compiling academic projects, including formatting compliance, citation structuring, and outline design. Traditional word processors offer formatting tools but lack context-aware assistance. DocuAI attempts to solve this by providing a highly responsive editor coupled with an offline-first data model.</p>
+<p>Students face significant hurdles when compiling academic projects, including formatting compliance, citation structuring, and outline design. Traditional word processors offer formatting tools but lack context-aware assistance. Project Pilot attempts to solve this by providing a highly responsive editor coupled with an offline-first data model.</p>
 <blockquote>
   "The future of academic software lies in Zero-Server architectures that grant students absolute control over their content privacy and tool availability without subscription limits."
 </blockquote>
@@ -63,11 +63,14 @@ const DEFAULT_CONTENT = `
 const formatAiResponseToHtml = (text: string): string => {
   // Strip any raw replacement tags that might leak
   let cleaned = text
-    .replace(/<<<ORIGINAL>>>/g, '')
-    .replace(/<<<REPLACEMENT>>>/g, '')
-    .replace(/<<<END>>>/g, '')
-    .replace(/<<</g, '')
-    .replace(/>>>/g, '')
+    .replace(/<+\s*ORIGINAL\s*>+/gi, '')
+    .replace(/<+\s*REPLACEMENT\s*>+/gi, '')
+    .replace(/<+\s*NEW\s*>+/gi, '')
+    .replace(/<+\s*END\s*>+/gi, '')
+    .replace(/<<<+/g, '')
+    .replace(/>>>+/g, '')
+    .replace(/<<+/g, '')
+    .replace(/>>+/g, '')
     .trim()
 
   // Remove markdown code block wraps (e.g., ```html ... ``` or ``` ... ```)
@@ -263,6 +266,46 @@ const findTextRange = (editor: any, searchText: string): { from: number; to: num
   return null
 }
 
+interface ParsedReplacement {
+  isReplacementMode: boolean;
+  originalText: string;
+  replacementText: string;
+}
+
+const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
+  const origMatch = accumulated.match(/<+\s*ORIGINAL\s*>+/i)
+  const replMatch = accumulated.match(/<+\s*(REPLACEMENT|NEW)\s*>+/i)
+  const endMatch = accumulated.match(/<+\s*END\s*>+/i)
+
+  if (!origMatch) {
+    return { isReplacementMode: false, originalText: '', replacementText: '' }
+  }
+
+  const origStart = origMatch.index!
+  const origLength = origMatch[0].length
+  const origEnd = origStart + origLength
+
+  if (!replMatch) {
+    const originalText = accumulated.substring(origEnd).trim()
+    return { isReplacementMode: true, originalText, replacementText: '' }
+  }
+
+  const replStart = replMatch.index!
+  const replLength = replMatch[0].length
+  const replEnd = replStart + replLength
+
+  const originalText = accumulated.substring(origEnd, replStart).trim()
+
+  let replacementText = ''
+  if (endMatch) {
+    replacementText = accumulated.substring(replEnd, endMatch.index!).trim()
+  } else {
+    replacementText = accumulated.substring(replEnd).trim()
+  }
+
+  return { isReplacementMode: true, originalText, replacementText }
+}
+
 export default function Editor() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document')
   const [isSaved, setIsSaved] = useState(true)
@@ -286,7 +329,17 @@ export default function Editor() {
   const [popupContextText, setPopupContextText] = useState('')
   const [popupContextRange, setPopupContextRange] = useState<{ from: number; to: number } | null>(null)
   const [popupPrompt, setPopupPrompt] = useState('')
+  const [popupBlockStart, setPopupBlockStart] = useState<number | null>(null)
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const popupRef = useRef<HTMLDivElement | null>(null)
+
+  // Project Pilot Setup Wizard & Context Window States
+  const [showWizard, setShowWizard] = useState(false)
+  const [wizardStep, setWizardStep] = useState(1) // 1: Welcome/Details, 2: Ingestion, 3: Setup Choice
+  const [wizardTopic, setWizardTopic] = useState('')
+  const [wizardAcademicLevel, setWizardAcademicLevel] = useState('Undergraduate')
+  const [projectSources, setProjectSources] = useState<{ name: string; content: string; type: string }[]>([])
+  const [isProcessingSource, setIsProcessingSource] = useState(false)
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -307,6 +360,26 @@ export default function Editor() {
       setDocumentTitle(docTitle)
     }
   }, [])
+
+  // Click outside handler for floating AI popup
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showFloatingPopup && popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        const editorEl = document.querySelector('.tiptap')
+        if (editorEl && !editorEl.contains(event.target as Node)) {
+          setShowFloatingPopup(false)
+          setSimulatedAiResult('')
+          setAiSelectedText('')
+          setAiSelectionRange(null)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showFloatingPopup])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -339,8 +412,16 @@ export default function Editor() {
     onUpdate: ({ editor }) => {
       setIsSaved(false)
       
-      // Hide floating popup on edit
-      setShowFloatingPopup(false)
+      // Hide floating popup only if we moved to a different block
+      if (showFloatingPopup && popupBlockStart !== null) {
+        const { $from } = editor.state.selection
+        if ($from.start() !== popupBlockStart) {
+          setShowFloatingPopup(false)
+          setSimulatedAiResult('')
+          setAiSelectedText('')
+          setAiSelectionRange(null)
+        }
+      }
       
       // Calculate Stats
       const text = editor.getText()
@@ -361,10 +442,15 @@ export default function Editor() {
         clearTimeout(idleTimerRef.current)
       }
 
-      // Close the floating popup if user changes selection/cursor in the editor
-      if (editor.isFocused) {
-        setShowFloatingPopup(false)
-        setSimulatedAiResult('')
+      // Close the floating popup if user changes selection/cursor to a different block
+      if (editor.isFocused && showFloatingPopup && popupBlockStart !== null) {
+        const { $from } = editor.state.selection
+        if ($from.start() !== popupBlockStart) {
+          setShowFloatingPopup(false)
+          setSimulatedAiResult('')
+          setAiSelectedText('')
+          setAiSelectionRange(null)
+        }
       }
 
       // If AI is generating, or if editor is not focused, or if there is a selection highlight active, do not trigger
@@ -387,6 +473,7 @@ export default function Editor() {
             setPopupCoords({ top: coords.top, left: coords.left })
             setPopupContextText(text)
             setPopupContextRange({ from, to })
+            setPopupBlockStart(from)
             setShowFloatingPopup(true)
           } catch (e) {
             console.error(e)
@@ -408,7 +495,8 @@ export default function Editor() {
         editor.commands.setContent(DEFAULT_CONTENT)
       }
     } else {
-      editor.commands.setContent(DEFAULT_CONTENT)
+      editor.commands.setContent('')
+      setShowWizard(true)
     }
 
     // Initial stat calculations
@@ -554,7 +642,7 @@ export default function Editor() {
       }
 
       // Stream PDF and hook into the underlying jsPDF instance to draw layout headers and footers
-      await (html2pdf().set(opt).from(element).toPdf().get('pdf').then((pdf: any) => {
+      await (html2pdf().set(opt as any).from(element).toPdf().get('pdf').then((pdf: any) => {
         const totalPages = pdf.internal.getNumberOfPages()
         for (let i = 1; i <= totalPages; i++) {
           pdf.setPage(i)
@@ -713,7 +801,7 @@ export default function Editor() {
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docHeader || "DocuAI Document Draft",
+                        text: docHeader || "Project Pilot Document Draft",
                         size: 18, // 9pt (half-points in docx)
                         color: "71717a", // Zinc 500
                         font: "Arial"
@@ -977,12 +1065,19 @@ export default function Editor() {
     }
 
     try {
+      // Build unified context including ingested sources if they exist
+      let unifiedContext = selectedText || editor.getText()
+      if (projectSources.length > 0) {
+        const sourcesText = projectSources.map(s => `[Source Research File: ${s.name}]\n${s.content.replace(/<[^>]*>/g, '')}`).join('\n\n')
+        unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
+      }
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          context: selectedText || editor.getText()
+          context: unifiedContext
         })
       })
 
@@ -1033,37 +1128,19 @@ export default function Editor() {
                 accumulatedText += data.text
               }
 
-              // Check if model returned replacement format
-              if (accumulatedText.includes('<<<ORIGINAL>>>')) {
+              // Call our robust parser
+              const parsed = parseStreamingReplacement(accumulatedText)
+              if (parsed.isReplacementMode) {
                 detectedOriginalMode = true
-                const origIndex = accumulatedText.indexOf('<<<ORIGINAL>>>')
-                const replIndex = accumulatedText.indexOf('<<<REPLACEMENT>>>')
-
-                if (replIndex !== -1) {
-                  const origText = accumulatedText.substring(origIndex + 14, replIndex).trim()
-                  setAiSelectedText(origText)
-
-                  // Try to find and select it in the editor
-                  const range = findTextRange(editor, origText)
+                if (parsed.originalText) {
+                  setAiSelectedText(parsed.originalText)
+                  const range = findTextRange(editor, parsed.originalText)
                   if (range) {
                     setAiSelectionRange(range)
-                    // Highlight visually in Tiptap
                     editor.chain().setTextSelection(range).scrollIntoView().run()
                   }
-
-                  const endIndex = accumulatedText.indexOf('<<<END>>>')
-                  let replText = ''
-                  if (endIndex !== -1) {
-                    replText = accumulatedText.substring(replIndex + 17, endIndex).trim()
-                  } else {
-                    replText = accumulatedText.substring(replIndex + 17).trim()
-                  }
-                  setSimulatedAiResult(replText)
-                } else {
-                  const origText = accumulatedText.substring(origIndex + 14).trim()
-                  setAiSelectedText(origText)
-                  setSimulatedAiResult('') // Wait for replacement text
                 }
+                setSimulatedAiResult(parsed.replacementText)
               } else if (!detectedOriginalMode) {
                 setSimulatedAiResult(accumulatedText)
               }
@@ -1130,12 +1207,19 @@ export default function Editor() {
     const promptText = `Rewrite or edit the following text context as requested: "${finalPrompt}". Return ONLY the revised version of this paragraph/sentence, styled with standard HTML if needed.`
 
     try {
+      // Build unified context including ingested sources if they exist
+      let unifiedContext = popupContextText
+      if (projectSources.length > 0) {
+        const sourcesText = projectSources.map(s => `[Source Research File: ${s.name}]\n${s.content.replace(/<[^>]*>/g, '')}`).join('\n\n')
+        unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
+      }
+
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          context: popupContextText
+          context: unifiedContext
         })
       })
 
@@ -1183,38 +1267,21 @@ export default function Editor() {
                 accumulatedText += data.text
               }
 
-              // Check if model returned replacement format
-              if (accumulatedText.includes('<<<ORIGINAL>>>')) {
+              // Call our robust parser
+              const parsed = parseStreamingReplacement(accumulatedText)
+              if (parsed.isReplacementMode) {
                 detectedOriginalMode = true
-                const origIndex = accumulatedText.indexOf('<<<ORIGINAL>>>')
-                const replIndex = accumulatedText.indexOf('<<<REPLACEMENT>>>')
-
-                if (replIndex !== -1) {
-                  const origText = accumulatedText.substring(origIndex + 14, replIndex).trim()
-                  setAiSelectedText(origText)
-
-                  // Try to find and select it in the editor
-                  const range = findTextRange(editor, origText)
+                if (parsed.originalText) {
+                  setAiSelectedText(parsed.originalText)
+                  const range = findTextRange(editor, parsed.originalText)
                   if (range) {
                     setAiSelectionRange(range)
                     editor.chain().setTextSelection(range).scrollIntoView().run()
                   } else if (popupContextRange) {
                     setAiSelectionRange(popupContextRange)
                   }
-
-                  const endIndex = accumulatedText.indexOf('<<<END>>>')
-                  let replText = ''
-                  if (endIndex !== -1) {
-                    replText = accumulatedText.substring(replIndex + 17, endIndex).trim()
-                  } else {
-                    replText = accumulatedText.substring(replIndex + 17).trim()
-                  }
-                  setSimulatedAiResult(replText)
-                } else {
-                  const origText = accumulatedText.substring(origIndex + 14).trim()
-                  setAiSelectedText(origText)
-                  setSimulatedAiResult('') // Wait for replacement text
                 }
+                setSimulatedAiResult(parsed.replacementText)
               } else if (!detectedOriginalMode) {
                 setSimulatedAiResult(accumulatedText)
               }
@@ -1253,6 +1320,158 @@ export default function Editor() {
     setPopupPrompt('')
   }
 
+  // Setup Wizard & Source Context File Parsing Helpers
+  const parseSourceFile = async (file: File): Promise<{ name: string; content: string; type: string }> => {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    
+    if (extension === 'docx') {
+      const mammoth = await import('mammoth')
+      const arrayBuffer = await file.arrayBuffer()
+      const result = await mammoth.convertToHtml({ arrayBuffer })
+      return {
+        name: file.name,
+        content: result.value,
+        type: 'docx'
+      }
+    } else if (extension === 'pdf') {
+      const pdfjs = await import('pdfjs-dist')
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+      
+      const arrayBuffer = await file.arrayBuffer()
+      const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+      const pdf = await loadingTask.promise
+      
+      let accumulatedHtml = ''
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const textContent = await page.getTextContent()
+        const pageStrings = textContent.items.map((item: any) => item.str).join(' ')
+        accumulatedHtml += `<p>${pageStrings}</p>`
+      }
+      return {
+        name: file.name,
+        content: accumulatedHtml,
+        type: 'pdf'
+      }
+    } else {
+      throw new Error('Unsupported document format. Only .docx and .pdf files are supported.')
+    }
+  }
+
+  const handleWizardFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    setIsProcessingSource(true)
+    const newSources = [...projectSources]
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const parsed = await parseSourceFile(file)
+        newSources.push(parsed)
+      } catch (err: any) {
+        alert(`Error parsing "${file.name}": ${err.message}`)
+      }
+    }
+
+    setProjectSources(newSources)
+    setIsProcessingSource(false)
+    e.target.value = ''
+  }
+
+  const handleWizardComplete = async (choice: 'import' | 'ai_blueprint' | 'blank') => {
+    const finalTitle = wizardTopic.trim() || 'Untitled Project'
+    setDocumentTitle(finalTitle)
+    localStorage.setItem('docTitle', finalTitle)
+
+    if (choice === 'import' && projectSources.length > 0) {
+      editor.commands.setContent(projectSources[0].content)
+      setIsSaved(false)
+      setShowWizard(false)
+    } else if (choice === 'ai_blueprint') {
+      setShowWizard(false)
+      setIsSimulatingAI(true)
+      setSimulatedAiResult('')
+      setActiveAiModel('')
+      
+      let contextText = ''
+      if (projectSources.length > 0) {
+        contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ": " + s.content.slice(0, 1000)).join('\n\n')
+      }
+      
+      const promptText = `Write a comprehensive academic thesis setup for the topic: "${finalTitle}". Provide:
+      1. A formatted H1 title.
+      2. A structured thesis chapter outline (Chapters 1 to 5) with H2/H3 subheadings and list items.
+      3. A detailed 3-paragraph introduction styled with academic paragraphs (<p>).
+      
+      Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} project.`
+
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: promptText,
+            context: contextText
+          })
+        })
+
+        if (!response.ok) {
+          editor.commands.setContent(`<h1>${finalTitle}</h1><p>Failed to generate initial outline.</p>`)
+          setIsSimulatingAI(false)
+          return
+        }
+
+        const reader = response.body?.getReader()
+        if (!reader) {
+          editor.commands.setContent(`<h1>${finalTitle}</h1><p>Failed to read outline stream.</p>`)
+          setIsSimulatingAI(false)
+          return
+        }
+
+        const decoder = new TextDecoder()
+        let accumulatedText = ''
+        
+        editor.commands.setContent(`<h1>${finalTitle}</h1><p>Generating project blueprint... Please wait.</p>`)
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+
+          const chunk = decoder.decode(value, { stream: true })
+          const lines = chunk.split('\n')
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim()
+              if (dataStr === '[DONE]') break
+              try {
+                const data = JSON.parse(dataStr)
+                if (data.text) {
+                  accumulatedText += data.text
+                  const formatted = formatAiResponseToHtml(accumulatedText)
+                  editor.commands.setContent(formatted)
+                }
+              } catch (e) {}
+            }
+          }
+        }
+        setIsSaved(false)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setIsSimulatingAI(false)
+      }
+    } else {
+      editor.commands.setContent(`<h1>${finalTitle}</h1><p>Start writing your thesis here...</p>`)
+      setIsSaved(false)
+      setShowWizard(false)
+    }
+
+    setWizardStep(1)
+    setWizardTopic('')
+  }
+
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
       {isExporting && (
@@ -1271,8 +1490,8 @@ export default function Editor() {
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 px-3 py-1 bg-indigo-600 rounded-lg text-white font-bold text-lg shadow-sm">
-            <FileText className="w-5 h-5" />
-            <span>DocuAI</span>
+            <Sparkles className="w-5 h-5 animate-pulse" />
+            <span>Project Pilot</span>
           </div>
           
           <div className="flex items-center gap-2">
@@ -1285,6 +1504,19 @@ export default function Editor() {
               }}
               className="text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-48 sm:w-64 transition-colors"
             />
+            
+            <button
+              onClick={() => {
+                setWizardTopic('')
+                setWizardStep(1)
+                setShowWizard(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Reset workspace and launch Onboarding Wizard"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>New Project</span>
+            </button>
             <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
               <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-zinc-300'}`} />
               <span>{isSaved ? 'Draft saved locally' : 'Saving...'}</span>
@@ -1626,6 +1858,79 @@ export default function Editor() {
                   <span className="font-bold">Gemini AI Workspace:</span> Highlight any section of your document for context, choose a preset, or write a custom instruction to refine your writing.
                 </div>
 
+                {/* Context Window & Ingested Sources Panel */}
+                <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-zinc-50/50 dark:bg-zinc-900/30">
+                  <details className="group" open>
+                    <summary className="flex items-center justify-between p-3 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-850 select-none">
+                      <div className="flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Project Context ({projectSources.length})</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-zinc-400" />
+                    </summary>
+                    <div className="p-3 border-t border-zinc-150 dark:border-zinc-850 space-y-3 bg-white dark:bg-zinc-900/50">
+                      {/* Topic & Tone details */}
+                      <div className="space-y-1">
+                        <div className="text-[10px] text-zinc-400 uppercase font-semibold">Active Topic</div>
+                        <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200 truncate animate-fade-in" title={documentTitle}>
+                          {documentTitle || 'Untitled Project'}
+                        </div>
+                      </div>
+                      
+                      {/* List of ingested sources */}
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] text-zinc-400 uppercase font-semibold flex items-center justify-between">
+                          <span>Ingested Reference Sources</span>
+                          <span className="text-[9px] font-mono lowercase">{projectSources.length} files</span>
+                        </div>
+                        {projectSources.length === 0 ? (
+                          <div className="text-[10px] italic text-zinc-400 py-1 bg-zinc-50/50 dark:bg-zinc-900/50 text-center rounded border border-dashed border-zinc-200 dark:border-zinc-800">
+                            No research reference files uploaded.
+                          </div>
+                        ) : (
+                          <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                            {projectSources.map((source, index) => (
+                              <div key={index} className="flex items-center justify-between p-1.5 bg-zinc-50 dark:bg-zinc-850 rounded border border-zinc-100 dark:border-zinc-800 text-[10px] gap-2">
+                                <div className="flex items-center gap-1 min-w-0 flex-1">
+                                  <FileText className={`w-3 h-3 flex-shrink-0 ${source.type === 'pdf' ? 'text-red-500' : 'text-blue-500'}`} />
+                                  <span className="truncate text-zinc-700 dark:text-zinc-300 font-medium" title={source.name}>
+                                    {source.name}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const updated = projectSources.filter((_, idx) => idx !== index)
+                                    setProjectSources(updated)
+                                  }}
+                                  className="text-red-500 hover:text-red-750 p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950/20 cursor-pointer"
+                                  title="Remove source"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Add more sources inline */}
+                      <div className="pt-1">
+                        <label className="w-full flex items-center justify-center gap-1.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-750 py-1.5 text-[10px] font-semibold transition-colors cursor-pointer">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Ingest PDF or Word File</span>
+                          <input
+                            type="file"
+                            accept=".docx,.pdf"
+                            multiple
+                            onChange={handleWizardFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
@@ -1830,6 +2135,7 @@ export default function Editor() {
 
       {showFloatingPopup && popupCoords && (
         <div 
+          ref={popupRef}
           style={{ 
             position: 'fixed', 
             top: `${Math.max(80, Math.min(window.innerHeight - 320, popupCoords.top - 120))}px`, 
@@ -1945,6 +2251,269 @@ export default function Editor() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showWizard && (
+        <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-5 text-white relative">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <Sparkles className="w-5 h-5 animate-pulse" />
+                <span>Project Pilot Onboarding Wizard</span>
+              </h3>
+              <p className="text-[11px] text-indigo-100 mt-1">
+                Configure your writing pilot and ingest source context in less than a minute.
+              </p>
+              
+              <div className="absolute top-5 right-6 flex items-center gap-1.5">
+                {[1, 2, 3].map((step) => (
+                  <div 
+                    key={step}
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold border transition-colors ${
+                      wizardStep === step 
+                        ? 'bg-white text-indigo-700 border-white' 
+                        : 'bg-indigo-700/50 text-indigo-200 border-indigo-500/50'
+                    }`}
+                  >
+                    {step}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Step Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              
+              {/* Step 1: Project Details */}
+              {wizardStep === 1 && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      1. What is the topic of your project?
+                    </label>
+                    <input
+                      type="text"
+                      value={wizardTopic}
+                      onChange={(e) => setWizardTopic(e.target.value)}
+                      placeholder="e.g., The Impact of Renewable Energy on Developing Economies"
+                      className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      2. What is your Target Academic Level?
+                    </label>
+                    <select
+                      value={wizardAcademicLevel}
+                      onChange={(e) => setWizardAcademicLevel(e.target.value)}
+                      className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300"
+                    >
+                      <option value="High School">High School (Simple & Direct)</option>
+                      <option value="Undergraduate">Undergraduate (Academic & Structured)</option>
+                      <option value="Master's">Master's (Authoritative & Rigorous)</option>
+                      <option value="Ph.D.">Ph.D. / Researcher (Highly Technical & Analytical)</option>
+                    </select>
+                  </div>
+                  
+                  <div className="bg-zinc-50 dark:bg-zinc-850 p-3 rounded-lg border border-zinc-150 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-455 leading-relaxed">
+                    <strong>Why this matters:</strong> Project Pilot adapts its vocabulary, stylistic structures, and citation formatting to match your target level.
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Context Ingestion */}
+              {wizardStep === 2 && (
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                      Upload Source Context (PDF or DOCX)
+                    </h4>
+                    <p className="text-[11px] text-zinc-400">
+                      Ingest reference books, drafts, or syllabus documents into your Pilot's local context window.
+                    </p>
+                  </div>
+
+                  {/* Drag and Drop Zone */}
+                  <label className="border-2 border-dashed border-zinc-200 hover:border-indigo-400 dark:border-zinc-750 dark:hover:border-indigo-650 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-zinc-50/50 dark:bg-zinc-900/30">
+                    <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-500" />
+                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                      {isProcessingSource ? 'Parsing documents...' : 'Click to upload files'}
+                    </span>
+                    <span className="text-[10px] text-zinc-450 dark:text-zinc-500">
+                      Supports Word (.docx) and PDF (.pdf) files
+                    </span>
+                    <input
+                      type="file"
+                      accept=".docx,.pdf"
+                      multiple
+                      disabled={isProcessingSource}
+                      onChange={handleWizardFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {/* Processing spinner */}
+                  {isProcessingSource && (
+                    <div className="flex items-center justify-center gap-2 py-2">
+                      <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-xs font-medium text-zinc-500">Processing file buffers...</span>
+                    </div>
+                  )}
+
+                  {/* Sources List */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide block">
+                      Ingested Sources ({projectSources.length})
+                    </label>
+                    {projectSources.length === 0 ? (
+                      <div className="text-xs italic text-zinc-400 text-center py-4 bg-zinc-50 dark:bg-zinc-850 rounded border border-dashed border-zinc-200 dark:border-zinc-800">
+                        No reference files uploaded yet.
+                      </div>
+                    ) : (
+                      <div className="max-h-36 overflow-y-auto space-y-1.5">
+                        {projectSources.map((source, index) => (
+                          <div 
+                            key={index}
+                            className="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-850 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <FileText className={`w-4 h-4 flex-shrink-0 ${source.type === 'pdf' ? 'text-red-500' : 'text-blue-500'}`} />
+                              <span className="truncate text-zinc-700 dark:text-zinc-300 font-medium" title={source.name}>
+                                {source.name}
+                              </span>
+                              <span className="text-[9px] bg-zinc-250 dark:bg-zinc-700 px-1 rounded text-zinc-500 dark:text-zinc-400 uppercase font-mono">
+                                {source.type}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const updated = projectSources.filter((_, idx) => idx !== index)
+                                setProjectSources(updated)
+                              }}
+                              className="text-red-500 hover:text-red-750 p-1 rounded hover:bg-red-55/20 cursor-pointer"
+                              title="Delete source"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Step 3: Setup Choice */}
+              {wizardStep === 3 && (
+                <div className="space-y-4">
+                  <div className="space-y-1 text-center pb-2">
+                    <h4 className="text-sm font-bold text-zinc-700 dark:text-zinc-200">
+                      Configuration Complete!
+                    </h4>
+                    <p className="text-xs text-zinc-400">
+                      How would you like to initialize the editor canvas?
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {/* Option A: Import First Source Document */}
+                    <button
+                      disabled={projectSources.length === 0}
+                      onClick={() => handleWizardComplete('import')}
+                      className={`w-full p-4 rounded-xl border text-left flex items-start gap-3 transition-all cursor-pointer ${
+                        projectSources.length === 0
+                          ? 'opacity-50 border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 cursor-not-allowed'
+                          : 'border-zinc-200 dark:border-zinc-800 hover:bg-indigo-50/20 hover:border-indigo-300 dark:hover:bg-indigo-950/10 dark:hover:border-indigo-900/30'
+                      }`}
+                    >
+                      <FileText className="w-5 h-5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                          Import Primary Document Draft
+                        </div>
+                        <div className="text-[10px] text-zinc-450 dark:text-zinc-500 mt-0.5">
+                          {projectSources.length > 0 
+                            ? `Load "${projectSources[0].name}" into the editor canvas preserving its layout and formatting.`
+                            : "Upload a Word or PDF file in Step 2 to enable this option."}
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Option B: AI Blueprint Generation */}
+                    <button
+                      onClick={() => handleWizardComplete('ai_blueprint')}
+                      className="w-full p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 text-left flex items-start gap-3 hover:bg-indigo-50/20 hover:border-indigo-300 dark:hover:bg-indigo-950/10 dark:hover:border-indigo-900/30 transition-all cursor-pointer"
+                    >
+                      <Sparkles className="w-5 h-5 text-indigo-500 mt-0.5 flex-shrink-0 animate-pulse" />
+                      <div>
+                        <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                          Generate AI Thesis Blueprint & Outline
+                        </div>
+                        <div className="text-[10px] text-zinc-450 dark:text-zinc-500 mt-0.5">
+                          Drafts a structured academic chapter outline and an introductory paragraph matching your topic and sources.
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Option C: Blank Slate */}
+                    <button
+                      onClick={() => handleWizardComplete('blank')}
+                      className="w-full p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 text-left flex items-start gap-3 hover:bg-indigo-50/20 hover:border-indigo-300 dark:hover:bg-indigo-950/10 dark:hover:border-indigo-900/30 transition-all cursor-pointer"
+                    >
+                      <Check className="w-5 h-5 text-indigo-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                          Start Blank Canvas
+                        </div>
+                        <div className="text-[10px] text-zinc-450 dark:text-zinc-500 mt-0.5">
+                          Opens a blank workspace with your topic, keeping the references in your sidebar's context window.
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="border-t border-zinc-150 dark:border-zinc-850 px-6 py-4 bg-zinc-50 dark:bg-zinc-900/40 flex justify-between items-center">
+              <div>
+                {wizardStep > 1 && (
+                  <button
+                    onClick={() => setWizardStep(wizardStep - 1)}
+                    className="px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowWizard(false)
+                    if (!editor.getText().trim()) {
+                      editor.commands.setContent(DEFAULT_CONTENT)
+                    }
+                  }}
+                  className="px-4 py-2 text-zinc-500 hover:text-zinc-750 dark:text-zinc-400 dark:hover:text-zinc-200 text-xs font-semibold cursor-pointer"
+                >
+                  Skip Wizard (Load Default)
+                </button>
+                {wizardStep < 3 ? (
+                  <button
+                    disabled={wizardStep === 1 && !wizardTopic.trim()}
+                    onClick={() => setWizardStep(wizardStep + 1)}
+                    className="px-5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

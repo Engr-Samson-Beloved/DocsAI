@@ -5,11 +5,9 @@ export const runtime = 'edge' // Enable Edge Runtime for lightweight and high pe
 
 // Prioritized list of Gemini models to support automatic failover on 503 / 404
 const PRIORITIZED_MODELS = [
-  'gemini-3.5-flash',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-flash-latest'
+  'gemini-1.5-flash'
 ]
 
 export async function POST(req: NextRequest) {

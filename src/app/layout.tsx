@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DocuAI - Client-Side Document Processor",
-  description: "A zero-cost, serverless AI-powered document editor for students.",
+  title: "Project Pilot - Client-Side Document Processor",
+  description: "A zero-cost, serverless AI-powered academic document setup and writing pilot.",
 };
 
 export default function RootLayout({
