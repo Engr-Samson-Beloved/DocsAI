@@ -65,6 +65,7 @@ export default function Editor() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [isSimulatingAI, setIsSimulatingAI] = useState(false)
   const [simulatedAiResult, setSimulatedAiResult] = useState('')
+  const [isExporting, setIsExporting] = useState(false)
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -252,6 +253,303 @@ export default function Editor() {
     URL.revokeObjectURL(link.href)
   }
 
+  // Export to PDF Document (.pdf) using html2pdf.js (dynamic load)
+  const exportToPdf = async () => {
+    setIsExporting(true)
+    try {
+      const html2pdf = (await import('html2pdf.js')).default
+      const element = document.querySelector('.tiptap')
+      if (!element) {
+        alert('Editor canvas element not found.')
+        return
+      }
+
+      const opt = {
+        margin: [0.75, 0.75, 0.75, 0.75], // Standard 0.75 in margin
+        filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true, 
+          logging: false 
+        },
+        jsPDF: { 
+          unit: 'in', 
+          format: 'letter', 
+          orientation: 'portrait' 
+        },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      }
+
+      await html2pdf().set(opt).from(element).save()
+    } catch (err: any) {
+      console.error('PDF export error:', err)
+      alert(`Failed to export PDF: ${err.message || err}`)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  // Export to Word Document (.docx) using docx.js (dynamic load)
+  const exportToDocx = async () => {
+    setIsExporting(true)
+    try {
+      const docx = await import('docx')
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = docx
+
+      const json = editor.getJSON()
+      const nodes = json.content || []
+      const children: any[] = []
+
+      // Helper to map alignments
+      const getAlignment = (align?: string) => {
+        if (align === 'center') return AlignmentType.CENTER
+        if (align === 'right') return AlignmentType.RIGHT
+        if (align === 'justify') return AlignmentType.JUSTIFY
+        return AlignmentType.LEFT
+      }
+
+      // Helper to map headings
+      const getHeadingLevel = (level: number) => {
+        if (level === 1) return HeadingLevel.HEADING_1
+        if (level === 2) return HeadingLevel.HEADING_2
+        if (level === 3) return HeadingLevel.HEADING_3
+        return undefined
+      }
+
+      nodes.forEach((node: any) => {
+        const align = getAlignment(node.attrs?.textAlign)
+
+        if (node.type === 'heading') {
+          const level = node.attrs?.level || 1
+          const runs = (node.content || []).map((childNode: any) => {
+            const marks = childNode.marks || []
+            return new TextRun({
+              text: childNode.text || '',
+              bold: marks.some((m: any) => m.type === 'bold'),
+              italics: marks.some((m: any) => m.type === 'italic'),
+              underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+              strike: marks.some((m: any) => m.type === 'strike'),
+              font: 'Arial'
+            })
+          })
+
+          children.push(
+            new Paragraph({
+              children: runs,
+              heading: getHeadingLevel(level),
+              alignment: align,
+              spacing: { before: 240, after: 120 }
+            })
+          )
+        } else if (node.type === 'paragraph') {
+          const runs = (node.content || []).map((childNode: any) => {
+            const marks = childNode.marks || []
+            return new TextRun({
+              text: childNode.text || '',
+              bold: marks.some((m: any) => m.type === 'bold'),
+              italics: marks.some((m: any) => m.type === 'italic'),
+              underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+              strike: marks.some((m: any) => m.type === 'strike'),
+              font: 'Arial'
+            })
+          })
+
+          children.push(
+            new Paragraph({
+              children: runs,
+              alignment: align,
+              spacing: { after: 120 },
+              lineSpacing: { val: 360 } // 1.5 line height spacing
+            })
+          )
+        } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+          const isOrdered = node.type === 'orderedList'
+          node.content?.forEach((listItem: any) => {
+            listItem.content?.forEach((listItemPara: any) => {
+              const runs = (listItemPara.content || []).map((childNode: any) => {
+                const marks = childNode.marks || []
+                return new TextRun({
+                  text: childNode.text || '',
+                  bold: marks.some((m: any) => m.type === 'bold'),
+                  italics: marks.some((m: any) => m.type === 'italic'),
+                  underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+                  font: 'Arial'
+                })
+              })
+
+              children.push(
+                new Paragraph({
+                  children: runs,
+                  bullet: isOrdered ? undefined : { level: 0 },
+                  indent: isOrdered ? { left: 720 } : undefined,
+                  spacing: { after: 80 }
+                })
+              )
+            })
+          })
+        } else if (node.type === 'blockquote') {
+          const runs: any[] = []
+          node.content?.forEach((p: any) => {
+            p.content?.forEach((childNode: any) => {
+              runs.push(
+                new TextRun({
+                  text: childNode.text || '',
+                  italics: true,
+                  color: '52525b', // Zinc 600
+                  font: 'Arial'
+                })
+              )
+            })
+          })
+
+          children.push(
+            new Paragraph({
+              children: runs,
+              indent: { left: 720 },
+              spacing: { before: 120, after: 120 }
+            })
+          )
+        }
+      })
+
+      const doc = new Document({
+        sections: [
+          {
+            properties: {},
+            children: children,
+          },
+        ],
+      })
+
+      const blob = await Packer.toBlob(doc)
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.docx`
+      link.click()
+      URL.revokeObjectURL(link.href)
+    } catch (err: any) {
+      console.error('Word export error:', err)
+      alert(`Failed to export Word document: ${err.message || err}`)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  // Export to PowerPoint Presentation (.pptx) using pptxgenjs (dynamic load)
+  const exportToPptx = async () => {
+    setIsExporting(true)
+    try {
+      const pptxgen = (await import('pptxgenjs')).default
+      const pptx = new pptxgen()
+      pptx.layout = 'LAYOUT_16x9'
+
+      const json = editor.getJSON()
+      const nodes = json.content || []
+
+      let slideTitle = ''
+      let slideContent: string[] = []
+
+      const createSlide = () => {
+        if (slideTitle || slideContent.length > 0) {
+          const slide = pptx.addSlide()
+
+          // Slide title header background banner
+          slide.addShape(pptx.shapes.RECTANGLE, {
+            x: 0,
+            y: 0,
+            w: '100%',
+            h: 1.2,
+            fill: { color: '4f46e5' } // Indigo 600
+          })
+
+          // Slide Title
+          slide.addText(slideTitle || 'Document Presentation', {
+            x: 0.5,
+            y: 0.3,
+            w: 9,
+            h: 0.6,
+            fontSize: 24,
+            bold: true,
+            color: 'FFFFFF',
+            fontFace: 'Arial'
+          })
+
+          // Bullet contents
+          if (slideContent.length > 0) {
+            const bodyText = slideContent.join('\n')
+            slide.addText(bodyText, {
+              x: 0.5,
+              y: 1.6,
+              w: 9,
+              h: 5.0,
+              fontSize: 16,
+              color: '3f3f46', // Zinc 700
+              fontFace: 'Arial',
+              bullet: { type: 'number' },
+              valign: 'top',
+              lineSpacing: 24
+            })
+          }
+        }
+      }
+
+      nodes.forEach((node: any) => {
+        if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2)) {
+          // Commit previous slide
+          createSlide()
+
+          // Start a new slide
+          slideTitle = node.content?.map((c: any) => c.text).join('') || 'Section Title'
+          slideContent = []
+        } else if (node.type === 'paragraph' || node.type === 'bulletList' || node.type === 'orderedList') {
+          const text = node.content?.map((c: any) => c.text).join('') || ''
+          
+          if (node.type === 'bulletList' || node.type === 'orderedList') {
+            node.content?.forEach((item: any) => {
+              const itemText = item.content?.map((p: any) => {
+                return p.content?.map((t: any) => t.text).join('') || ''
+              }).join('') || ''
+              if (itemText) slideContent.push(itemText)
+            })
+          } else if (text) {
+            // Keep bullets brief
+            if (text.length > 180) {
+              slideContent.push(text.slice(0, 180) + '...')
+            } else {
+              slideContent.push(text)
+            }
+          }
+        }
+      })
+
+      // Commit the final slide
+      createSlide()
+
+      // Create fallback title slide if empty
+      if (pptx.slides.length === 0) {
+        const slide = pptx.addSlide()
+        slide.addText(documentTitle, { 
+          x: 1, 
+          y: 2, 
+          w: 8, 
+          h: 2, 
+          fontSize: 32, 
+          bold: true, 
+          color: '4f46e5', 
+          align: 'center' 
+        })
+      }
+
+      await pptx.writeFile({ fileName: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pptx` })
+    } catch (err: any) {
+      console.error('PPTX export error:', err)
+      alert(`Failed to export PowerPoint: ${err.message || err}`)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   // Phase 2 AI Prompt execution (Streams response from Gemini API route proxy)
   const handleAiAction = async (action: string) => {
     setIsSimulatingAI(true)
@@ -349,6 +647,17 @@ export default function Editor() {
 
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+      {isExporting && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-xs z-50 flex items-center justify-center transition-all">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-xl p-6 shadow-2xl flex flex-col items-center gap-4 max-w-sm text-center">
+            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <div>
+              <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Compiling Export Package</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Generating document layout structure. This might take a few seconds...</p>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Top Application Bar */}
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
@@ -399,13 +708,22 @@ export default function Editor() {
               <div className="px-4 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
                 Phase 3 Exports
               </div>
-              <button disabled className="w-full text-left px-4 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 cursor-not-allowed">
+              <button 
+                onClick={exportToDocx}
+                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              >
                 Word (.docx)
               </button>
-              <button disabled className="w-full text-left px-4 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 cursor-not-allowed">
+              <button 
+                onClick={exportToPdf}
+                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              >
                 PDF Document (.pdf)
               </button>
-              <button disabled className="w-full text-left px-4 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 cursor-not-allowed">
+              <button 
+                onClick={exportToPptx}
+                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              >
                 Powerpoint (.pptx)
               </button>
             </div>
