@@ -987,8 +987,14 @@ export default function Editor() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errorData.error || 'Failed to generate content.'}</p>`)
+        let errMsg = 'Failed to generate content.'
+        try {
+          const errorData = await response.json()
+          errMsg = errorData.error || errMsg
+        } catch (e) {
+          errMsg = `Server Error (${response.status}): ${response.statusText}`
+        }
+        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errMsg}</p>`)
         setIsSimulatingAI(false)
         return
       }
@@ -1134,8 +1140,14 @@ export default function Editor() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errorData.error || 'Failed.'}</p>`)
+        let errMsg = 'Failed.'
+        try {
+          const errorData = await response.json()
+          errMsg = errorData.error || errMsg
+        } catch (e) {
+          errMsg = `Server Error (${response.status}): ${response.statusText}`
+        }
+        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errMsg}</p>`)
         setIsSimulatingAI(false)
         return
       }

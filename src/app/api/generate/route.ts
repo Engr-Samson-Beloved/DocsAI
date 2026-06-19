@@ -73,10 +73,6 @@ export async function POST(req: NextRequest) {
           contents: [{ role: 'user', parts: [{ text: contentPrompt }] }],
         })
 
-        // Instantly verify the stream by awaiting the response stream promise chain
-        // If the model is not found (404) or overloaded (503), it will throw here
-        await responseStream.response
-
         activeModelName = modelName
         console.log(`Successfully established stream using model: ${modelName}`)
         break
