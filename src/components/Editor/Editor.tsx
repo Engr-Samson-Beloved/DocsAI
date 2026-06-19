@@ -252,30 +252,91 @@ export default function Editor() {
     URL.revokeObjectURL(link.href)
   }
 
-  // Phase 2 AI Prompt Presets simulation
-  const handleAiAction = (action: string) => {
+  // Phase 2 AI Prompt execution (Streams response from Gemini API route proxy)
+  const handleAiAction = async (action: string) => {
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
     
-    // Select editor text if highlighted
+    // Select editor text if highlighted to provide context
     const { from, to } = editor.state.selection
     const selectedText = editor.state.doc.textBetween(from, to, ' ')
 
-    setTimeout(() => {
-      let result = ''
-      if (action === 'intro') {
-        result = `<p><strong>Chapter 1: Introduction</strong></p><p>The integration of advanced cognitive computing into workspace systems marks a paradigm shift in human-computer collaborations. This research addresses the fundamental limitations in text processing platforms through structural paragraph chunking and direct API integration schemes...</p>`
-      } else if (action === 'rephrase') {
-        const textToRephrase = selectedText || "AI is helpful for editing papers."
-        result = `<p><em>Rephrased Context:</em> "Leveraging machine intelligence configurations drastically optimizes the edit lifecycle and proofreading schema of scholastic compositions."</p>`
-      } else if (action === 'outline') {
-        result = `<h3>Project Blueprint</h3><ul><li>1.1 Background of Study</li><li>1.2 Statement of the Problem</li><li>1.3 Objectives of the Project</li><li>1.4 Significance of Research</li></ul>`
-      } else {
-        result = `<p><strong>AI Assistant Output:</strong> The user requested: "${aiPrompt}". System returned a simulated SSE text stream block in the browser memory.</p>`
+    let promptText = ''
+    if (action === 'intro') {
+      promptText = 'Generate a detailed academic introductory segment (Chapter 1) for a research project on this topic. Return the content styled with standard HTML tags like <h2>, <h3>, and <p>.'
+    } else if (action === 'rephrase') {
+      if (!selectedText) {
+        alert('Please highlight some text in the document first to rephrase!')
+        setIsSimulatingAI(false)
+        return
       }
-      setSimulatedAiResult(result)
+      promptText = `Rephrase the highlighted text to sound highly academic, formal, and authoritative. Return only the revised text enclosed in HTML <p> tags: "${selectedText}"`
+    } else if (action === 'outline') {
+      promptText = 'Generate a comprehensive academic thesis outline (Chapters 1 to 5) with subheadings formatted in structured HTML lists (<ul>/<li>).'
+    } else {
+      promptText = aiPrompt
+    }
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          context: selectedText || editor.getText().slice(0, 1500)
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errorData.error || 'Failed to generate content.'}</p>`)
+        setIsSimulatingAI(false)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        setSimulatedAiResult('<p class="text-red-500 font-semibold">Error: Failed to open response stream reader.</p>')
+        setIsSimulatingAI(false)
+        return
+      }
+
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        // Split chunk into Server-Sent Event lines
+        const lines = chunk.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim()
+            if (dataStr === '[DONE]') {
+              break
+            }
+            try {
+              const data = JSON.parse(dataStr)
+              if (data.error) {
+                accumulatedText += `<p class="text-red-500 font-semibold">${data.error}</p>`
+              } else if (data.text) {
+                accumulatedText += data.text
+              }
+              setSimulatedAiResult(accumulatedText)
+            } catch (e) {
+              // Handle partial JSON chunk splits
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Streaming API failure:', error)
+      setSimulatedAiResult(`<p class="text-red-500 font-semibold">Network Error: ${error.message || 'Could not connect to generator proxy.'}</p>`)
+    } finally {
       setIsSimulatingAI(false)
-    }, 1500)
+    }
   }
 
   const insertAiContent = () => {
@@ -638,7 +699,7 @@ export default function Editor() {
                 </div>
 
                 {/* AI Outputs Block */}
-                {isSimulatingAI && (
+                {isSimulatingAI && !simulatedAiResult && (
                   <div className="border border-indigo-100 rounded-lg p-4 bg-indigo-50/20 dark:border-indigo-950 dark:bg-indigo-950/10 space-y-2 animate-pulse">
                     <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded w-1/3"></div>
                     <div className="space-y-1">
@@ -649,18 +710,24 @@ export default function Editor() {
                   </div>
                 )}
 
-                {simulatedAiResult && !isSimulatingAI && (
+                {simulatedAiResult && (
                   <div className="border border-indigo-200 dark:border-indigo-850 rounded-lg p-3 bg-indigo-50/10 dark:bg-indigo-950/20 space-y-3">
-                    <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide">
-                      Streamed Output Preview
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-bold text-indigo-500 uppercase tracking-wide">
+                        {isSimulatingAI ? 'Streaming Output...' : 'Streamed Output'}
+                      </div>
+                      {isSimulatingAI && (
+                        <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+                      )}
                     </div>
                     <div 
-                      className="text-xs space-y-2 text-zinc-600 dark:text-zinc-350 max-h-48 overflow-y-auto border border-dashed border-zinc-200 dark:border-zinc-850 p-2 bg-white dark:bg-zinc-900 rounded"
+                      className="text-xs space-y-2 text-zinc-650 dark:text-zinc-300 max-h-48 overflow-y-auto border border-dashed border-zinc-200 dark:border-zinc-800 p-2 bg-white dark:bg-zinc-900 rounded font-normal leading-relaxed"
                       dangerouslySetInnerHTML={{ __html: simulatedAiResult }}
                     />
                     <button
+                      disabled={isSimulatingAI}
                       onClick={insertAiContent}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-md py-1.5 text-xs font-semibold transition-colors"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Insert at Cursor
                     </button>
