@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TextAlign from '@tiptap/extension-text-align'
@@ -35,7 +35,9 @@ import {
   Minimize2,
   Maximize2,
   Scissors,
-  Upload
+  Upload,
+  Check,
+  Trash2
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -56,6 +58,204 @@ const DEFAULT_CONTENT = `
 <p>Feel free to select text, change typography styles, or try out the formatting toolbar at the top!</p>
 `
 
+// Helper function to format raw markdown or code-blocked AI outputs to clean HTML tags.
+// This ensures content inserts cleanly into the Tiptap document tree with proper styles.
+const formatAiResponseToHtml = (text: string): string => {
+  let cleaned = text.trim()
+
+  // Remove markdown code block wraps (e.g., ```html ... ``` or ``` ... ```)
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n/, '').replace(/\n```$/, '')
+  }
+
+  // If it's already full HTML (e.g. starts with <p, <h, <ul, <ol), we return it as is.
+  if (/<(p|h[1-6]|ul|ol|li|blockquote|pre|code|strong|em|table|tr|td|th)\b[^>]*>/i.test(cleaned)) {
+    return cleaned
+  }
+
+  // Split by lines to compile block elements
+  const lines = cleaned.split(/\r?\n/)
+  const result: string[] = []
+  
+  let inList: 'ul' | 'ol' | null = null
+  let inBlockquote = false
+  let inCodeBlock = false
+  let codeBlockLines: string[] = []
+
+  const closeList = () => {
+    if (inList === 'ul') {
+      result.push('</ul>')
+    } else if (inList === 'ol') {
+      result.push('</ol>')
+    }
+    inList = null
+  }
+
+  const closeBlockquote = () => {
+    if (inBlockquote) {
+      result.push('</blockquote>')
+      inBlockquote = false
+    }
+  }
+
+  const parseInline = (str: string): string => {
+    return str
+      // Bold **text**
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+      // Italic *text*
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/_([^_]+)_/g, '<em>$1</em>')
+      // Inline code `code`
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    // Handle code blocks
+    if (trimmed.startsWith('```')) {
+      if (inCodeBlock) {
+        result.push(`<pre><code>${codeBlockLines.join('\n')}</code></pre>`)
+        codeBlockLines = []
+        inCodeBlock = false
+      } else {
+        closeList()
+        closeBlockquote()
+        inCodeBlock = true
+      }
+      continue
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(line)
+      continue
+    }
+
+    // Empty lines
+    if (trimmed === '') {
+      closeList()
+      closeBlockquote()
+      continue
+    }
+
+    // Headings
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/)
+    if (headingMatch) {
+      closeList()
+      closeBlockquote()
+      const level = headingMatch[1].length
+      const content = parseInline(headingMatch[2])
+      result.push(`<h${level}>${content}</h${level}>`)
+      continue
+    }
+
+    // Blockquotes
+    if (trimmed.startsWith('>')) {
+      closeList()
+      if (!inBlockquote) {
+        result.push('<blockquote>')
+        inBlockquote = true
+      }
+      const content = parseInline(trimmed.substring(1).trim())
+      result.push(`<p>${content}</p>`)
+      continue
+    } else {
+      closeBlockquote()
+    }
+
+    // Unordered list items
+    const ulMatch = trimmed.match(/^[-*+]\s+(.*)$/)
+    if (ulMatch) {
+      if (inList !== 'ul') {
+        closeList()
+        result.push('<ul>')
+        inList = 'ul'
+      }
+      const content = parseInline(ulMatch[1])
+      result.push(`<li>${content}</li>`)
+      continue
+    }
+
+    // Ordered list items
+    const olMatch = trimmed.match(/^(\d+)\.\s+(.*)$/)
+    if (olMatch) {
+      if (inList !== 'ol') {
+        closeList()
+        result.push('<ol>')
+        inList = 'ol'
+      }
+      const content = parseInline(olMatch[2])
+      result.push(`<li>${content}</li>`)
+      continue
+    }
+
+    // Regular text paragraph
+    closeList()
+    const content = parseInline(trimmed)
+    result.push(`<p>${content}</p>`)
+  }
+
+  closeList()
+  closeBlockquote()
+
+  return result.join('')
+}
+
+const findTextRange = (editor: any, searchText: string): { from: number; to: number } | null => {
+  if (!searchText || !editor) return null
+  const target = searchText.trim().replace(/\s+/g, ' ')
+  if (!target) return null
+
+  // Accumulate all text nodes with their start and end positions
+  const textBlocks: { text: string; startPos: number }[] = []
+  editor.state.doc.descendants((node: any, pos: number) => {
+    if (node.isText) {
+      textBlocks.push({ text: node.text || '', startPos: pos })
+    }
+    return true
+  })
+
+  // Concatenate them to build a single text string and map indices
+  let fullText = ''
+  const positions: number[] = []
+
+  for (const block of textBlocks) {
+    for (let i = 0; i < block.text.length; i++) {
+      fullText += block.text[i]
+      positions.push(block.startPos + i)
+    }
+  }
+
+  // Now find the target in fullText
+  const index = fullText.indexOf(target)
+  if (index !== -1) {
+    const from = positions[index]
+    const to = positions[Math.min(index + target.length - 1, positions.length - 1)] + 1
+    return { from, to }
+  }
+
+  // If exact match fails, let's try case-insensitive and normalized spacing
+  const normText = fullText.toLowerCase().replace(/\s+/g, ' ')
+  const normTarget = target.toLowerCase()
+  const normIndex = normText.indexOf(normTarget)
+  if (normIndex !== -1) {
+    const escapedTarget = target.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&').replace(/\s+/g, '\\s+')
+    const regex = new RegExp(escapedTarget, 'i')
+    const match = fullText.match(regex)
+    if (match && match.index !== undefined) {
+      const startIdx = match.index
+      const endIdx = startIdx + match[0].length
+      const from = positions[startIdx]
+      const to = positions[Math.min(endIdx - 1, positions.length - 1)] + 1
+      return { from, to }
+    }
+  }
+
+  return null
+}
+
 export default function Editor() {
   const [documentTitle, setDocumentTitle] = useState('Untitled Document')
   const [isSaved, setIsSaved] = useState(true)
@@ -72,6 +272,14 @@ export default function Editor() {
   const [docFooter, setDocFooter] = useState('')
   const [loadingMessage, setLoadingMessage] = useState('Processing Document...')
   const [activeAiModel, setActiveAiModel] = useState('')
+  const [aiSelectedText, setAiSelectedText] = useState('')
+  const [aiSelectionRange, setAiSelectionRange] = useState<{ from: number; to: number } | null>(null)
+  const [showFloatingPopup, setShowFloatingPopup] = useState(false)
+  const [popupCoords, setPopupCoords] = useState<{ top: number; left: number } | null>(null)
+  const [popupContextText, setPopupContextText] = useState('')
+  const [popupContextRange, setPopupContextRange] = useState<{ from: number; to: number } | null>(null)
+  const [popupPrompt, setPopupPrompt] = useState('')
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -124,6 +332,9 @@ export default function Editor() {
     onUpdate: ({ editor }) => {
       setIsSaved(false)
       
+      // Hide floating popup on edit
+      setShowFloatingPopup(false)
+      
       // Calculate Stats
       const text = editor.getText()
       const chars = text.length
@@ -136,6 +347,45 @@ export default function Editor() {
       // Local storage draft save trigger on edit
       const contentJSON = editor.getJSON()
       localStorage.setItem('tiptap-content', JSON.stringify(contentJSON))
+    },
+    onSelectionUpdate: ({ editor }) => {
+      // Clear existing idle timer
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+      }
+
+      // Close the floating popup if user changes selection/cursor in the editor
+      if (editor.isFocused) {
+        setShowFloatingPopup(false)
+        setSimulatedAiResult('')
+      }
+
+      // If AI is generating, or if editor is not focused, or if there is a selection highlight active, do not trigger
+      const { selection } = editor.state
+      if (!editor.isFocused || !selection.empty) {
+        return
+      }
+
+      // Start 2-second timer for contextual AI popup
+      idleTimerRef.current = setTimeout(() => {
+        const { $from } = editor.state.selection
+        const from = $from.start()
+        const to = $from.end()
+        const text = editor.state.doc.textBetween(from, to, ' ').trim()
+
+        // Only popup if there is substantial text in the current block node
+        if (text.length > 3) {
+          try {
+            const coords = editor.view.coordsAtPos($from.pos)
+            setPopupCoords({ top: coords.top, left: coords.left })
+            setPopupContextText(text)
+            setPopupContextRange({ from, to })
+            setShowFloatingPopup(true)
+          } catch (e) {
+            console.error(e)
+          }
+        }
+      }, 2000)
     },
   })
 
@@ -174,6 +424,14 @@ export default function Editor() {
 
     return () => clearInterval(interval)
   }, [isSaved, documentTitle])
+
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) {
+        clearTimeout(idleTimerRef.current)
+      }
+    }
+  }, [])
 
   if (!editor) {
     return (
@@ -686,6 +944,14 @@ export default function Editor() {
     const { from, to } = editor.state.selection
     const selectedText = editor.state.doc.textBetween(from, to, ' ')
 
+    if (from !== to) {
+      setAiSelectedText(selectedText)
+      setAiSelectionRange({ from, to })
+    } else {
+      setAiSelectedText('')
+      setAiSelectionRange(null)
+    }
+
     let promptText = ''
     if (action === 'intro') {
       promptText = 'Generate a detailed academic introductory segment (Chapter 1) for a research project on this topic. Return the content styled with standard HTML tags like <h2>, <h3>, and <p>.'
@@ -708,7 +974,7 @@ export default function Editor() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          context: selectedText || editor.getText().slice(0, 1500)
+          context: selectedText || editor.getText()
         })
       })
 
@@ -728,6 +994,7 @@ export default function Editor() {
 
       const decoder = new TextDecoder()
       let accumulatedText = ''
+      let detectedOriginalMode = false
 
       while (true) {
         const { value, done } = await reader.read()
@@ -751,7 +1018,41 @@ export default function Editor() {
               } else if (data.text) {
                 accumulatedText += data.text
               }
-              setSimulatedAiResult(accumulatedText)
+
+              // Check if model returned replacement format
+              if (accumulatedText.includes('<<<ORIGINAL>>>')) {
+                detectedOriginalMode = true
+                const origIndex = accumulatedText.indexOf('<<<ORIGINAL>>>')
+                const replIndex = accumulatedText.indexOf('<<<REPLACEMENT>>>')
+
+                if (replIndex !== -1) {
+                  const origText = accumulatedText.substring(origIndex + 14, replIndex).trim()
+                  setAiSelectedText(origText)
+
+                  // Try to find and select it in the editor
+                  const range = findTextRange(editor, origText)
+                  if (range) {
+                    setAiSelectionRange(range)
+                    // Highlight visually in Tiptap
+                    editor.chain().setTextSelection(range).scrollIntoView().run()
+                  }
+
+                  const endIndex = accumulatedText.indexOf('<<<END>>>')
+                  let replText = ''
+                  if (endIndex !== -1) {
+                    replText = accumulatedText.substring(replIndex + 17, endIndex).trim()
+                  } else {
+                    replText = accumulatedText.substring(replIndex + 17).trim()
+                  }
+                  setSimulatedAiResult(replText)
+                } else {
+                  const origText = accumulatedText.substring(origIndex + 14).trim()
+                  setAiSelectedText(origText)
+                  setSimulatedAiResult('') // Wait for replacement text
+                }
+              } else if (!detectedOriginalMode) {
+                setSimulatedAiResult(accumulatedText)
+              }
             } catch (e) {
               // Handle partial JSON chunk splits
             }
@@ -768,10 +1069,132 @@ export default function Editor() {
 
   const insertAiContent = () => {
     if (simulatedAiResult) {
-      editor.chain().focus().insertContent(simulatedAiResult).run()
+      const formatted = formatAiResponseToHtml(simulatedAiResult)
+      editor.chain().focus().insertContent(formatted).run()
       setSimulatedAiResult('')
       setAiPrompt('')
+      setAiSelectedText('')
+      setAiSelectionRange(null)
     }
+  }
+
+  const replaceSelectionContent = () => {
+    if (simulatedAiResult) {
+      const formatted = formatAiResponseToHtml(simulatedAiResult)
+      if (aiSelectionRange) {
+        editor.chain().focus().setTextSelection(aiSelectionRange).insertContent(formatted).run()
+      } else {
+        editor.chain().focus().insertContent(formatted).run()
+      }
+      setSimulatedAiResult('')
+      setAiPrompt('')
+      setAiSelectedText('')
+      setAiSelectionRange(null)
+    }
+  }
+
+  const discardAiContent = () => {
+    setSimulatedAiResult('')
+    setAiPrompt('')
+    setAiSelectedText('')
+    setAiSelectionRange(null)
+  }
+
+  const handlePopupAiAction = async (presetPrompt?: string) => {
+    const finalPrompt = presetPrompt || popupPrompt
+    if (!finalPrompt.trim()) return
+
+    setIsSimulatingAI(true)
+    setSimulatedAiResult('')
+    setActiveAiModel('')
+    
+    if (popupContextRange) {
+      setAiSelectionRange(popupContextRange)
+      setAiSelectedText(popupContextText)
+    }
+
+    const promptText = `Rewrite or edit the following text context as requested: "${finalPrompt}". Return ONLY the revised version of this paragraph/sentence, styled with standard HTML if needed.`
+
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          context: popupContextText
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        setSimulatedAiResult(`<p class="text-red-500 font-semibold">API Error: ${errorData.error || 'Failed.'}</p>`)
+        setIsSimulatingAI(false)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        setSimulatedAiResult('<p class="text-red-500 font-semibold">Error: Stream reader failed.</p>')
+        setIsSimulatingAI(false)
+        return
+      }
+
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim()
+            if (dataStr === '[DONE]') {
+              break
+            }
+            try {
+              const data = JSON.parse(dataStr)
+              if (data.meta?.model) {
+                setActiveAiModel(data.meta.model)
+              } else if (data.text) {
+                accumulatedText += data.text
+              }
+              setSimulatedAiResult(accumulatedText)
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (err: any) {
+      setSimulatedAiResult(`<p class="text-red-500 font-semibold">Error: ${err.message}</p>`)
+    } finally {
+      setIsSimulatingAI(false)
+    }
+  }
+
+  const acceptPopupSuggestion = () => {
+    if (simulatedAiResult) {
+      const formatted = formatAiResponseToHtml(simulatedAiResult)
+      if (popupContextRange) {
+        editor.chain().focus().setTextSelection(popupContextRange).insertContent(formatted).run()
+      } else {
+        editor.chain().focus().insertContent(formatted).run()
+      }
+      setSimulatedAiResult('')
+      setAiSelectedText('')
+      setAiSelectionRange(null)
+      setShowFloatingPopup(false)
+      setPopupPrompt('')
+    }
+  }
+
+  const rejectPopupSuggestion = () => {
+    setSimulatedAiResult('')
+    setAiSelectedText('')
+    setAiSelectionRange(null)
+    setShowFloatingPopup(false)
+    setPopupPrompt('')
   }
 
   return (
@@ -1233,17 +1656,79 @@ export default function Editor() {
                         <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
                       )}
                     </div>
-                    <div 
-                      className="text-xs space-y-2 text-zinc-650 dark:text-zinc-300 max-h-48 overflow-y-auto border border-dashed border-zinc-200 dark:border-zinc-800 p-2 bg-white dark:bg-zinc-900 rounded font-normal leading-relaxed"
-                      dangerouslySetInnerHTML={{ __html: simulatedAiResult }}
-                    />
-                    <button
-                      disabled={isSimulatingAI}
-                      onClick={insertAiContent}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Insert at Cursor
-                    </button>
+                    
+                    {aiSelectedText ? (
+                      <div className="space-y-2.5">
+                        <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
+                          Suggested Change Comparison
+                        </div>
+                        
+                        {/* Strikethrough box (Original selection to be removed/replaced) */}
+                        <div className="border border-red-200 dark:border-red-950/60 rounded-lg p-2.5 bg-red-50/5 dark:bg-red-950/5 relative overflow-hidden">
+                          <div className="absolute top-1 right-2 text-[9px] font-bold text-red-500/70 uppercase">
+                            Original (To Remove)
+                          </div>
+                          <div className="text-xs text-red-750 dark:text-red-400 line-through pr-12 break-words leading-relaxed">
+                            {aiSelectedText}
+                          </div>
+                        </div>
+
+                        {/* Insertion box (AI suggestion to be added) */}
+                        <div className="border border-emerald-250 dark:border-emerald-950/60 rounded-lg p-2.5 bg-emerald-50/5 dark:bg-emerald-950/5 relative overflow-hidden">
+                          <div className="absolute top-1 right-2 text-[9px] font-bold text-emerald-550/70 uppercase">
+                            Replacement (To Apply)
+                          </div>
+                          <div 
+                            className="text-xs text-emerald-800 dark:text-emerald-350 pr-12 break-words space-y-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_strong]:font-bold [&_em]:italic [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-sm [&_h2]:font-bold [&_h3]:text-xs [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-emerald-500 [&_blockquote]:pl-2 [&_blockquote]:italic [&_code]:bg-emerald-100/50 [&_code]:dark:bg-emerald-950/50 [&_code]:px-1 [&_code]:rounded [&_code]:font-mono [&_p]:my-1 leading-relaxed"
+                            dangerouslySetInnerHTML={{ __html: formatAiResponseToHtml(simulatedAiResult) }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div 
+                        className="text-xs space-y-2 text-zinc-650 dark:text-zinc-300 max-h-48 overflow-y-auto border border-dashed border-zinc-200 dark:border-zinc-800 p-2 bg-white dark:bg-zinc-900 rounded font-normal leading-relaxed [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-1 [&_strong]:font-bold [&_em]:italic [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-2 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-2 [&_h3]:text-xs [&_h3]:font-semibold [&_h3]:mt-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-indigo-500 [&_blockquote]:pl-2 [&_blockquote]:italic [&_code]:bg-zinc-100 [&_code]:dark:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_code]:font-mono [&_pre]:bg-zinc-100 [&_pre]:dark:bg-zinc-800 [&_pre]:p-2 [&_pre]:rounded [&_pre]:font-mono [&_pre]:overflow-x-auto [&_p]:my-1"
+                        dangerouslySetInnerHTML={{ __html: formatAiResponseToHtml(simulatedAiResult) }}
+                      />
+                    )}
+                    
+                    <div className="flex flex-col gap-2 pt-1">
+                      {aiSelectedText ? (
+                        <>
+                          <button
+                            disabled={isSimulatingAI}
+                            onClick={replaceSelectionContent}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            Replace Selection
+                          </button>
+                          <button
+                            disabled={isSimulatingAI}
+                            onClick={insertAiContent}
+                            className="w-full border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 dark:hover:text-zinc-50 text-zinc-700 dark:text-zinc-300 rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            Insert at Cursor
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          disabled={isSimulatingAI}
+                          onClick={insertAiContent}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          Insert at Cursor
+                        </button>
+                      )}
+                      
+                      <button
+                        disabled={isSimulatingAI}
+                        onClick={discardAiContent}
+                        className="w-full border border-red-200 hover:bg-red-50 dark:border-red-950 dark:hover:bg-red-950/20 text-red-650 dark:text-red-400 rounded-md py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Discard Suggestion
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1286,6 +1771,126 @@ export default function Editor() {
           <span>100% Zoom</span>
         </div>
       </footer>
+
+      {showFloatingPopup && popupCoords && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            top: `${Math.max(80, Math.min(window.innerHeight - 320, popupCoords.top - 120))}px`, 
+            left: `${Math.max(20, Math.min(window.innerWidth - 325, popupCoords.left - 140))}px`, 
+            zIndex: 100 
+          }}
+          className="w-80 bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-850 rounded-xl shadow-2xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200"
+        >
+          <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Contextual AI Editor</span>
+            </div>
+            <button 
+              onClick={() => {
+                setShowFloatingPopup(false)
+                setSimulatedAiResult('')
+                setAiSelectedText('')
+              }}
+              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+            >
+              <Minimize2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {!simulatedAiResult ? (
+            <div className="space-y-3">
+              <div className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-normal">
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300 block mb-0.5">Target Paragraph Context:</span>
+                <p className="line-clamp-2 italic bg-zinc-50 dark:bg-zinc-950 p-1.5 rounded border border-zinc-150 dark:border-zinc-850 text-zinc-600 dark:text-zinc-400">
+                  "{popupContextText}"
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <textarea
+                  value={popupPrompt}
+                  onChange={(e) => setPopupPrompt(e.target.value)}
+                  placeholder="Ask AI to rewrite, correct, or expand..."
+                  className="w-full text-xs p-2 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 h-16 resize-none"
+                />
+                <button
+                  disabled={isSimulatingAI || !popupPrompt.trim()}
+                  onClick={() => handlePopupAiAction()}
+                  className="w-full bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg py-1.5 text-xs font-semibold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {isSimulatingAI ? (
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <span>Apply Instruction</span>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">Quick Presets</div>
+                <div className="flex flex-wrap gap-1">
+                  {['Fix Grammar', 'Academic Tone', 'Summarize', 'Make Concise'].map((preset) => (
+                    <button
+                      key={preset}
+                      disabled={isSimulatingAI}
+                      onClick={() => handlePopupAiAction(preset)}
+                      className="text-[10px] px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 dark:text-indigo-300 rounded border border-indigo-100/60 dark:border-indigo-900/40 cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                  Review Suggestions
+                </div>
+                
+                {/* Strikethrough box (Original selection to be replaced) */}
+                <div className="border border-red-200 dark:border-red-950/60 rounded-lg p-2 bg-red-50/5 dark:bg-red-950/5 max-h-24 overflow-y-auto">
+                  <div className="text-[9px] font-bold text-red-500/80 uppercase mb-0.5">Original</div>
+                  <div className="text-[11px] text-red-750 dark:text-red-400 line-through leading-relaxed">
+                    {popupContextText}
+                  </div>
+                </div>
+
+                {/* Insertion box (AI suggestion to be added) */}
+                <div className="border border-emerald-250 dark:border-emerald-950/60 rounded-lg p-2 bg-emerald-50/5 dark:bg-emerald-950/5 max-h-32 overflow-y-auto">
+                  <div className="text-[9px] font-bold text-emerald-550/80 uppercase mb-0.5">AI Suggestion</div>
+                  <div 
+                    className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-relaxed space-y-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_strong]:font-bold [&_em]:italic [&_p]:my-0.5"
+                    dangerouslySetInnerHTML={{ __html: formatAiResponseToHtml(simulatedAiResult) }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  disabled={isSimulatingAI}
+                  onClick={acceptPopupSuggestion}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg py-1.5 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Accept
+                </button>
+                <button
+                  disabled={isSimulatingAI}
+                  onClick={rejectPopupSuggestion}
+                  className="flex-1 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 rounded-lg py-1.5 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Reject
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
     </div>
   )

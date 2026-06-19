@@ -46,7 +46,14 @@ export async function POST(req: NextRequest) {
       "Guidelines:\n" +
       "1. Maintain strict academic rigor, precise scientific terminology, and a professional, objective tone.\n" +
       "2. Do not use conversational filler (e.g., 'Sure, here is your text:', 'Hope this helps!'). Provide only the content requested.\n" +
-      "3. Output structurally formatted text (using Markdown headings like H2/H3, paragraphs, blockquotes, and list items) that is clean and ready to render in the editor canvas."
+      "3. Output structurally formatted text (using Markdown headings like H2/H3, paragraphs, blockquotes, and list items) that is clean and ready to render in the editor canvas.\n" +
+      "4. REPLACEMENT DETECTION: If the user's request is to change, edit, correct, rewrite, or update a specific part of the provided document context (e.g., 'change the topic to...', 'correct grammar in...', 'rewrite section...'), you MUST identify the exact text inside the document that needs to be replaced, and output the response using the following format:\n" +
+      "<<<ORIGINAL>>>\n" +
+      "[Specify the exact text from the document context to be replaced. Match it word-for-word exactly, including spelling and punctuation.]\n" +
+      "<<<REPLACEMENT>>>\n" +
+      "[Specify the new, updated text or HTML. Use appropriate heading, list, or paragraph tags.]\n" +
+      "<<<END>>>\n\n" +
+      "If the user's request is a general generation task (like writing a new introduction, outline, or paragraph) that does not replace existing text, output the response directly without the <<<ORIGINAL>>> format."
 
     let responseStream: any = null
     let activeModelName = ''
