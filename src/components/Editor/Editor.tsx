@@ -537,7 +537,7 @@ export default function Editor() {
       }
 
       const opt = {
-        margin: [1.0, 0.75, 1.0, 0.75], // Increased top/bottom margins to make space for headers and footers
+        margin: [1.0, 0.75, 1.0, 0.75] as [number, number, number, number], // Increased top/bottom margins to make space for headers and footers
         filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
