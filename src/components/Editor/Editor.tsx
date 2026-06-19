@@ -1848,13 +1848,10 @@ export default function Editor() {
           )}
         </aside>
 
-        <div 
-          ref={scrollContainerRef}
-          className="flex flex-col flex-1 overflow-y-auto items-center py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950"
-        >
-          
+        <div className="flex flex-col flex-1 h-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
           {/* Formatting Toolbar */}
-          <div className="w-full max-w-[816px] sticky top-0 flex flex-wrap gap-1 items-center p-2 mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-md z-30 justify-start sm:justify-between">
+          <div className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2 z-30 flex justify-center flex-shrink-0">
+            <div className="w-full max-w-[816px] flex flex-wrap gap-1 items-center justify-start sm:justify-between">
             <div className="flex flex-wrap items-center gap-0.5">
               {/* Heading Dropdown */}
               <select
@@ -2027,6 +2024,13 @@ export default function Editor() {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Scrollable Canvas Body */}
+        <div 
+          ref={scrollContainerRef}
+          className="flex-1 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center"
+        >
 
           {/* Document Settings & Layout Panel */}
           <div className="w-full max-w-[816px] mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-md space-y-3">
@@ -2069,6 +2073,7 @@ export default function Editor() {
             <EditorContent editor={editor} />
           </div>
         </div>
+      </div>
 
         {/* Floating/Collapsible AI Sidebar (Phase 2 Component Simulation) */}
         <aside 
