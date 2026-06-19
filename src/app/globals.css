@@ -153,3 +153,16 @@ body {
 .font-playfair {
   font-family: "Times New Roman", Times, serif !important;
 }
+
+/* Printing styles to hide the visual page-break divider in final compile */
+@media print {
+  .tiptap .page-break {
+    border-top: none !important;
+    color: transparent !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+  }
+}

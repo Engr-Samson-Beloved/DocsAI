@@ -33,7 +33,9 @@ import {
   ChevronRight,
   ChevronLeft,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Scissors,
+  Upload
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -66,6 +68,10 @@ export default function Editor() {
   const [isSimulatingAI, setIsSimulatingAI] = useState(false)
   const [simulatedAiResult, setSimulatedAiResult] = useState('')
   const [isExporting, setIsExporting] = useState(false)
+  const [docHeader, setDocHeader] = useState('')
+  const [docFooter, setDocFooter] = useState('')
+  const [loadingMessage, setLoadingMessage] = useState('Processing Document...')
+  const [activeAiModel, setActiveAiModel] = useState('')
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -255,6 +261,7 @@ export default function Editor() {
 
   // Export to PDF Document (.pdf) using html2pdf.js (dynamic load)
   const exportToPdf = async () => {
+    setLoadingMessage('Compiling PDF Document...')
     setIsExporting(true)
     try {
       const html2pdf = (await import('html2pdf.js')).default
@@ -265,7 +272,7 @@ export default function Editor() {
       }
 
       const opt = {
-        margin: [0.75, 0.75, 0.75, 0.75], // Standard 0.75 in margin
+        margin: [1.0, 0.75, 1.0, 0.75], // Increased top/bottom margins to make space for headers and footers
         filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
@@ -281,7 +288,25 @@ export default function Editor() {
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
       }
 
-      await html2pdf().set(opt).from(element).save()
+      // Stream PDF and hook into the underlying jsPDF instance to draw layout headers and footers
+      await html2pdf().set(opt).from(element).toPdf().get('pdf').then((pdf: any) => {
+        const totalPages = pdf.internal.getNumberOfPages()
+        for (let i = 1; i <= totalPages; i++) {
+          pdf.setPage(i)
+          pdf.setFont('helvetica', 'normal')
+          pdf.setFontSize(8)
+          pdf.setTextColor(113, 113, 122) // Zinc 500
+
+          // Render Page Header (Right Aligned on top margin)
+          if (docHeader) {
+            pdf.text(docHeader, 7.75, 0.5, { align: 'right' })
+          }
+
+          // Render Page Footer (Center Aligned on bottom margin)
+          const footerText = docFooter ? `${docFooter} | Page ${i} of ${totalPages}` : `Page ${i} of ${totalPages}`
+          pdf.text(footerText, 4.25, 10.5, { align: 'center' })
+        }
+      }).save()
     } catch (err: any) {
       console.error('PDF export error:', err)
       alert(`Failed to export PDF: ${err.message || err}`)
@@ -292,6 +317,7 @@ export default function Editor() {
 
   // Export to Word Document (.docx) using docx.js (dynamic load)
   const exportToDocx = async () => {
+    setLoadingMessage('Compiling Word Document...')
     setIsExporting(true)
     try {
       const docx = await import('docx')
@@ -417,6 +443,48 @@ export default function Editor() {
         sections: [
           {
             properties: {},
+            headers: {
+              default: new docx.Header({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: docHeader || "DocuAI Document Draft",
+                        size: 18, // 9pt (half-points in docx)
+                        color: "71717a", // Zinc 500
+                        font: "Arial"
+                      })
+                    ],
+                    alignment: AlignmentType.RIGHT,
+                    spacing: { after: 120 }
+                  })
+                ]
+              })
+            },
+            footers: {
+              default: new docx.Footer({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: docFooter ? `${docFooter} | ` : "Page ",
+                        size: 18,
+                        color: "71717a",
+                        font: "Arial"
+                      }),
+                      new TextRun({
+                        children: [docx.PageNumber.CURRENT],
+                        size: 18,
+                        color: "71717a",
+                        font: "Arial"
+                      })
+                    ],
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 120 }
+                  })
+                ]
+              })
+            },
             children: children,
           },
         ],
@@ -438,6 +506,7 @@ export default function Editor() {
 
   // Export to PowerPoint Presentation (.pptx) using pptxgenjs (dynamic load)
   const exportToPptx = async () => {
+    setLoadingMessage('Compiling PowerPoint Slides...')
     setIsExporting(true)
     try {
       const pptxgen = (await import('pptxgenjs')).default
@@ -550,10 +619,68 @@ export default function Editor() {
     }
   }
 
+  // Import document file (.docx or .pdf) dynamically using mammoth or pdfjs-dist
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setLoadingMessage('Importing and Parsing File...')
+    setIsExporting(true)
+    try {
+      const extension = file.name.split('.').pop()?.toLowerCase()
+      if (extension === 'docx') {
+        const mammoth = await import('mammoth')
+        const arrayBuffer = await file.arrayBuffer()
+        const result = await mammoth.convertToHtml({ arrayBuffer })
+        
+        // Renders word document inline HTML directly into Tiptap
+        editor.commands.setContent(result.value)
+        setIsSaved(false)
+        
+        // Extract title from file name
+        const cleanName = file.name.replace(/\.[^/.]+$/, "")
+        setDocumentTitle(cleanName)
+      } else if (extension === 'pdf') {
+        // Renders PDF text content extracted from pdfjs-dist
+        const pdfjs = await import('pdfjs-dist')
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+        
+        const arrayBuffer = await file.arrayBuffer()
+        const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+        const pdf = await loadingTask.promise
+        
+        let accumulatedHtml = ''
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i)
+          const textContent = await page.getTextContent()
+          const pageStrings = textContent.items.map((item: any) => item.str).join(' ')
+          accumulatedHtml += `<p>${pageStrings}</p>`
+        }
+        
+        editor.commands.setContent(accumulatedHtml)
+        setIsSaved(false)
+        
+        // Extract title from file name
+        const cleanName = file.name.replace(/\.[^/.]+$/, "")
+        setDocumentTitle(cleanName)
+      } else {
+        alert('Unsupported document format. Please upload a .docx or .pdf file.')
+      }
+    } catch (err: any) {
+      console.error('File import failure:', err)
+      alert(`Failed to import document: ${err.message || err}`)
+    } finally {
+      setIsExporting(false)
+      // Reset input element value to allow re-upload of same file
+      if (e.target) e.target.value = ''
+    }
+  }
+
   // Phase 2 AI Prompt execution (Streams response from Gemini API route proxy)
   const handleAiAction = async (action: string) => {
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
+    setActiveAiModel('')
     
     // Select editor text if highlighted to provide context
     const { from, to } = editor.state.selection
@@ -617,7 +744,9 @@ export default function Editor() {
             }
             try {
               const data = JSON.parse(dataStr)
-              if (data.error) {
+              if (data.meta?.model) {
+                setActiveAiModel(data.meta.model)
+              } else if (data.error) {
                 accumulatedText += `<p class="text-red-500 font-semibold">${data.error}</p>`
               } else if (data.text) {
                 accumulatedText += data.text
@@ -652,8 +781,8 @@ export default function Editor() {
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-xl p-6 shadow-2xl flex flex-col items-center gap-4 max-w-sm text-center">
             <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
             <div>
-              <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Compiling Export Package</h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Generating document layout structure. This might take a few seconds...</p>
+              <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">{loadingMessage}</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Please wait a few seconds...</p>
             </div>
           </div>
         </div>
@@ -685,6 +814,23 @@ export default function Editor() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Import Actions */}
+          <input
+            type="file"
+            accept=".docx,.pdf"
+            id="import-file"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+          <label
+            htmlFor="import-file"
+            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors"
+            title="Import a Word (.docx) or PDF (.pdf) file to format or edit"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import</span>
+          </label>
+
           {/* Export Actions */}
           <div className="relative group">
             <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors">
@@ -897,6 +1043,15 @@ export default function Editor() {
               >
                 <QuoteIcon className="w-4 h-4" />
               </button>
+              <button
+                onClick={() => {
+                  editor.chain().focus().insertContent('<div class="page-break" style="page-break-after: always; border-top: 2px dashed #818cf8; margin: 2.5rem 0; padding-top: 0.5rem; text-align: center; font-size: 10px; color: #818cf8; text-transform: uppercase; letter-spacing: 0.1em; user-select: none;">Page Break</div>').run()
+                }}
+                className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-700 dark:text-zinc-300"
+                title="Insert Page Break"
+              >
+                <Scissors className="w-4 h-4" />
+              </button>
 
               <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-700 mx-1.5"></div>
 
@@ -915,6 +1070,39 @@ export default function Editor() {
               >
                 <RedoIcon className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+
+          {/* Document Settings & Layout Panel */}
+          <div className="w-full max-w-[816px] mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-md space-y-3">
+            <h3 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+              Document Headers & Layout Options (Word & PDF)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-450 block mb-1">
+                  Page Header Text (Right Aligned)
+                </label>
+                <input
+                  type="text"
+                  value={docHeader}
+                  onChange={(e) => setDocHeader(e.target.value)}
+                  placeholder="e.g. Chapter 1: Literature Review"
+                  className="w-full text-xs px-3 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-450 block mb-1">
+                  Page Footer Prefix
+                </label>
+                <input
+                  type="text"
+                  value={docFooter}
+                  onChange={(e) => setDocFooter(e.target.value)}
+                  placeholder="e.g. Confidential Research Draft"
+                  className="w-full text-xs px-3 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 transition-all"
+                />
+              </div>
             </div>
           </div>
 
@@ -954,15 +1142,22 @@ export default function Editor() {
               {/* Chat/Generation Input and Presets */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 
-                {/* Simulated AI Instructions Info Alert */}
-                <div className="bg-amber-50 border border-amber-200 text-amber-900 dark:bg-amber-950/20 dark:border-amber-900/30 dark:text-amber-300 rounded-lg p-3 text-xs leading-5">
-                  <span className="font-bold">Prototyping Environment:</span> Select text in the document and click any option below to simulate the generative AI workflow.
+                 {/* AI Instructions Info Alert */}
+                <div className="bg-indigo-50 border border-indigo-100 text-indigo-950 dark:bg-indigo-950/20 dark:border-indigo-900/30 dark:text-indigo-300 rounded-lg p-3 text-xs leading-5">
+                  <span className="font-bold">Gemini AI Workspace:</span> Highlight any section of your document for context, choose a preset, or write a custom instruction to refine your writing.
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                    Prompt Gemini
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                      Prompt Gemini
+                    </label>
+                    {activeAiModel && (
+                      <span className="text-[9px] font-mono bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 px-1.5 py-0.5 rounded">
+                        {activeAiModel}
+                      </span>
+                    )}
+                  </div>
                   <textarea
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
