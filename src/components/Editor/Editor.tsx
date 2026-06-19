@@ -1,7 +1,8 @@
 "use client"
 
 import React, { useState, useEffect, useRef } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
+import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
@@ -306,6 +307,167 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
   return { isReplacementMode: true, originalText, replacementText }
 }
 
+// Helper to pre-wrap raw HTML in a page block tag if not already paginated.
+// This ensures that all imported or reset content is correctly parsed into a page node.
+const ensurePaginatedHtml = (html: string): string => {
+  const trimmed = html.trim()
+  if (!trimmed) return '<div data-type="page"><p></p></div>'
+  if (trimmed.includes('data-type="page"') || trimmed.includes('class="page-sheet"')) {
+    return html
+  }
+  return `<div data-type="page">${html}</div>`
+}
+
+// Helper to pre-process loaded JSON content to wrap flat block nodes into a page node.
+// This preserves backward compatibility for flat document drafts in local storage.
+const ensurePaginatedJson = (json: any): any => {
+  if (!json) return { type: 'doc', content: [{ type: 'page', content: [{ type: 'paragraph' }] }] }
+  if (json.type !== 'doc') return json
+  
+  const content = json.content || []
+  const hasPageNodes = content.some((child: any) => child.type === 'page')
+  if (hasPageNodes) {
+    return json
+  }
+  
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'page',
+        content: content.length > 0 ? content : [{ type: 'paragraph' }]
+      }
+    ]
+  }
+}
+
+// Pure JavaScript NodeView for synchronous page rendering
+class PageNodeView {
+  dom: HTMLElement
+  contentDOM: HTMLElement
+  editor: any
+  node: any
+  getPos: any
+
+  constructor(node: any, editor: any, getPos: any) {
+    this.node = node
+    this.editor = editor
+    this.getPos = getPos
+
+    // Outer sheet box representing A4
+    this.dom = document.createElement('div')
+    this.dom.className = 'page-sheet relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1)] mx-auto my-4 w-[794px] h-[1123px] select-none text-zinc-850 dark:text-zinc-100 overflow-hidden box-border print:shadow-none print:border-none print:m-0'
+
+    // Header container
+    const headerEl = document.createElement('div')
+    headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-100 dark:border-zinc-800 pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    headerEl.innerHTML = `
+      <span class="header-text truncate max-w-[400px]"></span>
+      <span class="text-[10px] tracking-wider uppercase font-semibold text-zinc-300 dark:text-zinc-700">Project Pilot</span>
+    `
+    this.dom.appendChild(headerEl)
+
+    // Editable block contents container
+    this.contentDOM = document.createElement('div')
+    this.contentDOM.className = 'page-content absolute top-[96px] left-0 right-0 h-[931px] px-[72px] overflow-hidden focus:outline-none text-left select-text'
+    this.dom.appendChild(this.contentDOM)
+
+    // Footer container
+    const footerEl = document.createElement('div')
+    footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-100 dark:border-zinc-800 pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    footerEl.innerHTML = `
+      <span class="footer-text truncate max-w-[450px]"></span>
+      <span class="page-number"></span>
+    `
+    this.dom.appendChild(footerEl)
+
+    this.updateLabels()
+  }
+
+  update(node: any) {
+    if (node.type.name !== 'page') return false
+    this.node = node
+    this.updateLabels()
+    return true
+  }
+
+  updateLabels() {
+    let pageIndex = 0
+    let totalPages = 1
+    if (this.editor && typeof this.getPos === 'function') {
+      try {
+        const pos = this.getPos()
+        this.editor.state.doc.descendants((n: any, p: number) => {
+          if (n.type.name === 'page') {
+            if (p < pos) {
+              pageIndex++
+            }
+          }
+          return true
+        })
+        
+        let count = 0
+        this.editor.state.doc.descendants((n: any) => {
+          if (n.type.name === 'page') {
+            count++
+          }
+          return true
+        })
+        totalPages = count || 1
+      } catch (e) {
+        console.error("Error calculating page indexing:", e)
+      }
+    }
+
+    const docHeader = this.editor.storage?.page?.docHeader || ''
+    const docFooter = this.editor.storage?.page?.docFooter || ''
+
+    const headerTextEl = this.dom.querySelector('.header-text')
+    if (headerTextEl) headerTextEl.textContent = docHeader
+
+    const footerTextEl = this.dom.querySelector('.footer-text')
+    if (footerTextEl) footerTextEl.textContent = docFooter
+
+    const pageNumEl = this.dom.querySelector('.page-number')
+    if (pageNumEl) pageNumEl.textContent = `Page ${pageIndex + 1} of ${totalPages}`
+
+    this.dom.setAttribute('data-page-index', pageIndex.toString())
+  }
+}
+
+// Custom Document and Page Nodes
+const CustomDocument = Node.create({
+  name: 'doc',
+  topNode: true,
+  content: 'page+',
+})
+
+const PageNode = Node.create({
+  name: 'page',
+  group: 'page',
+  content: 'block+',
+  defining: true,
+
+  addStorage() {
+    return {
+      docHeader: '',
+      docFooter: ''
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="page"]' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'page' }), 0]
+  },
+
+  addNodeView() {
+    return ({ node, editor, getPos }) => new PageNodeView(node, editor, getPos)
+  }
+})
+
 interface OutlineItem {
   text: string;
   level: number;
@@ -346,6 +508,9 @@ export default function Editor() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [activeHeadingIndex, setActiveHeadingIndex] = useState<number | null>(null)
+  const [zoomScale, setZoomScale] = useState(1)
+  const isPaginatingRef = useRef(false)
+  const paginationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
@@ -380,28 +545,25 @@ export default function Editor() {
   // Document Outline Calculations
   const updateOutline = () => {
     if (!editor) return
-    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
-    const editorEl = document.querySelector('.tiptap') as HTMLElement
-    if (!editorEl) return
-
-    const pageHeight = 1056 // Standard Letter page height in pixels
+    const headingElements = document.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
     const items: OutlineItem[] = []
 
     headingElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement
-      let offset = 0
-      let curr: HTMLElement | null = htmlEl
-      while (curr && curr !== editorEl) {
-        offset += curr.offsetTop
-        curr = curr.offsetParent as HTMLElement | null
+      const pageSheet = htmlEl.closest('.page-sheet') as HTMLElement
+      let pageNum = 1
+      if (pageSheet) {
+        const indexAttr = pageSheet.getAttribute('data-page-index')
+        if (indexAttr !== null) {
+          pageNum = parseInt(indexAttr) + 1
+        }
       }
       
-      const page = Math.floor(offset / pageHeight) + 1
       items.push({
         text: htmlEl.textContent || '',
         level: parseInt(htmlEl.tagName.substring(1)),
         id: `heading-${index}`,
-        page
+        page: pageNum
       })
     })
 
@@ -412,41 +574,44 @@ export default function Editor() {
     const container = scrollContainerRef.current
     if (!container) return
 
-    const editorEl = document.querySelector('.tiptap') as HTMLElement
-    if (!editorEl) return
+    const pageSheets = container.querySelectorAll('.page-sheet')
+    if (pageSheets.length === 0) return
 
-    const pageHeight = 1056
-    const scrollTop = container.scrollTop
-    const clientHeight = container.clientHeight
+    const containerRect = container.getBoundingClientRect()
+    const containerMid = containerRect.top + containerRect.height / 2
 
-    // Calculate current page based on midpoint scroll offset relative to editor container
-    const relativeScrollTop = Math.max(0, scrollTop + clientHeight / 2 - editorEl.offsetTop)
-    const pageNum = Math.floor(relativeScrollTop / pageHeight) + 1
-    setCurrentPage(pageNum)
+    let activePage = 1
+    let minDistance = Infinity
 
-    // Calculate total pages
-    const totalH = editorEl.scrollHeight
-    const totalP = Math.max(1, Math.ceil(totalH / pageHeight))
-    setTotalPages(totalP)
+    pageSheets.forEach((sheet) => {
+      const htmlSheet = sheet as HTMLElement
+      const rect = htmlSheet.getBoundingClientRect()
+      const sheetMid = rect.top + rect.height / 2
+      const distance = Math.abs(containerMid - sheetMid)
+
+      if (distance < minDistance) {
+        minDistance = distance
+        const indexAttr = htmlSheet.getAttribute('data-page-index')
+        if (indexAttr !== null) {
+          activePage = parseInt(indexAttr) + 1
+        }
+      }
+    })
+
+    setCurrentPage(activePage)
+    setTotalPages(pageSheets.length)
 
     // Calculate which heading is active (visible on screen)
-    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
+    const headingElements = container.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
     let currentActiveIdx: number | null = null
-    let minDiff = Infinity
+    let minHeadingDiff = Infinity
 
     headingElements.forEach((el, index) => {
       const htmlEl = el as HTMLElement
-      let offset = 0
-      let curr: HTMLElement | null = htmlEl
-      while (curr && curr !== editorEl) {
-        offset += curr.offsetTop
-        curr = curr.offsetParent as HTMLElement | null
-      }
-
-      // Check distance from current scroll position
-      const diff = Math.abs(offset - (scrollTop + 100))
-      if (offset <= scrollTop + 200 && diff < minDiff) {
-        minDiff = diff
+      const rect = htmlEl.getBoundingClientRect()
+      const diff = Math.abs(rect.top - containerRect.top - 100)
+      if (rect.top <= containerRect.top + 200 && diff < minHeadingDiff) {
+        minHeadingDiff = diff
         currentActiveIdx = index
       }
     })
@@ -455,7 +620,7 @@ export default function Editor() {
   }
 
   const scrollToHeading = (index: number) => {
-    const headingElements = document.querySelectorAll('.tiptap h1, .tiptap h2, .tiptap h3, .tiptap h4, .tiptap h5, .tiptap h6')
+    const headingElements = document.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
     const target = headingElements[index] as HTMLElement
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -486,27 +651,176 @@ export default function Editor() {
     }
   }, [outline])
 
-  // Screen size check for sidebars auto-collapsing
-  useEffect(() => {
-    const handleResize = () => {
-      const width = window.innerWidth
-      if (width < 1440) {
-        setSidebarOpen(false)
-      } else {
-        setSidebarOpen(true)
+  // Pagination Engine: Splits and joins pages dynamically based on client heights
+  const triggerPagination = (editorInstance: any) => {
+    if (paginationTimeoutRef.current) {
+      clearTimeout(paginationTimeoutRef.current)
+    }
+    paginationTimeoutRef.current = setTimeout(() => {
+      runPagination(editorInstance)
+    }, 300)
+  }
+
+  const runPagination = (editorInstance: any) => {
+    if (!editorInstance || !editorInstance.view || isPaginatingRef.current) return
+    isPaginatingRef.current = true
+
+    try {
+      const { doc } = editorInstance.state
+      let tr = editorInstance.state.tr
+      let hasChanged = false
+
+      // Step 1: Join adjacent page nodes to flow content backwards
+      const joinPositions: number[] = []
+      doc.forEach((node, offset) => {
+        if (offset > 0 && node.type.name === 'page') {
+          joinPositions.push(offset)
+        }
+      })
+
+      for (let i = joinPositions.length - 1; i >= 0; i--) {
+        const pos = joinPositions[i]
+        const $pos = tr.doc.resolve(pos)
+        if ($pos.nodeBefore && $pos.nodeAfter && 
+            $pos.nodeBefore.type.name === 'page' && 
+            $pos.nodeAfter.type.name === 'page') {
+          tr = tr.join(pos)
+          hasChanged = true
+        }
       }
-      
-      if (width < 1024) {
-        setLeftSidebarOpen(false)
-      } else {
-        setLeftSidebarOpen(true)
+
+      if (hasChanged) {
+        editorInstance.view.dispatch(tr.setMeta('paginating', true))
+        tr = editorInstance.state.tr
       }
+
+      // Step 2: Measure element heights within `.page-content` containers
+      let pageContentElements = document.querySelectorAll('.page-content')
+      if (pageContentElements.length === 0) return
+
+      let pageIdx = 0
+      let splitOccurred = false
+
+      while (pageIdx < pageContentElements.length) {
+        const pageEl = pageContentElements[pageIdx] as HTMLElement
+        if (!pageEl) break
+
+        const clientHeight = 931 // Safe content area height boundary
+
+        if (pageEl.scrollHeight > clientHeight) {
+          const children = Array.from(pageEl.children) as HTMLElement[]
+          let accumulatedHeight = 0
+          let splitChildIdx = -1
+
+          for (let i = 0; i < children.length; i++) {
+            const child = children[i]
+            const rect = child.getBoundingClientRect()
+            const style = window.getComputedStyle(child)
+            const marginTop = parseFloat(style.marginTop) || 0
+            const marginBottom = parseFloat(style.marginBottom) || 0
+            const childHeight = rect.height + marginTop + marginBottom
+
+            accumulatedHeight += childHeight
+
+            if (accumulatedHeight > clientHeight) {
+              splitChildIdx = i
+              break
+            }
+          }
+
+          // Mitigate infinite looping on giant elements or first child overflows
+          if (splitChildIdx === 0) {
+            if (children.length > 1) {
+              splitChildIdx = 1
+            } else {
+              pageIdx++
+              continue
+            }
+          }
+
+          if (splitChildIdx !== -1) {
+            const childDom = children[splitChildIdx]
+            try {
+              const absolutePos = editorInstance.view.posAtDOM(childDom, 0)
+              if (absolutePos !== undefined) {
+                tr = tr.split(absolutePos, 1)
+                editorInstance.view.dispatch(tr.setMeta('paginating', true))
+                splitOccurred = true
+                pageContentElements = document.querySelectorAll('.page-content')
+              }
+            } catch (e) {
+              console.error("Error paginating split position:", e)
+              pageIdx++
+            }
+          } else {
+            pageIdx++
+          }
+        } else {
+          pageIdx++
+        }
+      }
+
+      if (splitOccurred) {
+        setTimeout(() => {
+          updateOutline()
+          handleScroll()
+        }, 50)
+      }
+    } catch (err) {
+      console.error("Pagination processor error:", err)
+    } finally {
+      isPaginatingRef.current = false
+    }
+  }
+
+  // Screen size check for sidebars auto-collapsing & Zoom Scale calculations
+  const handleResize = () => {
+    const width = window.innerWidth
+    if (width < 1440) {
+      setSidebarOpen(false)
+    } else {
+      setSidebarOpen(true)
+    }
+    
+    if (width < 1024) {
+      setLeftSidebarOpen(false)
+    } else {
+      setLeftSidebarOpen(true)
     }
 
+    // Trigger zoom calculation check
+    calculateScale()
+  }
+
+  const calculateScale = () => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    
+    // Page width is 794px. Standard desktop viewport can have vertical scrollbars and sidebars.
+    // Target width of editor area including padding is 794 + 64 = 858px.
+    const containerWidth = container.clientWidth
+    if (containerWidth < 858) {
+      const scale = (containerWidth - 32) / 794
+      setZoomScale(Math.max(0.4, scale))
+    } else {
+      setZoomScale(1)
+    }
+  }
+
+  useEffect(() => {
     handleResize()
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  // Recalculate zoom when sidebars open/close as container width changes
+  useEffect(() => {
+    // Wait for sidebar transitions to finish before calculating final width
+    const timer = setTimeout(calculateScale, 300)
+    return () => clearTimeout(timer)
+  }, [leftSidebarOpen, sidebarOpen])
+
+
 
   // Click outside handler for floating AI popup
   useEffect(() => {
@@ -538,7 +852,11 @@ export default function Editor() {
   // Tiptap Editor configuration
   const editor = useEditor({
     extensions: [
-      StarterKit.configure(),
+      CustomDocument,
+      PageNode,
+      StarterKit.configure({
+        document: false,
+      }),
       TextStyle,
       FontFamily,
       TextAlign.configure({
@@ -553,10 +871,10 @@ export default function Editor() {
     content: '',
     editorProps: {
       attributes: {
-        class: 'tiptap focus:outline-none min-h-[900px] w-full',
+        class: 'tiptap focus:outline-none w-full print:w-full',
       },
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
       setIsSaved(false)
       
       // Hide floating popup only if we moved to a different block
@@ -588,6 +906,14 @@ export default function Editor() {
         updateOutline()
         handleScroll()
       }, 50)
+
+      // Skip running pagination if this is a pagination-induced transaction
+      if (transaction && transaction.getMeta('paginating')) {
+        return
+      }
+
+      // Schedule pagination
+      triggerPagination(editor)
     },
     onSelectionUpdate: ({ editor }) => {
       // Clear existing idle timer
@@ -636,6 +962,19 @@ export default function Editor() {
     },
   })
 
+  // Sync headers and footers with Tiptap storage
+  useEffect(() => {
+    if (editor && editor.storage && editor.storage.page) {
+      editor.storage.page.docHeader = docHeader
+      editor.storage.page.docFooter = docFooter
+      
+      // Trigger a dummy ProseMirror transaction to force all page node views to update labels
+      const { state, view } = editor
+      const tr = state.tr.setMeta('paginating', true)
+      view.dispatch(tr)
+    }
+  }, [docHeader, docFooter, editor])
+
   // Load editor content on mount from localstorage
   useEffect(() => {
     if (!editor) return
@@ -643,12 +982,12 @@ export default function Editor() {
     const savedContent = localStorage.getItem('tiptap-content')
     if (savedContent) {
       try {
-        editor.commands.setContent(JSON.parse(savedContent))
+        editor.commands.setContent(ensurePaginatedJson(JSON.parse(savedContent)))
       } catch (e) {
-        editor.commands.setContent(DEFAULT_CONTENT)
+        editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
       }
     } else {
-      editor.commands.setContent('')
+      editor.commands.setContent(ensurePaginatedHtml(''))
       setShowWizard(true)
     }
 
@@ -660,7 +999,10 @@ export default function Editor() {
       setReadTime(Math.ceil((text.trim() ? text.trim().split(/\s+/).length : 0) / 200))
       updateOutline()
       handleScroll()
-    }, 100)
+      
+      // Run pagination immediately on mount
+      runPagination(editor)
+    }, 150)
   }, [editor])
 
   // Periodic Auto-save effect
@@ -771,56 +1113,49 @@ export default function Editor() {
   const exportToPdf = async () => {
     setLoadingMessage('Compiling PDF Document...')
     setIsExporting(true)
-    try {
-      const html2pdf = (await import('html2pdf.js')).default
-      const element = document.querySelector('.tiptap') as HTMLElement
-      if (!element) {
-        alert('Editor canvas element not found.')
-        return
-      }
+    
+    // Temporarily reset zoomScale to 1 so the elements render at full resolution without scale artifacts
+    const originalScale = zoomScale
+    setZoomScale(1)
 
-      const opt: any = {
-        margin: [1.0, 0.75, 1.0, 0.75] as [number, number, number, number], // Increased top/bottom margins to make space for headers and footers
-        filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
-          scale: 2, 
-          useCORS: true, 
-          logging: false 
-        },
-        jsPDF: { 
-          unit: 'in', 
-          format: 'letter', 
-          orientation: 'portrait' 
-        },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-      }
-
-      // Stream PDF and hook into the underlying jsPDF instance to draw layout headers and footers
-      await (html2pdf().set(opt as any).from(element).toPdf().get('pdf').then((pdf: any) => {
-        const totalPages = pdf.internal.getNumberOfPages()
-        for (let i = 1; i <= totalPages; i++) {
-          pdf.setPage(i)
-          pdf.setFont('helvetica', 'normal')
-          pdf.setFontSize(8)
-          pdf.setTextColor(113, 113, 122) // Zinc 500
-
-          // Render Page Header (Right Aligned on top margin)
-          if (docHeader) {
-            pdf.text(docHeader, 7.75, 0.5, { align: 'right' })
-          }
-
-          // Render Page Footer (Center Aligned on bottom margin)
-          const footerText = docFooter ? `${docFooter} | Page ${i} of ${totalPages}` : `Page ${i} of ${totalPages}`
-          pdf.text(footerText, 4.25, 10.5, { align: 'center' })
+    // Wait a brief tick for layout repaint
+    setTimeout(async () => {
+      try {
+        const html2pdf = (await import('html2pdf.js')).default
+        const element = document.querySelector('.tiptap') as HTMLElement
+        if (!element) {
+          alert('Editor canvas element not found.')
+          return
         }
-      }) as any).save()
-    } catch (err: any) {
-      console.error('PDF export error:', err)
-      alert(`Failed to export PDF: ${err.message || err}`)
-    } finally {
-      setIsExporting(false)
-    }
+
+        const opt: any = {
+          margin: 0,
+          filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { 
+            scale: 2, 
+            useCORS: true, 
+            logging: false 
+          },
+          jsPDF: { 
+            unit: 'px', 
+            format: [794, 1123], 
+            orientation: 'portrait',
+            hotfixes: ['px_scaling']
+          },
+          pagebreak: { mode: ['css', 'legacy'] }
+        }
+
+        await html2pdf().set(opt).from(element).save()
+      } catch (err: any) {
+        console.error('PDF export error:', err)
+        alert(`Failed to export PDF: ${err.message || err}`)
+      } finally {
+        // Restore screen scale
+        setZoomScale(originalScale)
+        setIsExporting(false)
+      }
+    }, 150)
   }
 
   // Export to Word Document (.docx) using docx.js (dynamic load)
@@ -832,7 +1167,7 @@ export default function Editor() {
       const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = docx
 
       const json = editor.getJSON()
-      const nodes = json.content || []
+      const pages = json.content || []
       const children: any[] = []
 
       // Helper to map alignments
@@ -851,99 +1186,104 @@ export default function Editor() {
         return undefined
       }
 
-      nodes.forEach((node: any) => {
-        const align = getAlignment(node.attrs?.textAlign)
+      pages.forEach((pageNode: any) => {
+        if (pageNode.type !== 'page') return
+        const nodes = pageNode.content || []
 
-        if (node.type === 'heading') {
-          const level = node.attrs?.level || 1
-          const runs = (node.content || []).map((childNode: any) => {
-            const marks = childNode.marks || []
-            return new TextRun({
-              text: childNode.text || '',
-              bold: marks.some((m: any) => m.type === 'bold'),
-              italics: marks.some((m: any) => m.type === 'italic'),
-              underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-              strike: marks.some((m: any) => m.type === 'strike'),
-              font: 'Arial'
-            })
-          })
+        nodes.forEach((node: any) => {
+          const align = getAlignment(node.attrs?.textAlign)
 
-          children.push(
-            new Paragraph({
-              children: runs,
-              heading: getHeadingLevel(level),
-              alignment: align,
-              spacing: { before: 240, after: 120 }
-            })
-          )
-        } else if (node.type === 'paragraph') {
-          const runs = (node.content || []).map((childNode: any) => {
-            const marks = childNode.marks || []
-            return new TextRun({
-              text: childNode.text || '',
-              bold: marks.some((m: any) => m.type === 'bold'),
-              italics: marks.some((m: any) => m.type === 'italic'),
-              underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-              strike: marks.some((m: any) => m.type === 'strike'),
-              font: 'Arial'
-            })
-          })
-
-          children.push(
-            new Paragraph({
-              children: runs,
-              alignment: align,
-              spacing: { after: 120, line: 360 } // 1.5 line height spacing
-            })
-          )
-        } else if (node.type === 'bulletList' || node.type === 'orderedList') {
-          const isOrdered = node.type === 'orderedList'
-          node.content?.forEach((listItem: any) => {
-            listItem.content?.forEach((listItemPara: any) => {
-              const runs = (listItemPara.content || []).map((childNode: any) => {
-                const marks = childNode.marks || []
-                return new TextRun({
-                  text: childNode.text || '',
-                  bold: marks.some((m: any) => m.type === 'bold'),
-                  italics: marks.some((m: any) => m.type === 'italic'),
-                  underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                  font: 'Arial'
-                })
+          if (node.type === 'heading') {
+            const level = node.attrs?.level || 1
+            const runs = (node.content || []).map((childNode: any) => {
+              const marks = childNode.marks || []
+              return new TextRun({
+                text: childNode.text || '',
+                bold: marks.some((m: any) => m.type === 'bold'),
+                italics: marks.some((m: any) => m.type === 'italic'),
+                underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+                strike: marks.some((m: any) => m.type === 'strike'),
+                font: 'Arial'
               })
+            })
 
-              children.push(
-                new Paragraph({
-                  children: runs,
-                  bullet: isOrdered ? undefined : { level: 0 },
-                  indent: isOrdered ? { left: 720 } : undefined,
-                  spacing: { after: 80 }
-                })
-              )
+            children.push(
+              new Paragraph({
+                children: runs,
+                heading: getHeadingLevel(level),
+                alignment: align,
+                spacing: { before: 240, after: 120 }
+              })
+            )
+          } else if (node.type === 'paragraph') {
+            const runs = (node.content || []).map((childNode: any) => {
+              const marks = childNode.marks || []
+              return new TextRun({
+                text: childNode.text || '',
+                bold: marks.some((m: any) => m.type === 'bold'),
+                italics: marks.some((m: any) => m.type === 'italic'),
+                underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+                strike: marks.some((m: any) => m.type === 'strike'),
+                font: 'Arial'
+              })
             })
-          })
-        } else if (node.type === 'blockquote') {
-          const runs: any[] = []
-          node.content?.forEach((p: any) => {
-            p.content?.forEach((childNode: any) => {
-              runs.push(
-                new TextRun({
-                  text: childNode.text || '',
-                  italics: true,
-                  color: '52525b', // Zinc 600
-                  font: 'Arial'
-                })
-              )
-            })
-          })
 
-          children.push(
-            new Paragraph({
-              children: runs,
-              indent: { left: 720 },
-              spacing: { before: 120, after: 120 }
+            children.push(
+              new Paragraph({
+                children: runs,
+                alignment: align,
+                spacing: { after: 120, line: 360 } // 1.5 line height spacing
+              })
+            )
+          } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+            const isOrdered = node.type === 'orderedList'
+            node.content?.forEach((listItem: any) => {
+              listItem.content?.forEach((listItemPara: any) => {
+                const runs = (listItemPara.content || []).map((childNode: any) => {
+                  const marks = childNode.marks || []
+                  return new TextRun({
+                    text: childNode.text || '',
+                    bold: marks.some((m: any) => m.type === 'bold'),
+                    italics: marks.some((m: any) => m.type === 'italic'),
+                    underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+                    font: 'Arial'
+                  })
+                })
+
+                children.push(
+                  new Paragraph({
+                    children: runs,
+                    bullet: isOrdered ? undefined : { level: 0 },
+                    indent: isOrdered ? { left: 720 } : undefined,
+                    spacing: { after: 80 }
+                  })
+                )
+              })
             })
-          )
-        }
+          } else if (node.type === 'blockquote') {
+            const runs: any[] = []
+            node.content?.forEach((p: any) => {
+              p.content?.forEach((childNode: any) => {
+                runs.push(
+                  new TextRun({
+                    text: childNode.text || '',
+                    italics: true,
+                    color: '52525b', // Zinc 600
+                    font: 'Arial'
+                  })
+                )
+              })
+            })
+
+            children.push(
+              new Paragraph({
+                children: runs,
+                indent: { left: 720 },
+                spacing: { before: 120, after: 120 }
+              })
+            )
+          }
+        })
       })
 
       const doc = new Document({
@@ -1021,7 +1361,7 @@ export default function Editor() {
       pptx.layout = 'LAYOUT_16x9'
 
       const json = editor.getJSON()
-      const nodes = json.content || []
+      const pages = json.content || []
 
       let slideTitle = ''
       let slideContent: string[] = []
@@ -1072,33 +1412,38 @@ export default function Editor() {
         }
       }
 
-      nodes.forEach((node: any) => {
-        if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2)) {
-          // Commit previous slide
-          createSlide()
+      pages.forEach((pageNode: any) => {
+        if (pageNode.type !== 'page') return
+        const nodes = pageNode.content || []
 
-          // Start a new slide
-          slideTitle = node.content?.map((c: any) => c.text).join('') || 'Section Title'
-          slideContent = []
-        } else if (node.type === 'paragraph' || node.type === 'bulletList' || node.type === 'orderedList') {
-          const text = node.content?.map((c: any) => c.text).join('') || ''
-          
-          if (node.type === 'bulletList' || node.type === 'orderedList') {
-            node.content?.forEach((item: any) => {
-              const itemText = item.content?.map((p: any) => {
-                return p.content?.map((t: any) => t.text).join('') || ''
-              }).join('') || ''
-              if (itemText) slideContent.push(itemText)
-            })
-          } else if (text) {
-            // Keep bullets brief
-            if (text.length > 180) {
-              slideContent.push(text.slice(0, 180) + '...')
-            } else {
-              slideContent.push(text)
+        nodes.forEach((node: any) => {
+          if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2)) {
+            // Commit previous slide
+            createSlide()
+
+            // Start a new slide
+            slideTitle = node.content?.map((c: any) => c.text).join('') || 'Section Title'
+            slideContent = []
+          } else if (node.type === 'paragraph' || node.type === 'bulletList' || node.type === 'orderedList') {
+            const text = node.content?.map((c: any) => c.text).join('') || ''
+            
+            if (node.type === 'bulletList' || node.type === 'orderedList') {
+              node.content?.forEach((item: any) => {
+                const itemText = item.content?.map((p: any) => {
+                  return p.content?.map((t: any) => t.text).join('') || ''
+                }).join('') || ''
+                if (itemText) slideContent.push(itemText)
+              })
+            } else if (text) {
+              // Keep bullets brief
+              if (text.length > 180) {
+                slideContent.push(text.slice(0, 180) + '...')
+              } else {
+                slideContent.push(text)
+              }
             }
           }
-        }
+        })
       })
 
       // Commit the final slide
@@ -1143,7 +1488,7 @@ export default function Editor() {
         const result = await mammoth.convertToHtml({ arrayBuffer })
         
         // Renders word document inline HTML directly into Tiptap
-        editor.commands.setContent(result.value)
+        editor.commands.setContent(ensurePaginatedHtml(result.value))
         setIsSaved(false)
         
         // Extract title from file name
@@ -1166,7 +1511,7 @@ export default function Editor() {
           accumulatedHtml += `<p>${pageStrings}</p>`
         }
         
-        editor.commands.setContent(accumulatedHtml)
+        editor.commands.setContent(ensurePaginatedHtml(accumulatedHtml))
         setIsSaved(false)
         
         // Extract title from file name
@@ -1541,7 +1886,7 @@ export default function Editor() {
     localStorage.setItem('docTitle', finalTitle)
 
     if (choice === 'import' && projectSources.length > 0) {
-      editor.commands.setContent(projectSources[0].content)
+      editor.commands.setContent(ensurePaginatedHtml(projectSources[0].content))
       setIsSaved(false)
       setShowWizard(false)
     } else if (choice === 'ai_blueprint') {
@@ -1573,14 +1918,14 @@ export default function Editor() {
         })
 
         if (!response.ok) {
-          editor.commands.setContent(`<h1>${finalTitle}</h1><p>Failed to generate initial outline.</p>`)
+          editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Failed to generate initial outline.</p>`))
           setIsSimulatingAI(false)
           return
         }
 
         const reader = response.body?.getReader()
         if (!reader) {
-          editor.commands.setContent(`<h1>${finalTitle}</h1><p>Failed to read outline stream.</p>`)
+          editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Failed to read outline stream.</p>`))
           setIsSimulatingAI(false)
           return
         }
@@ -1588,7 +1933,7 @@ export default function Editor() {
         const decoder = new TextDecoder()
         let accumulatedText = ''
         
-        editor.commands.setContent(`<h1>${finalTitle}</h1><p>Generating project blueprint... Please wait.</p>`)
+        editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Generating project blueprint... Please wait.</p>`))
 
         while (true) {
           const { value, done } = await reader.read()
@@ -1605,7 +1950,7 @@ export default function Editor() {
                 if (data.text) {
                   accumulatedText += data.text
                   const formatted = formatAiResponseToHtml(accumulatedText)
-                  editor.commands.setContent(formatted)
+                  editor.commands.setContent(ensurePaginatedHtml(formatted))
                 }
               } catch (e) {}
             }
@@ -1618,7 +1963,7 @@ export default function Editor() {
         setIsSimulatingAI(false)
       }
     } else {
-      editor.commands.setContent(`<h1>${finalTitle}</h1><p>Start writing your thesis here...</p>`)
+      editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Start writing your thesis here...</p>`))
       setIsSaved(false)
       setShowWizard(false)
     }
@@ -2068,30 +2413,23 @@ export default function Editor() {
           {/* Document Sheet Container */}
           <div 
             onClick={() => editor.commands.focus()}
-            className="w-full max-w-[816px] bg-[var(--paper-bg)] border border-[var(--paper-border)] shadow-[var(--paper-shadow)] rounded-lg p-16 md:p-20 min-h-[1056px] text-zinc-850 dark:text-zinc-100 cursor-text transition-all duration-300 paper-sheet relative"
+            style={{ 
+              width: `${794 * zoomScale}px`, 
+              height: `${totalPages * 1139 * zoomScale}px`,
+              overflow: 'hidden'
+            }}
+            className="cursor-text transition-all duration-300 select-none flex flex-col items-center justify-start relative print:w-full print:h-auto print:overflow-visible print:scale-100"
           >
-            {/* Visual Page Separators */}
-            {totalPages > 1 && Array.from({ length: totalPages - 1 }).map((_, index) => {
-              const pageNum = index + 1
-              const topOffset = pageNum * 1056
-              return (
-                <div 
-                  key={index}
-                  style={{ top: `${topOffset - 12}px` }}
-                  className="absolute left-0 right-0 h-6 bg-zinc-100 dark:bg-zinc-950 border-t border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-8 select-none z-10 pointer-events-none print:hidden shadow-xs"
-                >
-                  <span className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 tracking-wider">
-                    PAGE {pageNum}
-                  </span>
-                  <div className="flex-1 border-t border-dashed border-zinc-200 dark:border-zinc-800 mx-4"></div>
-                  <span className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 tracking-wider">
-                    PAGE {pageNum + 1}
-                  </span>
-                </div>
-              )
-            })}
-
-            <EditorContent editor={editor} />
+            <div 
+              style={{ 
+                width: '794px', 
+                transform: `scale(${zoomScale})`, 
+                transformOrigin: 'top center' 
+              }}
+              className="transition-transform duration-300 print:transform-none print:w-full"
+            >
+              <EditorContent editor={editor} />
+            </div>
           </div>
         </div>
       </div>
@@ -2765,7 +3103,7 @@ export default function Editor() {
                   onClick={() => {
                     setShowWizard(false)
                     if (!editor.getText().trim()) {
-                      editor.commands.setContent(DEFAULT_CONTENT)
+                      editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
                     }
                   }}
                   className="px-4 py-2 text-zinc-500 hover:text-zinc-750 dark:text-zinc-400 dark:hover:text-zinc-200 text-xs font-semibold cursor-pointer"

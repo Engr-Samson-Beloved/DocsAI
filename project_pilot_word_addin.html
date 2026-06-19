@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Pilot AI Copilot</title>
+  <!-- Load Office.js API -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+  
+  <style>
+    :root {
+      --bg-primary: #09090b; /* Zinc 950 */
+      --bg-secondary: #18181b; /* Zinc 900 */
+      --border-color: #27272a; /* Zinc 800 */
+      --text-main: #f4f4f5; /* Zinc 100 */
+      --text-muted: #a1a1aa; /* Zinc 400 */
+      --indigo-color: #6366f1; /* Indigo 500 */
+      --indigo-hover: #4f46e5;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg-primary);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      height: 100vh;
+      display: flex;
+      flex-direction: flex-col;
+      overflow: hidden;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      box-sizing: border-box;
+    }
+
+    header {
+      background: var(--bg-secondary);
+      padding: 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .app-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .app-title span {
+      background: linear-gradient(135deg, #a5b4fc, var(--indigo-color));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .badge {
+      font-size: 9px;
+      background: rgba(99, 102, 241, 0.2);
+      color: #c7d2fe;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 12px;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 13px;
+    }
+
+    .message.user {
+      background: var(--indigo-color);
+      color: white;
+      align-self: flex-end;
+      border-bottom-right-radius: 2px;
+    }
+
+    .message.ai {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      align-self: flex-start;
+      border-bottom-left-radius: 2px;
+    }
+
+    .message.system {
+      background: rgba(39, 39, 42, 0.5);
+      border: 1px dashed var(--border-color);
+      color: var(--text-muted);
+      max-width: 95%;
+      align-self: center;
+      text-align: center;
+      font-size: 11px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+
+    .action-btn {
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      color: #e4e4e7;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: #3f3f46;
+      color: white;
+    }
+
+    .action-btn.primary {
+      background: var(--indigo-color);
+      border-color: var(--indigo-color);
+      color: white;
+    }
+
+    .action-btn.primary:hover {
+      background: var(--indigo-hover);
+    }
+
+    .input-area {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-color);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    textarea {
+      flex: 1;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 8px;
+      resize: none;
+      height: 36px;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    textarea:focus {
+      border-color: var(--indigo-color);
+    }
+
+    .send-btn {
+      background: var(--indigo-color);
+      border: none;
+      color: white;
+      padding: 0 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .send-btn:hover {
+      background: var(--indigo-hover);
+    }
+
+    .status-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="app-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: #6366f1;">
+          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+        </svg>
+        <span>Project Pilot Copilot</span>
+      </div>
+      <div class="badge">WORD ADD-IN</div>
+    </header>
+
+    <div class="chat-area" id="chatArea">
+      <div class="message system">
+        Welcome to the Project Pilot Add-in! Highlight any section of your MS Word document for AI suggestions, or chat directly to generate academic content.
+      </div>
+      <div class="message ai" id="welcomeMsg">
+        Hello! I can help you draft sections, write introductions, summarize chapters, or rewrite highlighted paragraphs. Select text in Word and ask me a command!
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="userInput" placeholder="Ask AI Copilot to write or edit..."></textarea>
+        <button class="send-btn" id="sendBtn">Ask</button>
+      </div>
+      <div class="status-text" id="statusMessage">Office.js loading...</div>
+    </div>
+  </div>
+
+  <script>
+    // Initialize variables
+    const chatArea = document.getElementById('chatArea');
+    const userInput = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusMessage = document.getElementById('statusMessage');
+
+    let officeInitialized = false;
+
+    // Office initialization
+    Office.onReady((info) => {
+      if (info.host === Office.HostType.Word) {
+        officeInitialized = true;
+        statusMessage.textContent = "Connected to MS Word";
+      } else {
+        statusMessage.textContent = "Running in Browser Sandbox";
+      }
+    });
+
+    // Send AI trigger helper
+    sendBtn.addEventListener('click', async () => {
+      const text = userInput.value.trim();
+      if (!text) return;
+
+      appendMessage(text, 'user');
+      userInput.value = '';
+
+      // Check if there is selection context from Word
+      let selectionContext = '';
+      if (officeInitialized) {
+        statusMessage.textContent = "Reading selection...";
+        selectionContext = await getSelectedText();
+      }
+
+      appendSystemMessage("AI is thinking...");
+      
+      // Simulate Gemini stream call or query direct mock setup
+      setTimeout(() => {
+        removeSystemMessages();
+        
+        let reply = "";
+        if (selectionContext) {
+          reply = `Here is a refined version of your selected text ("${selectionContext.slice(0, 30)}..."): \n\n"The research framework emphasizes a serverless browser model to address data privacy concerns in student portfolios."`;
+        } else {
+          reply = `Sure! Here is a structured thesis outline setup:\n\n1. Introduction: Scope of Zero-Server architectures.\n2. Literature Review: Privacy regulations.\n3. Methodology: Browser performance benchmarking.`;
+        }
+
+        appendAiMessage(reply, selectionContext);
+        statusMessage.textContent = "Ready";
+      }, 1000);
+    });
+
+    // Helper functions to write to Chat UI
+    function appendMessage(text, type) {
+      const msg = document.createElement('div');
+      msg.className = 'message ' + type;
+      msg.innerText = text;
+      chatArea.appendChild(msg);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function appendSystemMessage(text) {
+      const msg = document.createElement('div');
+      msg.className = 'message system temp-sys';
+      msg.innerText = text;
+      chatArea.appendChild(msg);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function removeSystemMessages() {
+      const elements = document.querySelectorAll('.temp-sys');
+      elements.forEach(e => e.remove());
+    }
+
+    function appendAiMessage(text, originalText) {
+      const container = document.createElement('div');
+      container.className = 'message ai';
+      
+      const content = document.createElement('div');
+      content.innerText = text;
+      container.appendChild(content);
+
+      // Actions panel
+      const actions = document.createElement('div');
+      actions.className = 'action-row';
+
+      const insertBtn = document.createElement('button');
+      insertBtn.className = 'action-btn primary';
+      insertBtn.innerText = 'Insert after cursor';
+      insertBtn.onclick = () => insertTextAtCursor(text);
+      actions.appendChild(insertBtn);
+
+      if (originalText) {
+        const replaceBtn = document.createElement('button');
+        replaceBtn.className = 'action-btn';
+        replaceBtn.innerText = 'Replace Selection';
+        replaceBtn.onclick = () => replaceSelectedText(text);
+        actions.appendChild(replaceBtn);
+      }
+
+      container.appendChild(actions);
+      chatArea.appendChild(container);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    // Office.js Document Interactions
+    async function getSelectedText() {
+      return new Promise((resolve) => {
+        Word.run(async (context) => {
+          const selection = context.document.getSelection();
+          selection.load("text");
+          await context.sync();
+          resolve(selection.text.trim());
+        }).catch(() => {
+          resolve('');
+        });
+      });
+    }
+
+    function insertTextAtCursor(text) {
+      if (!officeInitialized) {
+        alert("Not connected to MS Word. Simulated text: " + text);
+        return;
+      }
+
+      Word.run(async (context) => {
+        const selection = context.document.getSelection();
+        selection.insertText(text + "\n", Word.InsertLocation.after);
+        await context.sync();
+        statusMessage.textContent = "Text inserted successfully";
+      }).catch(err => {
+        statusMessage.textContent = "Insert failed: " + err.message;
+      });
+    }
+
+    function replaceSelectedText(text) {
+      if (!officeInitialized) {
+        alert("Not connected to MS Word. Simulated replace: " + text);
+        return;
+      }
+
+      Word.run(async (context) => {
+        const selection = context.document.getSelection();
+        selection.insertText(text, Word.InsertLocation.replace);
+        await context.sync();
+        statusMessage.textContent = "Selection replaced successfully";
+      }).catch(err => {
+        statusMessage.textContent = "Replacement failed: " + err.message;
+      });
+    }
+  </script>
+</body>
+</html>

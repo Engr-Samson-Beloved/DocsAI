@@ -192,4 +192,21 @@ body {
     font-size: 0 !important;
     line-height: 0 !important;
   }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .page-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
 }
