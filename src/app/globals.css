@@ -40,6 +40,24 @@ body {
   font-size: 16px;
   line-height: inherit;
   color: inherit;
+  
+  /* Visual automatic page break guidelines */
+  background-image: linear-gradient(
+    to bottom,
+    transparent 1055px,
+    #e2e8f0 1055px,
+    #e2e8f0 1056px
+  );
+  background-size: 100% 1056px;
+}
+
+.dark .tiptap {
+  background-image: linear-gradient(
+    to bottom,
+    transparent 1055px,
+    #27272a 1055px,
+    #27272a 1056px
+  );
 }
 
 .tiptap p {
@@ -152,6 +170,28 @@ body {
 
 .font-playfair {
   font-family: "Times New Roman", Times, serif !important;
+}
+
+/* Page break styles for screen rendering */
+.tiptap .page-break {
+  border-top: 2px dashed #818cf8;
+  margin: 3rem 0;
+  padding-top: 0.5rem;
+  text-align: center;
+  font-size: 10px;
+  color: #818cf8;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: bold;
+  user-select: none;
+  position: relative;
+  page-break-after: always;
+  break-after: page;
+}
+
+.dark .tiptap .page-break {
+  border-top-color: #6366f1;
+  color: #6366f1;
 }
 
 /* Printing styles to hide the visual page-break divider in final compile */
