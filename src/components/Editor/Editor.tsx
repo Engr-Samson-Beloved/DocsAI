@@ -1183,8 +1183,8 @@ export default function Editor() {
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
     if (editor && editor.storage && (editor.storage as any).page) {
-      (editor.storage as any).page.docHeader = docHeader
-      (editor.storage as any).page.docFooter = docFooter
+      (editor.storage as any).page.docHeader = docHeader;
+      (editor.storage as any).page.docFooter = docFooter;
       
       // Trigger a dummy ProseMirror transaction to force all page node views to update labels
       const { state, view } = editor
