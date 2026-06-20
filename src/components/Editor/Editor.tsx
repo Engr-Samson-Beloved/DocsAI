@@ -487,7 +487,7 @@ class PageNodeView {
 
     // Outer sheet box representing A4
     this.dom = document.createElement('div')
-    this.dom.className = 'page-sheet relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1)] mx-auto my-4 w-[794px] h-[1123px] select-none text-zinc-850 dark:text-zinc-100 overflow-hidden box-border print:shadow-none print:border-none print:m-0'
+    this.dom.className = 'page-sheet group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1)] mx-auto my-4 w-[794px] h-[1123px] select-none text-zinc-850 dark:text-zinc-100 overflow-hidden box-border print:shadow-none print:border-none print:m-0'
 
     // Header container
     const headerEl = document.createElement('div')
@@ -508,9 +508,53 @@ class PageNodeView {
     footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-100 dark:border-zinc-800 pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     footerEl.innerHTML = `
       <span class="footer-text truncate max-w-[450px]"></span>
-      <span class="page-number"></span>
+      <div class="flex items-center gap-3">
+        <button class="delete-page-btn pointer-events-auto cursor-pointer opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 flex items-center gap-1 text-[10px] font-bold transition-all duration-150 print:hidden" title="Delete this page and all its contents">
+          Delete Page
+        </button>
+        <span class="page-number"></span>
+      </div>
     `
     this.dom.appendChild(footerEl)
+
+    const deleteBtn = footerEl.querySelector('.delete-page-btn')
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (event) => {
+        event.stopPropagation()
+        event.preventDefault()
+
+        const pos = typeof this.getPos === 'function' ? this.getPos() : undefined
+        if (pos !== undefined) {
+          // Count total pages in Prosemirror doc state
+          let totalPageCount = 0
+          this.editor.state.doc.descendants((n: any) => {
+            if (n.type.name === 'page') {
+              totalPageCount++
+            }
+            return false // Top level only
+          })
+
+          if (totalPageCount <= 1) {
+            alert('Cannot delete the last remaining page.')
+            return
+          }
+
+          const indexAttr = this.dom.getAttribute('data-page-index')
+          const displayIndex = indexAttr !== null ? parseInt(indexAttr) + 1 : 1
+
+          if (window.confirm(`Are you sure you want to delete Page ${displayIndex} and all of its content?`)) {
+            const pageNode = this.editor.state.doc.nodeAt(pos)
+            if (pageNode) {
+              const size = pageNode.nodeSize
+              
+              // Perform deletion
+              this.editor.view.focus()
+              this.editor.chain().deleteRange({ from: pos, to: pos + size }).run()
+            }
+          }
+        }
+      })
+    }
 
     this.updateLabels()
   }
