@@ -835,6 +835,8 @@ export default function Editor() {
     if (!editorInstance || !editorInstance.view || isPaginatingRef.current) return
     isPaginatingRef.current = true
 
+    const scale = zoomScale || 1
+
     try {
       const { doc } = editorInstance.state
       let tr = editorInstance.state.tr
@@ -874,7 +876,7 @@ export default function Editor() {
               const style = window.getComputedStyle(firstChildDom)
               const marginTop = parseFloat(style.marginTop) || 0
               const marginBottom = parseFloat(style.marginBottom) || 0
-              const childHeight = rect.height + marginTop + marginBottom
+              const childHeight = (rect.height / scale) + marginTop + marginBottom
 
               // Pull child backwards only if it fits without overflowing Page i
               if (childHeight <= remainingSpace) {
@@ -927,7 +929,7 @@ export default function Editor() {
             const style = window.getComputedStyle(child)
             const marginTop = parseFloat(style.marginTop) || 0
             const marginBottom = parseFloat(style.marginBottom) || 0
-            const childHeight = rect.height + marginTop + marginBottom
+            const childHeight = (rect.height > 0 ? (rect.height / scale) : 20) + marginTop + marginBottom
 
             accumulatedHeight += childHeight
 
@@ -952,7 +954,10 @@ export default function Editor() {
             try {
               const absolutePos = editorInstance.view.posAtDOM(childDom, 0)
               if (absolutePos !== undefined) {
-                const freshTr = editorInstance.state.tr.split(absolutePos, 1)
+                const $pos = editorInstance.state.doc.resolve(absolutePos)
+                const depth = Math.min($pos.depth, 2)
+                const posBeforeBlock = $pos.before(depth)
+                const freshTr = editorInstance.state.tr.split(posBeforeBlock, 1)
                 editorInstance.view.dispatch(freshTr.setMeta('paginating', true))
                 
                 // Exit and schedule the next split on the next tick
@@ -1093,6 +1098,11 @@ export default function Editor() {
       },
     },
     onUpdate: ({ editor, transaction }) => {
+      // Skip all processing and re-renders if this is a pagination-induced transaction
+      if (transaction && transaction.getMeta('paginating')) {
+        return
+      }
+
       setIsSaved(false)
       
       // Hide floating popup only if we moved to a different block
@@ -1124,11 +1134,6 @@ export default function Editor() {
         updateOutline()
         handleScroll()
       }, 50)
-
-      // Skip running pagination if this is a pagination-induced transaction
-      if (transaction && transaction.getMeta('paginating')) {
-        return
-      }
 
       // Schedule pagination
       triggerPagination(editor)
