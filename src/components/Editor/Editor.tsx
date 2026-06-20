@@ -845,7 +845,7 @@ export default function Editor() {
       if (pageContentElements.length === 0) return
 
       const joinPositions: number[] = []
-      doc.forEach((node, offset) => {
+      doc.forEach((node: any, offset: number) => {
         if (offset > 0 && node.type.name === 'page') {
           joinPositions.push(offset)
         }
