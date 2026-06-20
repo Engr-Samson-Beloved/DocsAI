@@ -1838,7 +1838,7 @@ export default function Editor() {
       } else if (extension === 'pdf') {
         // Renders PDF text content extracted from pdfjs-dist
         const pdfjs = await import('pdfjs-dist')
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
         
         const arrayBuffer = await file.arrayBuffer()
         const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
@@ -2176,7 +2176,7 @@ export default function Editor() {
       }
     } else if (extension === 'pdf') {
       const pdfjs = await import('pdfjs-dist')
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
       
       const arrayBuffer = await file.arrayBuffer()
       const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
