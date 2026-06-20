@@ -525,28 +525,38 @@ class PageNodeView {
   updateLabels() {
     let pageIndex = 0
     let totalPages = 1
-    if (this.editor && typeof this.getPos === 'function') {
+
+    if (this.dom.parentNode) {
+      const sheets = Array.from(this.dom.parentNode.children).filter(el => el.classList.contains('page-sheet'))
+      const idx = sheets.indexOf(this.dom)
+      if (idx !== -1) {
+        pageIndex = idx
+        totalPages = sheets.length
+      }
+    } else if (this.editor && typeof this.getPos === 'function') {
       try {
         const pos = this.getPos()
-        this.editor.state.doc.descendants((n: any, p: number) => {
-          if (n.type.name === 'page') {
-            if (p < pos) {
-              pageIndex++
+        if (pos !== undefined) {
+          this.editor.state.doc.descendants((n: any, p: number) => {
+            if (n.type.name === 'page') {
+              if (p < pos) {
+                pageIndex++
+              }
             }
-          }
-          return true
-        })
-        
-        let count = 0
-        this.editor.state.doc.descendants((n: any) => {
-          if (n.type.name === 'page') {
-            count++
-          }
-          return true
-        })
-        totalPages = count || 1
+            return true
+          })
+          
+          let count = 0
+          this.editor.state.doc.descendants((n: any) => {
+            if (n.type.name === 'page') {
+              count++
+            }
+            return true
+          })
+          totalPages = count || 1
+        }
       } catch (e) {
-        console.error("Error calculating page indexing:", e)
+        // Fallback default
       }
     }
 
@@ -632,6 +642,10 @@ export default function Editor() {
   const [popupBlockStart, setPopupBlockStart] = useState<number | null>(null)
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const popupRef = useRef<HTMLDivElement | null>(null)
+  const [showLayoutSettings, setShowLayoutSettings] = useState(false)
+  const layoutSettingsRef = useRef<HTMLDivElement | null>(null)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
   // Document Outline Left Sidebar States
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
@@ -748,8 +762,12 @@ export default function Editor() {
       }
     })
 
-    setCurrentPage(activePage)
-    setTotalPages(pageSheets.length)
+    if (activePage !== currentPage) {
+      setCurrentPage(activePage)
+    }
+    if (pageSheets.length !== totalPages) {
+      setTotalPages(pageSheets.length)
+    }
 
     // Calculate which heading is active (visible on screen)
     const headingElements = container.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
@@ -766,7 +784,9 @@ export default function Editor() {
       }
     })
 
-    setActiveHeadingIndex(currentActiveIdx)
+    if (currentActiveIdx !== activeHeadingIndex) {
+      setActiveHeadingIndex(currentActiveIdx)
+    }
   }
 
   const scrollToHeading = (index: number) => {
@@ -820,7 +840,10 @@ export default function Editor() {
       let tr = editorInstance.state.tr
       let hasChanged = false
 
-      // Step 1: Join adjacent page nodes to flow content backwards
+      // Step 1: Flow content backwards if a page is underflowing and can receive the next page's first child
+      const pageContentElements = document.querySelectorAll('.page-content')
+      if (pageContentElements.length === 0) return
+
       const joinPositions: number[] = []
       doc.forEach((node, offset) => {
         if (offset > 0 && node.type.name === 'page') {
@@ -828,14 +851,49 @@ export default function Editor() {
         }
       })
 
-      for (let i = joinPositions.length - 1; i >= 0; i--) {
-        const pos = joinPositions[i]
-        const $pos = tr.doc.resolve(pos)
-        if ($pos.nodeBefore && $pos.nodeAfter && 
-            $pos.nodeBefore.type.name === 'page' && 
-            $pos.nodeAfter.type.name === 'page') {
-          tr = tr.join(pos)
-          hasChanged = true
+      for (let i = 0; i < joinPositions.length; i++) {
+        const pageEl = pageContentElements[i] as HTMLElement
+        if (!pageEl) continue
+
+        const pageHeight = pageEl.scrollHeight
+        const clientHeight = 931
+        const remainingSpace = clientHeight - pageHeight
+
+        // If there is substantial empty space at the bottom of the page
+        if (remainingSpace > 20) {
+          const pos = joinPositions[i]
+          const $pos = tr.doc.resolve(pos)
+          const nextPageNode = $pos.nodeAfter
+
+          if (nextPageNode && nextPageNode.childCount > 0) {
+            const nextPageEl = pageContentElements[i + 1] as HTMLElement
+            const firstChildDom = nextPageEl?.firstElementChild as HTMLElement
+            if (firstChildDom) {
+              // Measure first child height including margins
+              const rect = firstChildDom.getBoundingClientRect()
+              const style = window.getComputedStyle(firstChildDom)
+              const marginTop = parseFloat(style.marginTop) || 0
+              const marginBottom = parseFloat(style.marginBottom) || 0
+              const childHeight = rect.height + marginTop + marginBottom
+
+              // Pull child backwards only if it fits without overflowing Page i
+              if (childHeight <= remainingSpace) {
+                if (nextPageNode.childCount === 1) {
+                  // Join pages completely if it was the last node
+                  tr = tr.join(pos)
+                } else {
+                  // Shift the first block to Page i by joining and splitting after it
+                  const firstChildNode = nextPageNode.firstChild
+                  if (firstChildNode) {
+                    const size = firstChildNode.nodeSize
+                    tr = tr.join(pos).split(pos - 1 + size, 1)
+                  }
+                }
+                hasChanged = true
+                break // Stop and let DOM render before doing next passes
+              }
+            }
+          }
         }
       }
 
@@ -851,10 +909,7 @@ export default function Editor() {
         return
       }
 
-      // Step 2: Measure element heights within `.page-content` containers
-      const pageContentElements = document.querySelectorAll('.page-content')
-      if (pageContentElements.length === 0) return
-
+      // Step 2: Measure element heights and split overflowing pages
       for (let pageIdx = 0; pageIdx < pageContentElements.length; pageIdx++) {
         const pageEl = pageContentElements[pageIdx] as HTMLElement
         if (!pageEl) continue
@@ -977,7 +1032,7 @@ export default function Editor() {
 
 
 
-  // Click outside handler for floating AI popup
+  // Click outside handler for floating AI popup, layout settings, & export dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showFloatingPopup && popupRef.current && !popupRef.current.contains(event.target as Node)) {
@@ -989,13 +1044,19 @@ export default function Editor() {
           setAiSelectionRange(null)
         }
       }
+      if (showLayoutSettings && layoutSettingsRef.current && !layoutSettingsRef.current.contains(event.target as Node)) {
+        setShowLayoutSettings(false)
+      }
+      if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFloatingPopup])
+  }, [showFloatingPopup, showLayoutSettings, showExportMenu])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -1006,11 +1067,13 @@ export default function Editor() {
 
   // Tiptap Editor configuration
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       CustomDocument,
       PageNode,
       StarterKit.configure({
         document: false,
+        underline: false,
       }),
       TextStyle,
       FontFamily,
@@ -1273,8 +1336,120 @@ export default function Editor() {
     const originalScale = zoomScale
     setZoomScale(1)
 
+    // Helper to temporarily sanitize style rules using oklch, lab, lch color functions to prevent html2canvas crashes
+    const sanitizeStylesheets = () => {
+      const cleanCssText = (text: string): string => {
+        const functions = ['oklch(', 'lab(', 'oklab(', 'lch(']
+        let result = text
+        
+        for (const fn of functions) {
+          let index = result.indexOf(fn)
+          while (index !== -1) {
+            let parenCount = 1
+            let j = index + fn.length
+            while (j < result.length && parenCount > 0) {
+              if (result[j] === '(') parenCount++
+              else if (result[j] === ')') parenCount--
+              j++
+            }
+            
+            if (parenCount === 0) {
+              result = result.substring(0, index) + 'transparent' + result.substring(j)
+            } else {
+              result = result.substring(0, index) + 'transparent' + result.substring(index + fn.length)
+            }
+            index = result.indexOf(fn)
+          }
+        }
+        return result
+      }
+
+      const getSheetCssText = (sheet: CSSStyleSheet): string => {
+        let cssText = ''
+        try {
+          if (sheet.cssRules) {
+            for (let i = 0; i < sheet.cssRules.length; i++) {
+              cssText += sheet.cssRules[i].cssText + '\n'
+            }
+          }
+        } catch (e) {}
+        return cssText
+      }
+
+      const tempStyleElements: HTMLStyleElement[] = []
+      const disabledSheets: { sheet: CSSStyleSheet; disabled: boolean }[] = []
+      const modifiedInlineStyles: { el: Element; style: string }[] = []
+
+      // 1. Process all stylesheets
+      for (let i = 0; i < document.styleSheets.length; i++) {
+        const sheet = document.styleSheets[i] as CSSStyleSheet
+        try {
+          const cssText = getSheetCssText(sheet)
+          if (cssText) {
+            const cleaned = cleanCssText(cssText)
+            
+            // Create a temporary style tag with the sanitized styles
+            const tempStyle = document.createElement('style')
+            tempStyle.setAttribute('data-pdf-temp', 'true')
+            tempStyle.textContent = cleaned
+            document.head.appendChild(tempStyle)
+            tempStyleElements.push(tempStyle)
+          }
+          
+          // Disable the original sheet
+          const originalDisabled = sheet.disabled
+          sheet.disabled = true
+          disabledSheets.push({ sheet, disabled: originalDisabled })
+        } catch (e) {
+          // Cross-origin, just disable
+          try {
+            const originalDisabled = sheet.disabled
+            sheet.disabled = true
+            disabledSheets.push({ sheet, disabled: originalDisabled })
+          } catch (err) {}
+        }
+      }
+
+      // 2. Process all elements with inline styles
+      const styledElements = Array.from(document.querySelectorAll('[style]'))
+      for (const el of styledElements) {
+        const style = el.getAttribute('style')
+        if (style) {
+          const cleaned = cleanCssText(style)
+          if (cleaned !== style) {
+            modifiedInlineStyles.push({ el, style })
+            el.setAttribute('style', cleaned)
+          }
+        }
+      }
+
+      return () => {
+        // Remove temporary style tags
+        for (const el of tempStyleElements) {
+          try {
+            el.remove()
+          } catch (e) {}
+        }
+        
+        // Restore original stylesheets
+        for (const item of disabledSheets) {
+          try {
+            item.sheet.disabled = item.disabled
+          } catch (e) {}
+        }
+
+        // Restore inline styles
+        for (const item of modifiedInlineStyles) {
+          try {
+            item.el.setAttribute('style', item.style)
+          } catch (e) {}
+        }
+      }
+    }
+
     // Wait a brief tick for layout repaint
     setTimeout(async () => {
+      const restoreStyles = sanitizeStylesheets()
       try {
         const html2pdf = (await import('html2pdf.js')).default
         const element = document.querySelector('.tiptap') as HTMLElement
@@ -1306,6 +1481,7 @@ export default function Editor() {
         console.error('PDF export error:', err)
         alert(`Failed to export PDF: ${err.message || err}`)
       } finally {
+        restoreStyles()
         // Restore screen scale
         setZoomScale(originalScale)
         setIsExporting(false)
@@ -2340,47 +2516,67 @@ export default function Editor() {
           </label>
 
           {/* Export Actions */}
-          <div className="relative group">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors">
+          <div className="relative" ref={exportMenuRef}>
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+            >
               <Download className="w-3.5 h-3.5" />
               <span>Export</span>
             </button>
-            <div className="absolute right-0 mt-1.5 w-40 hidden group-hover:block bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50">
-              <button 
-                onClick={() => exportDoc('html')}
-                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              >
-                Web Page (.html)
-              </button>
-              <button 
-                onClick={() => exportDoc('txt')}
-                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              >
-                Plain Text (.txt)
-              </button>
-              <div className="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
-              <div className="px-4 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                Phase 3 Exports
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1.5 w-40 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+                <button 
+                  onClick={() => {
+                    exportDoc('html')
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  Web Page (.html)
+                </button>
+                <button 
+                  onClick={() => {
+                    exportDoc('txt')
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  Plain Text (.txt)
+                </button>
+                <div className="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
+                <div className="px-4 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                  Phase 3 Exports
+                </div>
+                <button 
+                  onClick={() => {
+                    exportToDocx()
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  Word (.docx)
+                </button>
+                <button 
+                  onClick={() => {
+                    exportToPdf()
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  PDF Document (.pdf)
+                </button>
+                <button 
+                  onClick={() => {
+                    exportToPptx()
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  Powerpoint (.pptx)
+                </button>
               </div>
-              <button 
-                onClick={exportToDocx}
-                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              >
-                Word (.docx)
-              </button>
-              <button 
-                onClick={exportToPdf}
-                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              >
-                PDF Document (.pdf)
-              </button>
-              <button 
-                onClick={exportToPptx}
-                className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              >
-                Powerpoint (.pptx)
-              </button>
-            </div>
+            )}
           </div>
 
           <button
@@ -2664,6 +2860,57 @@ export default function Editor() {
               >
                 <RedoIcon className="w-4 h-4" />
               </button>
+
+              <div className="w-[1px] h-6 bg-zinc-200 dark:bg-zinc-700 mx-1.5"></div>
+
+              {/* Document Headers & Footers Popover */}
+              <div className="relative" ref={layoutSettingsRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowLayoutSettings(!showLayoutSettings)}
+                  className={`p-1.5 rounded transition-colors ${
+                    showLayoutSettings
+                      ? 'bg-indigo-100 text-indigo-750 dark:bg-indigo-950 dark:text-indigo-300'
+                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-700 dark:text-zinc-300'
+                  } flex items-center gap-1 cursor-pointer`}
+                  title="Document Headers & Footers Settings"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span className="text-[11px] font-semibold hidden md:inline">Header/Footer</span>
+                </button>
+
+                {showLayoutSettings && (
+                  <div className="absolute right-0 mt-1.5 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 shadow-xl z-50 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">
+                      Header & Footer Options
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-zinc-550 dark:text-zinc-450 block">
+                        Page Header Text (Right)
+                      </label>
+                      <input
+                        type="text"
+                        value={docHeader}
+                        onChange={(e) => setDocHeader(e.target.value)}
+                        placeholder="e.g. Chapter 1: Literature"
+                        className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 font-medium transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-zinc-550 dark:text-zinc-455 block">
+                        Page Footer Prefix
+                      </label>
+                      <input
+                        type="text"
+                        value={docFooter}
+                        onChange={(e) => setDocFooter(e.target.value)}
+                        placeholder="e.g. Confidential Draft"
+                        className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 font-medium transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -2674,39 +2921,6 @@ export default function Editor() {
           className="flex-1 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center"
         >
 
-          {/* Document Settings & Layout Panel */}
-          <div className="w-full max-w-[816px] mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 shadow-md space-y-3">
-            <h3 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
-              Document Headers & Layout Options (Word & PDF)
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-450 block mb-1">
-                  Page Header Text (Right Aligned)
-                </label>
-                <input
-                  type="text"
-                  value={docHeader}
-                  onChange={(e) => setDocHeader(e.target.value)}
-                  placeholder="e.g. Chapter 1: Literature Review"
-                  className="w-full text-xs px-3 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 transition-all"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-450 block mb-1">
-                  Page Footer Prefix
-                </label>
-                <input
-                  type="text"
-                  value={docFooter}
-                  onChange={(e) => setDocFooter(e.target.value)}
-                  placeholder="e.g. Confidential Research Draft"
-                  className="w-full text-xs px-3 py-1.5 border border-zinc-200 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-700 dark:text-zinc-300 transition-all"
-                />
-              </div>
-            </div>
-          </div>
-
           {/* Document Sheet Container */}
           <div 
             onClick={() => editor.commands.focus()}
@@ -2715,7 +2929,7 @@ export default function Editor() {
               height: `${totalPages * 1139 * zoomScale}px`,
               overflow: 'hidden'
             }}
-            className="cursor-text transition-all duration-300 select-none flex flex-col items-center justify-start relative print:w-full print:h-auto print:overflow-visible print:scale-100"
+            className="cursor-text transition-all duration-300 flex flex-col items-center justify-start relative print:w-full print:h-auto print:overflow-visible print:scale-100"
           >
             <div 
               style={{ 
