@@ -1489,6 +1489,16 @@ export default function Editor() {
     }, 150)
   }
 
+  // Clear the document completely, leaving it with a blank document (one blank page)
+  const clearDocument = () => {
+    if (!editor) return
+    if (window.confirm('Are you sure you want to clear the entire document? This will wipe out all content and pages.')) {
+      editor.commands.setContent('<div data-type="page"><p></p></div>')
+      setDocumentTitle('Untitled Document')
+      setIsSaved(false)
+    }
+  }
+
   // Export to Word Document (.docx) using docx.js (dynamic load)
   const exportToDocx = async () => {
     setLoadingMessage('Compiling Word Document...')
@@ -2490,6 +2500,16 @@ export default function Editor() {
               <Sparkles className="w-3.5 h-3.5" />
               <span>New Project</span>
             </button>
+            
+            <button
+              onClick={clearDocument}
+              className="flex items-center gap-1.5 px-3 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Clear all pages and content to start blank"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Document</span>
+            </button>
+            
             <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
               <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-zinc-300'}`} />
               <span>{isSaved ? 'Draft saved locally' : 'Saving...'}</span>
