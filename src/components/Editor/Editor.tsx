@@ -893,8 +893,9 @@ export default function Editor() {
             try {
               const absolutePos = editorInstance.view.posAtDOM(childDom, 0)
               if (absolutePos !== undefined) {
-                tr = tr.split(absolutePos, 1)
-                editorInstance.view.dispatch(tr.setMeta('paginating', true))
+                const freshTr = editorInstance.state.tr.split(absolutePos, 1)
+                editorInstance.view.dispatch(freshTr.setMeta('paginating', true))
+                tr = editorInstance.state.tr // Reset tr to match the new state
                 splitOccurred = true
                 pageContentElements = document.querySelectorAll('.page-content')
               }
