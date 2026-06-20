@@ -844,7 +844,10 @@ export default function Editor() {
 
       // Step 1: Flow content backwards if a page is underflowing and can receive the next page's first child
       const pageContentElements = document.querySelectorAll('.page-content')
-      if (pageContentElements.length === 0) return
+      if (pageContentElements.length === 0) {
+        isPaginatingRef.current = false
+        return
+      }
 
       const joinPositions: number[] = []
       doc.forEach((node: any, offset: number) => {
@@ -906,8 +909,9 @@ export default function Editor() {
           clearTimeout(paginationTimeoutRef.current)
         }
         paginationTimeoutRef.current = setTimeout(() => {
+          isPaginatingRef.current = false // Release lock right before execution
           runPagination(editorInstance)
-        }, 40)
+        }, 150)
         return
       }
 
@@ -965,13 +969,14 @@ export default function Editor() {
                   clearTimeout(paginationTimeoutRef.current)
                 }
                 paginationTimeoutRef.current = setTimeout(() => {
+                  isPaginatingRef.current = false // Release lock right before execution
                   runPagination(editorInstance)
-                }, 40)
+                }, 150)
                 
                 setTimeout(() => {
                   updateOutline()
                   handleScroll()
-                }, 50)
+                }, 150)
                 
                 return // Exit now to let browser recalculate DOM layout
               }
@@ -981,9 +986,11 @@ export default function Editor() {
           }
         }
       }
+
+      // No more splits or joins needed, pagination is complete and stable
+      isPaginatingRef.current = false
     } catch (err) {
       console.error("Pagination processor error:", err)
-    } finally {
       isPaginatingRef.current = false
     }
   }
