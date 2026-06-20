@@ -785,26 +785,14 @@ export default function Editor() {
     const pageSheets = container.querySelectorAll('.page-sheet')
     if (pageSheets.length === 0) return
 
-    const containerRect = container.getBoundingClientRect()
-    const containerMid = containerRect.top + containerRect.height / 2
+    // Calculate active page mathematically to avoid forced synchronous layout thrashing
+    const scrollTop = container.scrollTop
+    const containerHeight = container.clientHeight
+    const pageHeightWithGap = 1139 * zoomScale
+    const midScroll = scrollTop + containerHeight / 2
 
-    let activePage = 1
-    let minDistance = Infinity
-
-    pageSheets.forEach((sheet) => {
-      const htmlSheet = sheet as HTMLElement
-      const rect = htmlSheet.getBoundingClientRect()
-      const sheetMid = rect.top + rect.height / 2
-      const distance = Math.abs(containerMid - sheetMid)
-
-      if (distance < minDistance) {
-        minDistance = distance
-        const indexAttr = htmlSheet.getAttribute('data-page-index')
-        if (indexAttr !== null) {
-          activePage = parseInt(indexAttr) + 1
-        }
-      }
-    })
+    let activePage = Math.floor(midScroll / pageHeightWithGap) + 1
+    activePage = Math.max(1, Math.min(pageSheets.length, activePage))
 
     if (activePage !== currentPage) {
       setCurrentPage(activePage)
@@ -813,23 +801,28 @@ export default function Editor() {
       setTotalPages(pageSheets.length)
     }
 
-    // Calculate which heading is active (visible on screen)
-    const headingElements = container.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
-    let currentActiveIdx: number | null = null
-    let minHeadingDiff = Infinity
+    // Calculate active outline heading ONLY if the outline sidebar is actually open
+    if (leftSidebarOpen) {
+      const headingElements = container.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
+      if (headingElements.length === 0) return
 
-    headingElements.forEach((el, index) => {
-      const htmlEl = el as HTMLElement
-      const rect = htmlEl.getBoundingClientRect()
-      const diff = Math.abs(rect.top - containerRect.top - 100)
-      if (rect.top <= containerRect.top + 200 && diff < minHeadingDiff) {
-        minHeadingDiff = diff
-        currentActiveIdx = index
+      const containerRect = container.getBoundingClientRect()
+      let currentActiveIdx: number | null = null
+      let minHeadingDiff = Infinity
+
+      headingElements.forEach((el, index) => {
+        const htmlEl = el as HTMLElement
+        const rect = htmlEl.getBoundingClientRect()
+        const diff = Math.abs(rect.top - containerRect.top - 100)
+        if (rect.top <= containerRect.top + 200 && diff < minHeadingDiff) {
+          minHeadingDiff = diff
+          currentActiveIdx = index
+        }
+      })
+
+      if (currentActiveIdx !== activeHeadingIndex) {
+        setActiveHeadingIndex(currentActiveIdx)
       }
-    })
-
-    if (currentActiveIdx !== activeHeadingIndex) {
-      setActiveHeadingIndex(currentActiveIdx)
     }
   }
 
@@ -847,23 +840,47 @@ export default function Editor() {
     }
   }
 
+  // Track latest handleScroll closure to avoid stale states in the event listener
+  const handleScrollRef = useRef(handleScroll)
+  useEffect(() => {
+    handleScrollRef.current = handleScroll
+  })
+
   // Listen to scroll events to update current page and active outline item
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
-    const listener = () => handleScroll()
+    let lastRun = 0
+    let timeoutId: any = null
+
+    const listener = () => {
+      const now = Date.now()
+      // Throttle to 100ms to eliminate scroll frame lag and UI stuttering
+      if (now - lastRun >= 100) {
+        handleScrollRef.current()
+        lastRun = now
+      } else {
+        if (timeoutId) clearTimeout(timeoutId)
+        timeoutId = setTimeout(() => {
+          handleScrollRef.current()
+          lastRun = Date.now()
+        }, 100)
+      }
+    }
+    
     container.addEventListener('scroll', listener)
     
     // Initial run
     setTimeout(() => {
-      handleScroll()
+      handleScrollRef.current()
     }, 200)
 
     return () => {
       container.removeEventListener('scroll', listener)
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [outline])
+  }, [editor])
 
   // Pagination Engine: Splits and joins pages dynamically based on client heights
   const triggerPagination = (editorInstance: any) => {
@@ -2994,7 +3011,11 @@ export default function Editor() {
         {/* Scrollable Canvas Body */}
         <div 
           ref={scrollContainerRef}
-          className="flex-1 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center"
+          className="flex-1 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center focus:outline-none"
+          style={{
+            scrollbarGutter: 'stable',
+            overscrollBehaviorY: 'contain'
+          }}
         >
 
           {/* Document Sheet Container */}
