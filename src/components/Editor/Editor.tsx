@@ -59,6 +59,137 @@ const DEFAULT_CONTENT = `
 <p>Feel free to select text, change typography styles, or try out the formatting toolbar at the top!</p>
 `
 
+const SEMINAR_TEMPLATE = `
+<h1>An Analysis of [Insert Seminar Topic Here]</h1>
+<div data-type="page">
+  <h2>Chapter 1.</h2>
+  <h3>1.1. Introduction</h3>
+  <p>Start writing your seminar introduction here...</p>
+  <h3>1.2. Problem Definition and Motivation</h3>
+  <p>Define the core problem and research motivation here...</p>
+  <h3>1.4. Advantages and Limitations</h3>
+  <p>Detail the key advantages and technical limitations of the proposed approach...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 2</h2>
+  <h3>Literature Review/Related work</h3>
+  <p>Perform a thorough literature survey here...</p>
+  <h3>2.1. Summary of exit works</h3>
+  <p>Summarize relevant existing/exit works and state-of-the-art literature...</p>
+  <h3>2.2. Overview of previous research</h3>
+  <p>Provide a comprehensive overview of historical research findings...</p>
+  <h3>Research Gaps</h3>
+  <p>Identify the key research gaps in existing systems...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 3</h2>
+  <h3>Methodology/Working Principle</h3>
+  <p>Describe the research design or experimental methodology here...</p>
+  <h3>3.1. Core Concepts: Theoretical Background</h3>
+  <p>Explain the theoretical background and fundamental concepts...</p>
+  <h3>3.2. Working Principle/Process Flow</h3>
+  <p>Provide a detailed description of the process flow or system architecture...</p>
+  <h3>3.3. Techniques/Tool Used</h3>
+  <p>Enumerate and describe the research techniques or engineering tools utilized...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 4</h2>
+  <h3>4.1. Summary of key takeaways and main findings</h3>
+  <p>Summarize the key takeaways and major experimental findings of the seminar...</p>
+  <h3>4.2. Future Scope</h3>
+  <p>Detail potential areas of future extension and development...</p>
+</div>
+<div data-type="page">
+  <h2>References</h2>
+  <p>[Insert your bibliography citations in the latest APA style here]</p>
+</div>
+`
+
+
+const PROPOSAL_TEMPLATE = `
+<h1>Research Proposal: [Insert Topic Here]</h1>
+<div data-type="page">
+  <h2>Chapter 1: Introduction</h2>
+  <h3>1.1. Background of the Study</h3>
+  <p>Provide the foundational background details of your research here...</p>
+  <h3>1.2. Problem Statement</h3>
+  <p>Surgically define the core problem statement being addressed...</p>
+  <h3>1.3. Aim and Objectives</h3>
+  <p>Detail the overall aim and list specific research objectives...</p>
+  <h3>1.4. Research Questions</h3>
+  <p>Formulate the primary research questions your study attempts to answer...</p>
+  <h3>1.5. Scope and Significance of the Study</h3>
+  <p>Define the boundary scope and discuss the clinical, scientific, or socioeconomic significance of this study...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 2: Literature Review</h2>
+  <h3>2.1. Theoretical Framework</h3>
+  <p>Examine current literature models and establish your theoretical framework...</p>
+  <h3>2.2. Empirical Review</h3>
+  <p>Conduct a thorough critical review of past empirical research related to the topic...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 3: Research Methodology</h2>
+  <h3>3.1. Research Design</h3>
+  <p>Describe the methodological research design adopted for this study...</p>
+  <h3>3.2. Data Collection Methods</h3>
+  <p>Outline your target population, sample sizes, and instrumentation methods...</p>
+  <h3>3.3. Data Analysis Plan</h3>
+  <p>Explain how collected variables will be processed, modeled, and evaluated...</p>
+</div>
+<div data-type="page">
+  <h2>References</h2>
+  <p>[Insert references in APA or Harvard style here]</p>
+</div>
+`
+
+const PROJECT_TEMPLATE = `
+<h1>Thesis Project: [Insert Topic Here]</h1>
+<div data-type="page">
+  <h2>Chapter 1: Introduction</h2>
+  <h3>1.1. Study Background</h3>
+  <p>Detail the historical and academic background of your thesis topic here...</p>
+  <h3>1.2. Problem Statement</h3>
+  <p>Clearly state the specific issue or challenge this project aims to solve...</p>
+  <h3>1.3. Project Aim and Objectives</h3>
+  <p>Write your project's high-level goal and specific design milestones...</p>
+  <h3>1.4. Significance of the Study</h3>
+  <p>Explain how this study contributes to the field and its practical benefits...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 2: Literature Review</h2>
+  <h3>2.1. Overview and Key Theories</h3>
+  <p>Review the standard academic literature, historical developments, and theories related to this work...</p>
+  <h3>2.2. Analysis of State-of-the-Art Systems</h3>
+  <p>Contrast existing solutions, highlight their merits, and point out operational limitations...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 3: System Design & Methodology</h2>
+  <h3>3.1. Methodology Framework</h3>
+  <p>Detail the research methodology, engineering design, or mathematical framework used...</p>
+  <h3>3.2. Process Design & System Architecture</h3>
+  <p>Explain the step-by-step process flow or architecture details of your system...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 4: Implementation & Experimental Results</h2>
+  <h3>4.1. Implementation Overview</h3>
+  <p>Describe the practical execution, software code, or hardware builds...</p>
+  <h3>4.2. Results Analysis & Performance Comparison</h3>
+  <p>Present and discuss experimental findings, tables, charts, or comparative statistics...</p>
+</div>
+<div data-type="page">
+  <h2>Chapter 5: Conclusion & Recommendations</h2>
+  <h3>5.1. Summary of Contributions</h3>
+  <p>Summarize the major findings and contributions of this project...</p>
+  <h3>5.2. Recommendations for Future Work</h3>
+  <p>Provide recommendations for future study expansions and next phases...</p>
+</div>
+<div data-type="page">
+  <h2>References</h2>
+  <p>[Insert your academic citations here]</p>
+</div>
+`
+
 // Helper function to format raw markdown or code-blocked AI outputs to clean HTML tags.
 // This ensures content inserts cleanly into the Tiptap document tree with proper styles.
 const formatAiResponseToHtml = (text: string): string => {
@@ -519,8 +650,27 @@ export default function Editor() {
   const [wizardStep, setWizardStep] = useState(1) // 1: Welcome/Details, 2: Ingestion, 3: Setup Choice
   const [wizardTopic, setWizardTopic] = useState('')
   const [wizardAcademicLevel, setWizardAcademicLevel] = useState('Undergraduate')
+  const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
+  const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
+  const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
+  const [customChapterOutline, setCustomChapterOutline] = useState<string>('')
   const [projectSources, setProjectSources] = useState<{ name: string; content: string; type: string }[]>([])
   const [isProcessingSource, setIsProcessingSource] = useState(false)
+
+  const handleDocTypeChange = (val: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
+    setWizardDocType(val)
+    if (val === 'Seminar') {
+      setWizardFontFamily('playfair') // Times New Roman / Playfair (APA)
+      setWizardLineSpacing('2.0') // Double spacing
+    } else if (val === 'Proposal') {
+      setWizardFontFamily('arial')
+      setWizardLineSpacing('1.5') // 1.5 spacing
+    } else if (val === 'Project') {
+      setWizardFontFamily('arial')
+      setWizardLineSpacing('1.5') // 1.5 spacing
+    }
+  }
+
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -1858,6 +2008,63 @@ export default function Editor() {
     }
   }
 
+  const handleStyleReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsProcessingSource(true)
+    try {
+      const parsed = await parseSourceFile(file)
+      
+      // Convert parsed HTML content to text for scanning headings
+      const tempDiv = document.createElement('div')
+      tempDiv.innerHTML = parsed.content
+      const extractedText = tempDiv.textContent || tempDiv.innerText || ''
+
+      // Parse headings to extract outline structure
+      const lines = extractedText.split('\n')
+      const headings = lines
+        .map(l => l.trim())
+        .filter(l => {
+          return (
+            /^(chapter|section|reference|introduction|appendix|methodology|related work|literature)/i.test(l) ||
+            /^\d+(\.\d+)+\s+\w+/i.test(l) ||
+            /^\d+\.\s+\w+/i.test(l)
+          )
+        })
+        .slice(0, 20)
+
+      if (headings.length > 0) {
+        setCustomChapterOutline(headings.join('\n'))
+        setWizardDocType('Custom')
+        alert(`Successfully extracted outline styles from "${file.name}":\n\n` + headings.slice(0, 5).join('\n') + '\n...')
+      } else {
+        setCustomChapterOutline(extractedText.slice(0, 500))
+        setWizardDocType('Custom')
+        alert(`Extracted style guidelines from "${file.name}".`)
+      }
+
+      // Auto-detect formatting styles from text contents
+      const lowerText = extractedText.toLowerCase()
+      if (lowerText.includes('apa') || file.name.toLowerCase().includes('apa')) {
+        setWizardFontFamily('playfair') // Times New Roman / Playfair
+        setWizardLineSpacing('2.0') // Double spaced
+      } else if (lowerText.includes('ieee') || file.name.toLowerCase().includes('ieee')) {
+        setWizardFontFamily('arial')
+        setWizardLineSpacing('1.0') // Single spaced
+      } else if (lowerText.includes('harvard') || file.name.toLowerCase().includes('harvard')) {
+        setWizardFontFamily('arial')
+        setWizardLineSpacing('1.5') // 1.5 line height spacing
+      }
+    } catch (err: any) {
+      console.error("Error extracting formatting style templates:", err)
+      alert("Failed to parse formatting styles: " + err.message)
+    } finally {
+      setIsProcessingSource(false)
+      e.target.value = ''
+    }
+  }
+
   const handleWizardFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
@@ -1880,6 +2087,22 @@ export default function Editor() {
     e.target.value = ''
   }
 
+  const applyOnboardingStyles = (editorInstance: any) => {
+    if (!editorInstance) return
+    setTimeout(() => {
+      let chain = editorInstance.chain().focus().selectAll()
+      if (wizardFontFamily === 'default') {
+        chain = chain.unsetFontFamily()
+      } else {
+        chain = chain.setFontFamily(wizardFontFamily)
+      }
+      chain.setLineHeight(wizardLineSpacing).run()
+      
+      // Trigger pagination synchronously
+      runPagination(editorInstance)
+    }, 150)
+  }
+
   const handleWizardComplete = async (choice: 'import' | 'ai_blueprint' | 'blank') => {
     const finalTitle = wizardTopic.trim() || 'Untitled Project'
     setDocumentTitle(finalTitle)
@@ -1889,6 +2112,7 @@ export default function Editor() {
       editor.commands.setContent(ensurePaginatedHtml(projectSources[0].content))
       setIsSaved(false)
       setShowWizard(false)
+      applyOnboardingStyles(editor)
     } else if (choice === 'ai_blueprint') {
       setShowWizard(false)
       setIsSimulatingAI(true)
@@ -1899,13 +2123,61 @@ export default function Editor() {
       if (projectSources.length > 0) {
         contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ": " + s.content.slice(0, 1000)).join('\n\n')
       }
+
+      // Generate structural guide based on doc type
+      let outlineStructurePrompt = ''
+      if (wizardDocType === 'Seminar') {
+        outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and subheadings:
+        Chapter 1.
+        1.1. Introduction 
+        1.2. Problem Definition and Motivation 
+        1.4. Advantages and Limitations
+
+        Chapter 2
+        Literature Review/Related work 
+        2.1. Summary of exit works
+        2.2. Overview of previous research 
+        Research Gaps.
+
+        Chapter 3
+        Methodology/Working Principle 
+        3.1. Core Concepts: Theoretical Background 
+        3.2. Working Principle/Process Flow 
+        3.3. Techniques/Tool Used
+
+        Chapter 4
+        4.1. Summary of key takeaways and main findings 
+        4.2. Future Scope.
+
+        Reference in latest APA style`
+      } else if (wizardDocType === 'Proposal') {
+        outlineStructurePrompt = `The document MUST be structured as a Research Proposal following these chapters and subheadings:
+        Chapter 1: Introduction (1.1 Background of the Study, 1.2 Problem Statement, 1.3 Aim and Objectives, 1.4 Research Questions, 1.5 Scope and Significance of the Study).
+        Chapter 2: Literature Review (2.1 Theoretical Framework, 2.2 Empirical Review).
+        Chapter 3: Research Methodology (3.1 Research Design, 3.2 Data Collection Methods, 3.3 Data Analysis Plan).
+        References.`
+      } else if (wizardDocType === 'Project') {
+        outlineStructurePrompt = `The document MUST be structured as a Thesis Project following these chapters:
+        Chapter 1: Introduction (1.1 Study Background, 1.2 Problem Statement, 1.3 Project Aim and Objectives, 1.4 Significance of the Study).
+        Chapter 2: Literature Review (2.1 Overview and Key Theories, 2.2 Analysis of State-of-the-Art Systems).
+        Chapter 3: System Design & Methodology (3.1 Methodology Framework, 3.2 Process Design & System Architecture).
+        Chapter 4: Implementation & Experimental Results (4.1 Implementation Overview, 4.2 Results Analysis & Performance Comparison).
+        Chapter 5: Conclusion & Recommendations (5.1 Summary of Contributions, 5.2 Recommendations for Future Work).
+        References.`
+      } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
+        outlineStructurePrompt = `The document MUST be structured following this user-provided chapter layout template:
+        ${customChapterOutline}`
+      }
       
-      const promptText = `Write a comprehensive academic thesis setup for the topic: "${finalTitle}". Provide:
-      1. A formatted H1 title.
-      2. A structured thesis chapter outline (Chapters 1 to 5) with H2/H3 subheadings and list items.
-      3. A detailed 3-paragraph introduction styled with academic paragraphs (<p>).
+      const promptText = `Write a comprehensive academic thesis setup for the topic: "${finalTitle}".
+      ${outlineStructurePrompt}
       
-      Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} project.`
+      For each section:
+      1. Write clear, structured chapter titles and H2/H3 subheadings.
+      2. Provide a detailed, double-spaced academic introductory paragraph under Chapter 1/Introduction.
+      3. For the reference section, provide 3 highly relevant academic citation placeholders in latest APA style.
+      
+      Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`
 
       try {
         const response = await fetch('/api/generate', {
@@ -1957,15 +2229,35 @@ export default function Editor() {
           }
         }
         setIsSaved(false)
+        applyOnboardingStyles(editor)
       } catch (err) {
         console.error(err)
       } finally {
         setIsSimulatingAI(false)
       }
     } else {
-      editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Start writing your thesis here...</p>`))
+      // blank/template canvas slate
+      let templateContent = ''
+      if (wizardDocType === 'Seminar') {
+        templateContent = SEMINAR_TEMPLATE.replace('[Insert Seminar Topic Here]', finalTitle)
+      } else if (wizardDocType === 'Proposal') {
+        templateContent = PROPOSAL_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
+      } else if (wizardDocType === 'Project') {
+        templateContent = PROJECT_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
+      } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
+        const generatedOutlineHtml = customChapterOutline
+          .split('\n')
+          .map(h => `<h3>${h}</h3><p>Start writing under this heading...</p>`)
+          .join('')
+        templateContent = `<h1>${finalTitle}</h1><div data-type="page"><h2>Custom Outline</h2>${generatedOutlineHtml}</div>`
+      } else {
+        templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
+      }
+
+      editor.commands.setContent(ensurePaginatedHtml(templateContent))
       setIsSaved(false)
       setShowWizard(false)
+      applyOnboardingStyles(editor)
     }
 
     setWizardStep(1)
@@ -2897,22 +3189,157 @@ export default function Editor() {
               {/* Step 1: Project Details */}
               {wizardStep === 1 && (
                 <div className="space-y-4">
+                  {/* Topic Input */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      1. What is the topic of your project?
+                      1. Topic / Title
                     </label>
                     <input
                       type="text"
                       value={wizardTopic}
                       onChange={(e) => setWizardTopic(e.target.value)}
                       placeholder="e.g., The Impact of Renewable Energy on Developing Economies"
-                      className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300"
+                      className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 font-medium"
                     />
                   </div>
 
+                  {/* Document Type Selection */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      2. Document Type
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDocTypeChange('Seminar')}
+                        className={`p-3 rounded-xl border text-left transition-all relative ${
+                          wizardDocType === 'Seminar'
+                            ? 'border-indigo-600 bg-indigo-50/20 text-indigo-750 dark:border-indigo-500 dark:bg-indigo-950/20 dark:text-indigo-300 ring-2 ring-indigo-500/50'
+                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5">
+                          Seminar
+                          {wizardDocType === 'Seminar' && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 dark:text-zinc-550 mt-1 leading-relaxed">
+                          4-chapter seminar layout. Auto-applies Times New Roman & double spacing.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDocTypeChange('Proposal')}
+                        className={`p-3 rounded-xl border text-left transition-all relative ${
+                          wizardDocType === 'Proposal'
+                            ? 'border-indigo-600 bg-indigo-50/20 text-indigo-750 dark:border-indigo-500 dark:bg-indigo-950/20 dark:text-indigo-300 ring-2 ring-indigo-500/50'
+                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5">
+                          Proposal
+                          {wizardDocType === 'Proposal' && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 dark:text-zinc-550 mt-1 leading-relaxed">
+                          3-chapter research proposal draft with methodology.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDocTypeChange('Project')}
+                        className={`p-3 rounded-xl border text-left transition-all relative ${
+                          wizardDocType === 'Project'
+                            ? 'border-indigo-600 bg-indigo-50/20 text-indigo-750 dark:border-indigo-500 dark:bg-indigo-950/20 dark:text-indigo-300 ring-2 ring-indigo-500/50'
+                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5">
+                          Project
+                          {wizardDocType === 'Project' && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 dark:text-zinc-550 mt-1 leading-relaxed">
+                          5-chapter complete academic project thesis framework.
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDocTypeChange('Custom')}
+                        className={`p-3 rounded-xl border text-left transition-all relative ${
+                          wizardDocType === 'Custom'
+                            ? 'border-indigo-600 bg-indigo-50/20 text-indigo-750 dark:border-indigo-500 dark:bg-indigo-950/20 dark:text-indigo-300 ring-2 ring-indigo-500/50'
+                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-850'
+                        }`}
+                      >
+                        <div className="text-xs font-bold flex items-center gap-1.5">
+                          Custom
+                          {wizardDocType === 'Custom' && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                        </div>
+                        <div className="text-[10px] text-zinc-400 dark:text-zinc-550 mt-1 leading-relaxed">
+                          Provide your own chapter outlines or extract from file reference.
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Custom Chapter Outline Input (Conditional) */}
+                  {wizardDocType === 'Custom' && (
+                    <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        Custom Outline headings (one per line)
+                      </label>
+                      <textarea
+                        value={customChapterOutline}
+                        onChange={(e) => setCustomChapterOutline(e.target.value)}
+                        placeholder="e.g.&#10;Chapter 1: Background&#10;Chapter 2: Context Analysis"
+                        className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 h-24 resize-none font-mono leading-normal"
+                      />
+                    </div>
+                  )}
+
+                  {/* Typography & Spacing Options */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        3. Font Family
+                      </label>
+                      <select
+                        value={wizardFontFamily}
+                        onChange={(e) => setWizardFontFamily(e.target.value as any)}
+                        className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300"
+                      >
+                        <option value="default">Default theme font</option>
+                        <option value="arial">Arial (Sans-serif)</option>
+                        <option value="georgia">Georgia (Editorial Serif)</option>
+                        <option value="playfair">Times New Roman / Playfair (APA)</option>
+                        <option value="inter">Inter (Clean UI)</option>
+                        <option value="courier">Courier (Draft Monospace)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        4. Line Spacing
+                      </label>
+                      <select
+                        value={wizardLineSpacing}
+                        onChange={(e) => setWizardLineSpacing(e.target.value)}
+                        className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300"
+                      >
+                        <option value="1.0">Single spaced (1.0)</option>
+                        <option value="1.15">Compact (1.15)</option>
+                        <option value="1.5">Standard Academic (1.5)</option>
+                        <option value="1.8">Comfortable (1.8)</option>
+                        <option value="2.0">Double spaced APA (2.0)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Target Academic Level */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      2. What is your Target Academic Level?
+                      5. Target Academic Level
                     </label>
                     <select
                       value={wizardAcademicLevel}
@@ -2925,9 +3352,27 @@ export default function Editor() {
                       <option value="Ph.D.">Ph.D. / Researcher (Highly Technical & Analytical)</option>
                     </select>
                   </div>
-                  
-                  <div className="bg-zinc-50 dark:bg-zinc-850 p-3 rounded-lg border border-zinc-150 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-455 leading-relaxed">
-                    <strong>Why this matters:</strong> Project Pilot adapts its vocabulary, stylistic structures, and citation formatting to match your target level.
+
+                  {/* Upload Formatting Style Reference */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                      6. Formatting Style Reference File (Optional)
+                    </label>
+                    <label className="flex border border-dashed border-zinc-300 dark:border-zinc-700 hover:border-indigo-400 dark:hover:border-indigo-650 rounded-lg p-3 items-center justify-center gap-2 cursor-pointer transition-all bg-zinc-50/50 dark:bg-zinc-900/30 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                      <Upload className="w-4 h-4 text-zinc-400" />
+                      <span>{isProcessingSource ? 'Extracting style elements...' : 'Upload Style Reference (.docx, .pdf)'}</span>
+                      <input
+                        type="file"
+                        accept=".docx,.pdf"
+                        disabled={isProcessingSource}
+                        onChange={handleStyleReferenceUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="bg-zinc-50 dark:bg-zinc-850 p-3 rounded-lg border border-zinc-150 dark:border-zinc-800 text-[10px] text-zinc-500 dark:text-zinc-450 leading-relaxed">
+                    <strong>Layout Guide:</strong> Selecting "Seminar", "Proposal" or "Project" configures the chapters automatically. Use Custom or Upload a Style Reference document to extract formatting rules.
                   </div>
                 </div>
               )}
