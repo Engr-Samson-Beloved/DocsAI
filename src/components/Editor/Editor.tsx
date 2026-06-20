@@ -808,7 +808,7 @@ export default function Editor() {
     }
     paginationTimeoutRef.current = setTimeout(() => {
       runPagination(editorInstance)
-    }, 300)
+    }, 500) // 500ms typing debounce for performance
   }
 
   const runPagination = (editorInstance: any) => {
@@ -841,19 +841,23 @@ export default function Editor() {
 
       if (hasChanged) {
         editorInstance.view.dispatch(tr.setMeta('paginating', true))
-        tr = editorInstance.state.tr
+        // Schedule next pagination step to check for splits after DOM has updated
+        if (paginationTimeoutRef.current) {
+          clearTimeout(paginationTimeoutRef.current)
+        }
+        paginationTimeoutRef.current = setTimeout(() => {
+          runPagination(editorInstance)
+        }, 40)
+        return
       }
 
       // Step 2: Measure element heights within `.page-content` containers
-      let pageContentElements = document.querySelectorAll('.page-content')
+      const pageContentElements = document.querySelectorAll('.page-content')
       if (pageContentElements.length === 0) return
 
-      let pageIdx = 0
-      let splitOccurred = false
-
-      while (pageIdx < pageContentElements.length) {
+      for (let pageIdx = 0; pageIdx < pageContentElements.length; pageIdx++) {
         const pageEl = pageContentElements[pageIdx] as HTMLElement
-        if (!pageEl) break
+        if (!pageEl) continue
 
         const clientHeight = 931 // Safe content area height boundary
 
@@ -883,7 +887,7 @@ export default function Editor() {
             if (children.length > 1) {
               splitChildIdx = 1
             } else {
-              pageIdx++
+              // Giant single child: can't split, skip to next page to prevent freeze
               continue
             }
           }
@@ -895,27 +899,27 @@ export default function Editor() {
               if (absolutePos !== undefined) {
                 const freshTr = editorInstance.state.tr.split(absolutePos, 1)
                 editorInstance.view.dispatch(freshTr.setMeta('paginating', true))
-                tr = editorInstance.state.tr // Reset tr to match the new state
-                splitOccurred = true
-                pageContentElements = document.querySelectorAll('.page-content')
+                
+                // Exit and schedule the next split on the next tick
+                if (paginationTimeoutRef.current) {
+                  clearTimeout(paginationTimeoutRef.current)
+                }
+                paginationTimeoutRef.current = setTimeout(() => {
+                  runPagination(editorInstance)
+                }, 40)
+                
+                setTimeout(() => {
+                  updateOutline()
+                  handleScroll()
+                }, 50)
+                
+                return // Exit now to let browser recalculate DOM layout
               }
             } catch (e) {
               console.error("Error paginating split position:", e)
-              pageIdx++
             }
-          } else {
-            pageIdx++
           }
-        } else {
-          pageIdx++
         }
-      }
-
-      if (splitOccurred) {
-        setTimeout(() => {
-          updateOutline()
-          handleScroll()
-        }, 50)
       }
     } catch (err) {
       console.error("Pagination processor error:", err)
