@@ -560,8 +560,8 @@ class PageNodeView {
       }
     }
 
-    const docHeader = this.editor.storage?.page?.docHeader || ''
-    const docFooter = this.editor.storage?.page?.docFooter || ''
+    const docHeader = (this.editor.storage as any)?.page?.docHeader || ''
+    const docFooter = (this.editor.storage as any)?.page?.docFooter || ''
 
     const headerTextEl = this.dom.querySelector('.header-text')
     if (headerTextEl) headerTextEl.textContent = docHeader
@@ -1182,9 +1182,9 @@ export default function Editor() {
 
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
-    if (editor && editor.storage && editor.storage.page) {
-      editor.storage.page.docHeader = docHeader
-      editor.storage.page.docFooter = docFooter
+    if (editor && editor.storage && (editor.storage as any).page) {
+      (editor.storage as any).page.docHeader = docHeader
+      (editor.storage as any).page.docFooter = docFooter
       
       // Trigger a dummy ProseMirror transaction to force all page node views to update labels
       const { state, view } = editor
