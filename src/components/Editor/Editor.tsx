@@ -1035,19 +1035,19 @@ export default function Editor() {
   // Click outside handler for floating AI popup, layout settings, & export dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showFloatingPopup && popupRef.current && !popupRef.current.contains(event.target as Node)) {
+      if (showFloatingPopup && popupRef.current && !popupRef.current.contains(event.target as any)) {
         const editorEl = document.querySelector('.tiptap')
-        if (editorEl && !editorEl.contains(event.target as Node)) {
+        if (editorEl && !editorEl.contains(event.target as any)) {
           setShowFloatingPopup(false)
           setSimulatedAiResult('')
           setAiSelectedText('')
           setAiSelectionRange(null)
         }
       }
-      if (showLayoutSettings && layoutSettingsRef.current && !layoutSettingsRef.current.contains(event.target as Node)) {
+      if (showLayoutSettings && layoutSettingsRef.current && !layoutSettingsRef.current.contains(event.target as any)) {
         setShowLayoutSettings(false)
       }
-      if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+      if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as any)) {
         setShowExportMenu(false)
       }
     }
