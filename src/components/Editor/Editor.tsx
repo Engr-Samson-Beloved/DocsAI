@@ -1590,6 +1590,70 @@ export default function Editor() {
     }
   }, [editor])
 
+  // Enable scrolling with keyboard when focus is outside the editor
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const container = scrollContainerRef.current
+      if (!container) return
+
+      // Don't intercept if the user is typing in an input, textarea, or contenteditable element
+      const activeEl = document.activeElement
+      if (
+        activeEl && (
+          activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.getAttribute('contenteditable') === 'true'
+        )
+      ) {
+        return
+      }
+
+      // Check which key is pressed and scroll the container
+      const scrollAmount = 80 // normal arrow key scroll speed
+      const pageScrollAmount = container.clientHeight - 40 // page up/down scroll amount
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault()
+          container.scrollBy({ top: scrollAmount, behavior: 'auto' })
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          container.scrollBy({ top: -scrollAmount, behavior: 'auto' })
+          break
+        case 'PageDown':
+        case ' ': // Spacebar
+          if (e.key === ' ' && e.shiftKey) {
+            e.preventDefault()
+            container.scrollBy({ top: -pageScrollAmount, behavior: 'auto' })
+          } else {
+            e.preventDefault()
+            container.scrollBy({ top: pageScrollAmount, behavior: 'auto' })
+          }
+          break
+        case 'PageUp':
+          e.preventDefault()
+          container.scrollBy({ top: -pageScrollAmount, behavior: 'auto' })
+          break
+        case 'Home':
+          e.preventDefault()
+          container.scrollTo({ top: 0, behavior: 'auto' })
+          break
+        case 'End':
+          e.preventDefault()
+          container.scrollTo({ top: container.scrollHeight, behavior: 'auto' })
+          break
+        default:
+          break
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [])
+
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
     if (editor && editor.storage && (editor.storage as any).page) {
@@ -3545,7 +3609,7 @@ export default function Editor() {
           )}
         </aside>
 
-        <div className="flex flex-col flex-1 h-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
+        <div className="flex flex-col flex-1 min-h-0 h-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
           {/* Formatting Toolbar */}
           <div className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2 z-30 flex justify-center flex-shrink-0">
             <div className="w-full max-w-[816px] flex flex-wrap gap-1 items-center justify-start sm:justify-between">
@@ -3777,7 +3841,8 @@ export default function Editor() {
         {/* Scrollable Canvas Body */}
         <div 
           ref={scrollContainerRef}
-          className="flex-1 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center focus:outline-none"
+          tabIndex={0}
+          className="scroll-container flex-1 min-h-0 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center focus:outline-none"
           style={{
             scrollbarGutter: 'stable',
             overscrollBehaviorY: 'contain'
