@@ -711,6 +711,15 @@ export default function Editor() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
+  // Import document and styling modal states
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importFileData, setImportFileData] = useState<{
+    name: string
+    htmlContent: string
+    extension: string
+  } | null>(null)
+  const [importOption, setImportOption] = useState<'maintain' | 'seminar' | 'apa' | 'ieee' | 'text_only'>('maintain')
+
   // Document Outline Left Sidebar States
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [outline, setOutline] = useState<OutlineItem[]>([])
@@ -2462,13 +2471,13 @@ export default function Editor() {
         const arrayBuffer = await file.arrayBuffer()
         const result = await mammoth.convertToHtml({ arrayBuffer })
         
-        // Renders word document inline HTML directly into Tiptap
-        editor.commands.setContent(ensurePaginatedHtml(result.value))
-        setIsSaved(false)
-        
-        // Extract title from file name
-        const cleanName = file.name.replace(/\.[^/.]+$/, "")
-        setDocumentTitle(cleanName)
+        setImportFileData({
+          name: file.name,
+          htmlContent: result.value,
+          extension: 'docx'
+        })
+        setImportOption('maintain')
+        setShowImportModal(true)
       } else if (extension === 'pdf') {
         // Renders PDF text content extracted from pdfjs-dist
         const pdfjs = await import('pdfjs-dist')
@@ -2486,12 +2495,13 @@ export default function Editor() {
           accumulatedHtml += `<p>${pageStrings}</p>`
         }
         
-        editor.commands.setContent(ensurePaginatedHtml(accumulatedHtml))
-        setIsSaved(false)
-        
-        // Extract title from file name
-        const cleanName = file.name.replace(/\.[^/.]+$/, "")
-        setDocumentTitle(cleanName)
+        setImportFileData({
+          name: file.name,
+          htmlContent: accumulatedHtml,
+          extension: 'pdf'
+        })
+        setImportOption('maintain')
+        setShowImportModal(true)
       } else {
         alert('Unsupported document format. Please upload a .docx or .pdf file.')
       }
@@ -2503,6 +2513,62 @@ export default function Editor() {
       // Reset input element value to allow re-upload of same file
       if (e.target) e.target.value = ''
     }
+  }
+
+  const confirmImportAction = () => {
+    if (!importFileData || !editor) return
+
+    let contentToLoad = importFileData.htmlContent
+
+    // 1. If Text Only option is selected, strip all HTML formatting tags
+    if (importOption === 'text_only') {
+      const tempDiv = document.createElement('div')
+      tempDiv.innerHTML = importFileData.htmlContent
+      const paragraphs = (tempDiv.textContent || tempDiv.innerText || '')
+        .split('\n')
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+      
+      contentToLoad = paragraphs.map(p => `<p>${p}</p>`).join('')
+    }
+
+    // 2. Load the content into Tiptap
+    editor.commands.setContent(ensurePaginatedHtml(contentToLoad))
+    setIsSaved(false)
+
+    // 3. Apply Style Formats
+    if (importOption === 'seminar') {
+      // Apply Arial, 1.5 line height
+      setTimeout(() => {
+        editor.chain().focus().selectAll().setFontFamily('arial').setLineHeight('1.5').run()
+        runPagination(editor)
+      }, 100)
+    } else if (importOption === 'apa') {
+      // Apply Playfair (academic serif), 2.0 line height
+      setTimeout(() => {
+        editor.chain().focus().selectAll().setFontFamily('playfair').setLineHeight('2.0').run()
+        runPagination(editor)
+      }, 100)
+    } else if (importOption === 'ieee') {
+      // Apply Arial, 1.0 line height
+      setTimeout(() => {
+        editor.chain().focus().selectAll().setFontFamily('arial').setLineHeight('1.0').run()
+        runPagination(editor)
+      }, 100)
+    } else {
+      // Maintain default/custom original layout, run pagination to lay out pages
+      setTimeout(() => {
+        runPagination(editor)
+      }, 100)
+    }
+
+    // Set Document Title
+    const cleanName = importFileData.name.replace(/\.[^/.]+$/, "")
+    setDocumentTitle(cleanName)
+
+    // Clean up states
+    setShowImportModal(false)
+    setImportFileData(null)
   }
 
   // Phase 2 AI Prompt execution (Streams response from Gemini API route proxy)
@@ -4577,6 +4643,152 @@ export default function Editor() {
                   </button>
                 ) : null}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && importFileData && (
+        <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-4 text-white">
+              <h3 className="font-bold text-sm flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span>Import Document Formatter</span>
+              </h3>
+              <p className="text-[10px] text-indigo-100 mt-0.5">
+                Customize how your document is imported and formatted on the canvas.
+              </p>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4">
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300">File Name: </span>
+                <span className="italic">{importFileData.name}</span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide block">
+                  Select Import Option
+                </label>
+                <div className="space-y-2.5">
+                  {/* Maintain Original Formatting */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-205 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer transition-colors">
+                    <input
+                      type="radio"
+                      name="import-option"
+                      checked={importOption === 'maintain'}
+                      onChange={() => setImportOption('maintain')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                        Maintain Original Styling
+                      </div>
+                      <div className="text-[10px] text-zinc-450 dark:text-zinc-500 mt-0.5">
+                        Keeps headings, lists, bold, and italic formatting parsed directly from the file.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Format as Seminar Paper */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-205 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer transition-colors">
+                    <input
+                      type="radio"
+                      name="import-option"
+                      checked={importOption === 'seminar'}
+                      onChange={() => setImportOption('seminar')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                        Format as Seminar Paper Template
+                      </div>
+                      <div className="text-[10px] text-zinc-455 dark:text-zinc-500 mt-0.5">
+                        Applies Arial font, 1.5 line height, and clean academic heading structures.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Format as Academic Essay (APA) */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-205 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer transition-colors">
+                    <input
+                      type="radio"
+                      name="import-option"
+                      checked={importOption === 'apa'}
+                      onChange={() => setImportOption('apa')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                        Format as Academic Essay (APA)
+                      </div>
+                      <div className="text-[10px] text-zinc-455 dark:text-zinc-500 mt-0.5">
+                        Applies Playfair font and double line-spacing (2.0) standard in APA papers.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Format as Technical Report (IEEE) */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-205 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer transition-colors">
+                    <input
+                      type="radio"
+                      name="import-option"
+                      checked={importOption === 'ieee'}
+                      onChange={() => setImportOption('ieee')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                        Format as Technical Report (IEEE)
+                      </div>
+                      <div className="text-[10px] text-zinc-455 dark:text-zinc-500 mt-0.5">
+                        Applies Arial font and tight single line-spacing (1.0) suitable for IEEE technical prints.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Extract Text Only */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-zinc-205 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer transition-colors">
+                    <input
+                      type="radio"
+                      name="import-option"
+                      checked={importOption === 'text_only'}
+                      onChange={() => setImportOption('text_only')}
+                      className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                        Extract Plain Text Only
+                      </div>
+                      <div className="text-[10px] text-zinc-450 dark:text-zinc-500 mt-0.5">
+                        Strips all heading sizes, tables, bold, and italic inline formatting. Imports text as raw paragraphs.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="bg-zinc-50 dark:bg-zinc-950 px-6 py-4 flex items-center justify-end gap-2 border-t border-zinc-150 dark:border-zinc-850">
+              <button
+                onClick={() => {
+                  setShowImportModal(false)
+                  setImportFileData(null)
+                }}
+                className="px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmImportAction}
+                className="px-5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
+              >
+                Confirm Import
+              </button>
             </div>
           </div>
         </div>
