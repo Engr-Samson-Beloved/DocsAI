@@ -9,6 +9,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
+import Dashboard, { Project } from '../Dashboard/Dashboard'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -38,7 +39,13 @@ import {
   Scissors,
   Upload,
   Check,
-  Trash2
+  Trash2,
+  Plus,
+  Search,
+  LayoutGrid,
+  Calendar,
+  Edit3,
+  Folder
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -660,7 +667,20 @@ interface OutlineItem {
   page: number;
 }
 
+
+
+const STORAGE_KEY_PROJECTS = 'project-pilot-writings';
+const STORAGE_KEY_ACTIVE_ID = 'project-pilot-active-id';
+
 export default function Editor() {
+  // Dashboard & Multi-Project Storage States
+  const [showDashboard, setShowDashboard] = useState(true)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'updated' | 'title' | 'words'>('updated')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+
   const [documentTitle, setDocumentTitle] = useState('Untitled Document')
   const [isSaved, setIsSaved] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
@@ -729,6 +749,247 @@ export default function Editor() {
     }
   }
 
+  // Create a blank project
+  const createNewProject = () => {
+    setWizardTopic('')
+    setWizardStep(1)
+    setWizardDocType('Project')
+    setProjectSources([])
+    setCustomChapterOutline('')
+    setShowWizard(true)
+  }
+
+  // Create project from templates directly in dashboard
+  const createNewProjectWithTemplate = (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
+    setWizardTopic(type === 'Seminar' ? 'Research Seminar Report' : type === 'Proposal' ? 'Thesis Proposal Outline' : 'Graduation Thesis Project')
+    setWizardStep(1)
+    handleDocTypeChange(type)
+    setProjectSources([])
+    setCustomChapterOutline('')
+    setShowWizard(true)
+  }
+
+  // Delete a project
+  const deleteProject = (id: string) => {
+    if (window.confirm('Are you sure you want to delete this project writing? This action cannot be undone.')) {
+      const updated = projects.filter(p => p.id !== id)
+      setProjects(updated)
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      
+      // If deleted project is active, reset active project ID
+      if (activeProjectId === id) {
+        setActiveProjectId(null)
+        localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+        // Clear editor content
+        if (editor) {
+          editor.commands.setContent(ensurePaginatedHtml(''))
+        }
+        setDocumentTitle('Untitled Document')
+        setDocHeader('')
+        setDocFooter('')
+      }
+    }
+  }
+
+  // Rename a project
+  const renameProjectPrompt = (id: string) => {
+    const project = projects.find(p => p.id === id)
+    if (!project) return
+    const newTitle = window.prompt('Enter new title for this project:', project.title)
+    if (newTitle !== null && newTitle.trim()) {
+      const updated = projects.map(p => {
+        if (p.id === id) {
+          return {
+            ...p,
+            title: newTitle.trim(),
+            updatedAt: Date.now()
+          }
+        }
+        return p
+      })
+      setProjects(updated)
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+
+      // If active project is renamed, update state title
+      if (activeProjectId === id) {
+        setDocumentTitle(newTitle.trim())
+      }
+    }
+  }
+
+  // Load project
+  const loadProject = (id: string) => {
+    const project = projects.find(p => p.id === id)
+    if (!project) return
+
+    setActiveProjectId(project.id)
+    localStorage.setItem(STORAGE_KEY_ACTIVE_ID, project.id)
+    setDocumentTitle(project.title)
+    setDocHeader(project.docHeader || '')
+    setDocFooter(project.docFooter || '')
+    setWordCount(project.wordCount)
+    setCharCount(project.charCount)
+
+    if (editor) {
+      try {
+        editor.commands.setContent(JSON.parse(project.content))
+        applyOnboardingStyles(editor)
+        runPagination(editor)
+      } catch (e) {
+        console.error("Failed to parse project content:", e)
+      }
+    }
+
+    setShowDashboard(false)
+    setIsSaved(true)
+  }
+
+  // Utility to extract text snippet from stringified Tiptap JSON content
+  const getContentSnippet = (contentStr: string): string => {
+    try {
+      const json = JSON.parse(contentStr)
+      let text = ''
+      
+      const extractText = (node: any) => {
+        if (node.text) {
+          text += node.text + ' '
+        }
+        if (node.content) {
+          node.content.forEach(extractText)
+        }
+      }
+      
+      extractText(json)
+      const cleaned = text.replace(/\s+/g, ' ').trim()
+      return cleaned.slice(0, 120) + (cleaned.length > 120 ? '...' : '')
+    } catch (e) {
+      return 'No preview available.'
+    }
+  }
+
+  // Utility to format timestamp
+  const formatDate = (timestamp: number): string => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMins / 60)
+    const diffDays = Math.floor(diffHours / 24)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays === 1) return 'Yesterday'
+    if (diffDays < 7) return `${diffDays}d ago`
+    
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  // Filter and sort projects
+  const filteredProjects = projects
+    .filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                 p.documentType.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'title') {
+        return a.title.localeCompare(b.title)
+      }
+      if (sortBy === 'words') {
+        return b.wordCount - a.wordCount
+      }
+      return b.updatedAt - a.updatedAt // Default: 'updated'
+    })
+
+  // Save title, header, and footer changes to active project
+  useEffect(() => {
+    if (!activeProjectId || projects.length === 0) return
+
+    const timer = setTimeout(() => {
+      setProjects(prevProjects => {
+        const project = prevProjects.find(p => p.id === activeProjectId)
+        if (project && (project.title !== documentTitle || project.docHeader !== docHeader || project.docFooter !== docFooter)) {
+          const updated = prevProjects.map(p => {
+            if (p.id === activeProjectId) {
+              return {
+                ...p,
+                title: documentTitle,
+                docHeader,
+                docFooter,
+                updatedAt: Date.now()
+              }
+            }
+            return p
+          })
+          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+          setIsSaved(true)
+          return updated
+        }
+        return prevProjects
+      })
+    }, 500) // Debounce saves to 500ms
+
+    return () => clearTimeout(timer)
+  }, [documentTitle, docHeader, docFooter, activeProjectId, projects.length])
+
+  // Load/initialize projects list and active project on mount (with single-doc migration support)
+  useEffect(() => {
+    const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
+    const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+    
+    let list: Project[] = []
+    if (storedProjects) {
+      try {
+        list = JSON.parse(storedProjects)
+      } catch (e) {
+        console.error("Failed to parse projects list", e)
+      }
+    }
+
+    // Migration for legacy single-document data
+    const legacyContent = localStorage.getItem('tiptap-content')
+    const legacyTitle = localStorage.getItem('docTitle') || 'Untitled Document'
+    
+    if (list.length === 0 && legacyContent) {
+      const migratedProj: Project = {
+        id: 'proj_migrated_' + Date.now(),
+        title: legacyTitle,
+        content: legacyContent,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        wordCount: wordCount || 0,
+        charCount: charCount || 0,
+        documentType: 'Custom',
+        academicLevel: 'Undergraduate',
+        docHeader: localStorage.getItem('docHeader') || '',
+        docFooter: localStorage.getItem('docFooter') || ''
+      }
+      list = [migratedProj]
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(list))
+      localStorage.setItem(STORAGE_KEY_ACTIVE_ID, migratedProj.id)
+      setProjects(list)
+      setActiveProjectId(migratedProj.id)
+      setDocumentTitle(migratedProj.title)
+      setDocHeader(migratedProj.docHeader || '')
+      setDocFooter(migratedProj.docFooter || '')
+      setShowDashboard(false)
+      return
+    }
+
+    setProjects(list)
+
+    if (storedActiveId && list.some(p => p.id === storedActiveId)) {
+      setActiveProjectId(storedActiveId)
+      // Load states
+      const project = list.find(p => p.id === storedActiveId)!
+      setDocumentTitle(project.title)
+      setDocHeader(project.docHeader || '')
+      setDocFooter(project.docFooter || '')
+      setWordCount(project.wordCount)
+      setCharCount(project.charCount)
+      setShowDashboard(false)
+    } else {
+      setShowDashboard(true)
+    }
+  }, [])
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -1138,6 +1399,12 @@ export default function Editor() {
     document.documentElement.classList.toggle('dark', nextTheme === 'dark')
   }
 
+  // Ref for activeProjectId to prevent stale closures inside Tiptap event handlers
+  const activeProjectIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    activeProjectIdRef.current = activeProjectId
+  }, [activeProjectId])
+
   // Tiptap Editor configuration
   const editor = useEditor({
     immediatelyRender: false,
@@ -1195,7 +1462,28 @@ export default function Editor() {
 
       // Local storage draft save trigger on edit
       const contentJSON = editor.getJSON()
-      localStorage.setItem('tiptap-content', JSON.stringify(contentJSON))
+
+      if (activeProjectIdRef.current) {
+        setProjects(prevProjects => {
+          const updated = prevProjects.map(p => {
+            if (p.id === activeProjectIdRef.current) {
+              return {
+                ...p,
+                content: JSON.stringify(contentJSON),
+                updatedAt: Date.now(),
+                wordCount: words,
+                charCount: chars
+              }
+            }
+            return p
+          })
+          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+          return updated
+        })
+        setIsSaved(true)
+      } else {
+        localStorage.setItem('tiptap-content', JSON.stringify(contentJSON))
+      }
 
       // Update outline dynamic values
       setTimeout(() => {
@@ -1266,20 +1554,41 @@ export default function Editor() {
     }
   }, [docHeader, docFooter, editor])
 
-  // Load editor content on mount from localstorage
+  // Load editor content on mount from localstorage (multi-project active document loading)
   useEffect(() => {
     if (!editor) return
 
-    const savedContent = localStorage.getItem('tiptap-content')
-    if (savedContent) {
+    const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
+    const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+    
+    let loaded = false
+    if (storedActiveId && storedProjects) {
       try {
-        editor.commands.setContent(ensurePaginatedJson(JSON.parse(savedContent)))
+        const list = JSON.parse(storedProjects) as Project[]
+        const project = list.find(p => p.id === storedActiveId)
+        if (project) {
+          editor.commands.setContent(ensurePaginatedJson(JSON.parse(project.content)))
+          applyOnboardingStyles(editor)
+          loaded = true
+        }
       } catch (e) {
-        editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
+        console.error("Failed to load active project content on editor mount:", e)
       }
-    } else {
-      editor.commands.setContent(ensurePaginatedHtml(''))
-      setShowWizard(true)
+    }
+
+    if (!loaded) {
+      // Check for legacy single-document content
+      const legacyContent = localStorage.getItem('tiptap-content')
+      if (legacyContent) {
+        try {
+          editor.commands.setContent(ensurePaginatedJson(JSON.parse(legacyContent)))
+          applyOnboardingStyles(editor)
+        } catch (e) {
+          editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
+        }
+      } else {
+        editor.commands.setContent(ensurePaginatedHtml(''))
+      }
     }
 
     // Initial stat calculations
@@ -2369,14 +2678,58 @@ export default function Editor() {
 
   const handleWizardComplete = async (choice: 'import' | 'ai_blueprint' | 'blank') => {
     const finalTitle = wizardTopic.trim() || 'Untitled Project'
+    
+    // Generate new project ID
+    const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    
+    // Set active states
+    setActiveProjectId(newProjId)
+    localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
     setDocumentTitle(finalTitle)
-    localStorage.setItem('docTitle', finalTitle)
+    setDocHeader('')
+    setDocFooter('')
+    setShowDashboard(false)
+
+    // Function to save the project snapshot
+    const saveProjectSnapshot = (htmlContent: string) => {
+      const tempEditor = editor
+      let contentJSON = tempEditor ? tempEditor.getJSON() : {}
+      
+      const newProj: Project = {
+        id: newProjId,
+        title: finalTitle,
+        content: JSON.stringify(contentJSON),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        wordCount: tempEditor ? (tempEditor.getText().trim() ? tempEditor.getText().trim().split(/\s+/).length : 0) : 0,
+        charCount: tempEditor ? tempEditor.getText().length : 0,
+        documentType: wizardDocType,
+        academicLevel: wizardAcademicLevel,
+        docHeader: '',
+        docFooter: ''
+      }
+
+      setProjects(prev => {
+        const filtered = prev.filter(p => p.id !== newProjId)
+        const updated = [newProj, ...filtered]
+        localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+        return updated
+      })
+      setIsSaved(true)
+    }
 
     if (choice === 'import' && projectSources.length > 0) {
-      editor.commands.setContent(ensurePaginatedHtml(projectSources[0].content))
+      const importedHtml = ensurePaginatedHtml(projectSources[0].content)
+      editor.commands.setContent(importedHtml)
       setIsSaved(false)
       setShowWizard(false)
       applyOnboardingStyles(editor)
+      
+      // Save snapshot immediately
+      setTimeout(() => {
+        saveProjectSnapshot(importedHtml)
+      }, 100)
+
     } else if (choice === 'ai_blueprint') {
       setShowWizard(false)
       setIsSimulatingAI(true)
@@ -2411,89 +2764,119 @@ export default function Editor() {
 
         Chapter 4
         4.1. Summary of key takeaways and main findings 
-        4.2. Future Scope.
-
-        Reference in latest APA style`
+        4.2. Future Scope.`
       } else if (wizardDocType === 'Proposal') {
-        outlineStructurePrompt = `The document MUST be structured as a Research Proposal following these chapters and subheadings:
-        Chapter 1: Introduction (1.1 Background of the Study, 1.2 Problem Statement, 1.3 Aim and Objectives, 1.4 Research Questions, 1.5 Scope and Significance of the Study).
-        Chapter 2: Literature Review (2.1 Theoretical Framework, 2.2 Empirical Review).
-        Chapter 3: Research Methodology (3.1 Research Design, 3.2 Data Collection Methods, 3.3 Data Analysis Plan).
-        References.`
+        outlineStructurePrompt = `The document MUST be structured EXACTLY as a Proposal report following these chapters and subheadings:
+        Chapter 1
+        Introduction
+        1.1. Background of Study
+        1.2. Problem Statement
+        1.3. Aim and Objectives
+        1.4. Significance of Study
+        1.5. Scope and Limitation
+
+        Chapter 2
+        Literature Review
+        2.1. Conceptual Review
+        2.2. Theoretical Review
+        2.3. Empirical Review
+
+        Chapter 3
+        Research Methodology
+        3.1. Research Design
+        3.2. Population of the Study
+        3.3. Method of Data Collection
+        3.4. Method of Data Analysis`
       } else if (wizardDocType === 'Project') {
-        outlineStructurePrompt = `The document MUST be structured as a Thesis Project following these chapters:
-        Chapter 1: Introduction (1.1 Study Background, 1.2 Problem Statement, 1.3 Project Aim and Objectives, 1.4 Significance of the Study).
-        Chapter 2: Literature Review (2.1 Overview and Key Theories, 2.2 Analysis of State-of-the-Art Systems).
-        Chapter 3: System Design & Methodology (3.1 Methodology Framework, 3.2 Process Design & System Architecture).
-        Chapter 4: Implementation & Experimental Results (4.1 Implementation Overview, 4.2 Results Analysis & Performance Comparison).
-        Chapter 5: Conclusion & Recommendations (5.1 Summary of Contributions, 5.2 Recommendations for Future Work).
-        References.`
+        outlineStructurePrompt = `The document MUST be structured EXACTLY as a Project report following these chapters and subheadings:
+        Chapter 1
+        Introduction
+        1.1. Background of the Study
+        1.2. Statement of the Problem
+        1.3. Objectives of the Study
+        1.4. Research Questions
+        1.5. Significance of the Study
+
+        Chapter 2
+        Literature Review
+        2.1. Conceptual Framework
+        2.2. Theoretical Framework
+        2.3. Empirical Framework
+
+        Chapter 3
+        System Analysis and Design / Methodology
+        3.1. Description of the Existing System
+        3.2. Method of Data Gathering
+        3.3. Analysis of the Proposed System
+        3.4. Design of the Proposed System
+
+        Chapter 4
+        Implementation and Results
+        4.1. System Requirements
+        4.2. Installation and Configurations
+        4.3. Interface Mockups and Explanations
+        4.4. Test Results and Evaluation
+
+        Chapter 5
+        Conclusion and Recommendations
+        5.1. Summary of Findings
+        5.2. Practical Recommendations
+        5.3. Recommendations for Future Research`
       } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
-        outlineStructurePrompt = `The document MUST be structured following this user-provided chapter layout template:
-        ${customChapterOutline}`
+        outlineStructurePrompt = `The document MUST follow this custom chapter outline exactly:\n${customChapterOutline}`
       }
       
-      const promptText = `Write a comprehensive academic thesis setup for the topic: "${finalTitle}".
-      ${outlineStructurePrompt}
-      
-      For each section:
-      1. Write clear, structured chapter titles and H2/H3 subheadings.
-      2. Provide a detailed, double-spaced academic introductory paragraph under Chapter 1/Introduction.
-      3. For the reference section, provide 3 highly relevant academic citation placeholders in latest APA style.
-      
-      Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`
-
       try {
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: promptText,
+            prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
+            
+            ${outlineStructurePrompt}
+            
+            For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 800 words of rich content.
+            Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
+            Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`,
             context: contextText
           })
         })
 
-        if (!response.ok) {
-          editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Failed to generate initial outline.</p>`))
-          setIsSimulatingAI(false)
-          return
-        }
+        if (!response.ok) throw new Error('API request failed')
 
         const reader = response.body?.getReader()
-        if (!reader) {
-          editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Failed to read outline stream.</p>`))
-          setIsSimulatingAI(false)
-          return
-        }
-
         const decoder = new TextDecoder()
         let accumulatedText = ''
-        
-        editor.commands.setContent(ensurePaginatedHtml(`<h1>${finalTitle}</h1><p>Generating project blueprint... Please wait.</p>`))
 
-        while (true) {
-          const { value, done } = await reader.read()
-          if (done) break
-
-          const chunk = decoder.decode(value, { stream: true })
-          const lines = chunk.split('\n')
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6).trim()
-              if (dataStr === '[DONE]') break
-              try {
-                const data = JSON.parse(dataStr)
-                if (data.text) {
-                  accumulatedText += data.text
-                  const formatted = formatAiResponseToHtml(accumulatedText)
-                  editor.commands.setContent(ensurePaginatedHtml(formatted))
-                }
-              } catch (e) {}
+        if (reader) {
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value, { stream: true })
+            const lines = chunk.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.slice(6).trim()
+                if (dataStr === '[DONE]') break
+                try {
+                  const data = JSON.parse(dataStr)
+                  if (data.text) {
+                    accumulatedText += data.text
+                    const formatted = formatAiResponseToHtml(accumulatedText)
+                    editor.commands.setContent(ensurePaginatedHtml(formatted))
+                  }
+                } catch (e) {}
+              }
             }
           }
         }
         setIsSaved(false)
         applyOnboardingStyles(editor)
+        
+        // Save final AI blueprint snapshot
+        setTimeout(() => {
+          saveProjectSnapshot(editor.getHTML())
+        }, 150)
       } catch (err) {
         console.error(err)
       } finally {
@@ -2518,10 +2901,16 @@ export default function Editor() {
         templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
       }
 
-      editor.commands.setContent(ensurePaginatedHtml(templateContent))
+      const formattedHtml = ensurePaginatedHtml(templateContent)
+      editor.commands.setContent(formattedHtml)
       setIsSaved(false)
       setShowWizard(false)
       applyOnboardingStyles(editor)
+      
+      // Save snapshot immediately
+      setTimeout(() => {
+        saveProjectSnapshot(formattedHtml)
+      }, 100)
     }
 
     setWizardStep(1)
@@ -2542,7 +2931,20 @@ export default function Editor() {
         </div>
       )}
       
-      {/* Top Application Bar */}
+      {showDashboard ? (
+        <Dashboard
+          theme={theme}
+          toggleTheme={toggleTheme}
+          projects={projects}
+          onCreateProject={createNewProject}
+          onCreateProjectWithTemplate={createNewProjectWithTemplate}
+          onDeleteProject={deleteProject}
+          onRenameProject={renameProjectPrompt}
+          onLoadProject={loadProject}
+        />
+      ) : (
+        <>
+          {/* Top Application Bar */}
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 px-3 py-1 bg-indigo-600 rounded-lg text-white font-bold text-lg shadow-sm">
@@ -2560,6 +2962,15 @@ export default function Editor() {
               }}
               className="text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-48 sm:w-64 transition-colors"
             />
+            
+            <button
+              onClick={() => setShowDashboard(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
+              title="Return to Document Center Dashboard"
+            >
+              <Folder className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Projects</span>
+            </button>
             
             <button
               onClick={() => {
@@ -3468,6 +3879,8 @@ export default function Editor() {
             </div>
           )}
         </div>
+      )}
+        </>
       )}
 
       {showWizard && (
