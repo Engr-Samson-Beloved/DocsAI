@@ -10,6 +10,7 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
+import { saveSource, getSourcesForProject, deleteSource, deleteSourcesForProject } from '../../utils/db'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -25,7 +26,6 @@ import {
   Quote as QuoteIcon,
   Undo as UndoIcon,
   Redo as RedoIcon,
-  Sparkles,
   Download,
   Moon,
   Sun,
@@ -732,7 +732,7 @@ export default function Editor() {
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
   const [customChapterOutline, setCustomChapterOutline] = useState<string>('')
-  const [projectSources, setProjectSources] = useState<{ name: string; content: string; type: string }[]>([])
+  const [projectSources, setProjectSources] = useState<{ id?: number; name: string; content: string; type: string }[]>([])
   const [isProcessingSource, setIsProcessingSource] = useState(false)
 
   const handleDocTypeChange = (val: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
@@ -776,6 +776,9 @@ export default function Editor() {
       setProjects(updated)
       localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
       
+      // Delete associated sources from IndexedDB
+      deleteSourcesForProject(id)
+      
       // If deleted project is active, reset active project ID
       if (activeProjectId === id) {
         setActiveProjectId(null)
@@ -818,7 +821,7 @@ export default function Editor() {
   }
 
   // Load project
-  const loadProject = (id: string) => {
+  const loadProject = async (id: string) => {
     const project = projects.find(p => p.id === id)
     if (!project) return
 
@@ -829,6 +832,20 @@ export default function Editor() {
     setDocFooter(project.docFooter || '')
     setWordCount(project.wordCount)
     setCharCount(project.charCount)
+
+    // Load ingested sources from IndexedDB
+    try {
+      const dbSources = await getSourcesForProject(project.id)
+      setProjectSources(dbSources.map(s => ({
+        id: s.id,
+        name: s.name,
+        content: s.content,
+        type: s.type
+      })))
+    } catch (e) {
+      console.error("Failed to load project sources from IndexedDB:", e)
+      setProjectSources([])
+    }
 
     if (editor) {
       try {
@@ -842,6 +859,20 @@ export default function Editor() {
 
     setShowDashboard(false)
     setIsSaved(true)
+  }
+
+  // Delete reference source from IndexedDB and state
+  const deleteIngestedSourceAtIndex = async (index: number) => {
+    const source = projectSources[index]
+    if (source && source.id !== undefined) {
+      try {
+        await deleteSource(source.id)
+      } catch (e) {
+        console.error("Failed to delete source from IndexedDB:", e)
+      }
+    }
+    const updated = projectSources.filter((_, idx) => idx !== index)
+    setProjectSources(updated)
   }
 
   // Utility to extract text snippet from stringified Tiptap JSON content
@@ -986,6 +1017,18 @@ export default function Editor() {
       setWordCount(project.wordCount)
       setCharCount(project.charCount)
       setShowDashboard(false)
+
+      // Load project reference documents from IndexedDB
+      getSourcesForProject(storedActiveId).then(projSources => {
+        setProjectSources(projSources.map(s => ({
+          id: s.id,
+          name: s.name,
+          content: s.content,
+          type: s.type
+        })))
+      }).catch(e => {
+        console.error("Failed to load project sources on mount:", e)
+      })
     } else {
       setShowDashboard(true)
     }
@@ -1107,41 +1150,7 @@ export default function Editor() {
     handleScrollRef.current = handleScroll
   })
 
-  // Listen to scroll events to update current page and active outline item
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
 
-    let lastRun = 0
-    let timeoutId: any = null
-
-    const listener = () => {
-      const now = Date.now()
-      // Throttle to 100ms to eliminate scroll frame lag and UI stuttering
-      if (now - lastRun >= 100) {
-        handleScrollRef.current()
-        lastRun = now
-      } else {
-        if (timeoutId) clearTimeout(timeoutId)
-        timeoutId = setTimeout(() => {
-          handleScrollRef.current()
-          lastRun = Date.now()
-        }, 100)
-      }
-    }
-    
-    container.addEventListener('scroll', listener)
-    
-    // Initial run
-    setTimeout(() => {
-      handleScrollRef.current()
-    }, 200)
-
-    return () => {
-      container.removeEventListener('scroll', listener)
-      if (timeoutId) clearTimeout(timeoutId)
-    }
-  }, [editor])
 
   // Pagination Engine: Splits and joins pages dynamically based on client heights
   const triggerPagination = (editorInstance: any) => {
@@ -1500,46 +1509,77 @@ export default function Editor() {
         clearTimeout(idleTimerRef.current)
       }
 
-      // Close the floating popup if user changes selection/cursor to a different block
-      if (editor.isFocused && showFloatingPopup && popupBlockStart !== null) {
-        const { $from } = editor.state.selection
-        if ($from.start() !== popupBlockStart) {
+      const { selection } = editor.state
+      const { from, to, $from } = selection
+
+      // If selection is empty, hide the popup and return
+      if (selection.empty || !editor.isFocused) {
+        if (showFloatingPopup) {
           setShowFloatingPopup(false)
           setSimulatedAiResult('')
           setAiSelectedText('')
           setAiSelectionRange(null)
         }
-      }
-
-      // If AI is generating, or if editor is not focused, or if there is a selection highlight active, do not trigger
-      const { selection } = editor.state
-      if (!editor.isFocused || !selection.empty) {
         return
       }
 
-      // Start 2-second timer for contextual AI popup
-      idleTimerRef.current = setTimeout(() => {
-        const { $from } = editor.state.selection
-        const from = $from.start()
-        const to = $from.end()
-        const text = editor.state.doc.textBetween(from, to, ' ').trim()
+      const selectedText = editor.state.doc.textBetween(from, to, ' ').trim()
+      if (selectedText.length <= 3) {
+        return
+      }
 
-        // Only popup if there is substantial text in the current block node
-        if (text.length > 3) {
-          try {
-            const coords = editor.view.coordsAtPos($from.pos)
-            setPopupCoords({ top: coords.top, left: coords.left })
-            setPopupContextText(text)
-            setPopupContextRange({ from, to })
-            setPopupBlockStart(from)
-            setShowFloatingPopup(true)
-          } catch (e) {
-            console.error(e)
-          }
+      // Start a short delay timer (800ms) to show the popup after user completes selection
+      idleTimerRef.current = setTimeout(() => {
+        try {
+          // Get coordinates at the end of the selection (to)
+          const coords = editor.view.coordsAtPos(to)
+          setPopupCoords({ top: coords.top, left: coords.left })
+          setPopupContextText(selectedText)
+          setPopupContextRange({ from, to })
+          setPopupBlockStart($from.start())
+          setShowFloatingPopup(true)
+        } catch (e) {
+          console.error("Failed to get coords for selection popup:", e)
         }
-      }, 2000)
+      }, 800)
     },
   })
+
+  // Listen to scroll events to update current page and active outline item
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    let lastRun = 0
+    let timeoutId: any = null
+
+    const listener = () => {
+      const now = Date.now()
+      // Throttle to 100ms to eliminate scroll frame lag and UI stuttering
+      if (now - lastRun >= 100) {
+        handleScrollRef.current()
+        lastRun = now
+      } else {
+        if (timeoutId) clearTimeout(timeoutId)
+        timeoutId = setTimeout(() => {
+          handleScrollRef.current()
+          lastRun = Date.now()
+        }, 100)
+      }
+    }
+    
+    container.addEventListener('scroll', listener)
+    
+    // Initial run
+    setTimeout(() => {
+      handleScrollRef.current()
+    }, 200)
+
+    return () => {
+      container.removeEventListener('scroll', listener)
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [editor])
 
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
@@ -2076,6 +2116,11 @@ export default function Editor() {
 
   // Export to PowerPoint Presentation (.pptx) using pptxgenjs (dynamic load)
   const exportToPptx = async () => {
+    if (!editor) {
+      alert('Editor is not initialized yet.')
+      return
+    }
+
     setLoadingMessage('Compiling PowerPoint Slides...')
     setIsExporting(true)
     try {
@@ -2083,109 +2128,316 @@ export default function Editor() {
       const pptx = new pptxgen()
       pptx.layout = 'LAYOUT_16x9'
 
+      // 1. ADD TITLE SLIDE
+      const titleSlide = pptx.addSlide()
+      titleSlide.addShape('rect' as any, {
+        x: 0,
+        y: 0,
+        w: '100%',
+        h: '100%',
+        fill: { color: '0f172a' } // Slate 900
+      })
+
+      // Elegant horizontal line accent above subtitle
+      titleSlide.addShape('rect' as any, {
+        x: 4.66,
+        y: 4.2,
+        w: 4.0,
+        h: 0.04,
+        fill: { color: '6366f1' } // Indigo 500
+      })
+
+      titleSlide.addText(documentTitle || 'Academic Presentation', {
+        x: 0.8,
+        y: 2.0,
+        w: 11.73,
+        h: 2.0,
+        fontSize: 36,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        fontFace: 'Arial'
+      })
+
+      const subtitleText = `Generated on ${new Date().toLocaleDateString()}\nDocsAI Research Platform`
+      titleSlide.addText(subtitleText, {
+        x: 0.8,
+        y: 4.5,
+        w: 11.73,
+        h: 1.5,
+        fontSize: 16,
+        color: '94a3b8', // Slate 400
+        align: 'center',
+        fontFace: 'Arial'
+      })
+
+      // 2. PARSE PAGES INTO SECTIONS
+      interface SlideContentItem {
+        type: 'bullet' | 'number' | 'paragraph' | 'blockquote'
+        text: string
+      }
+
+      interface SlideSection {
+        title: string
+        items: SlideContentItem[]
+      }
+
       const json = editor.getJSON()
       const pages = json.content || []
-
-      let slideTitle = ''
-      let slideContent: string[] = []
-      let hasSlidesCreated = false
-
-      const createSlide = () => {
-        if (slideTitle || slideContent.length > 0) {
-          const slide = pptx.addSlide()
-          hasSlidesCreated = true
-
-          // Slide title header background banner
-          slide.addShape('rect' as any, {
-            x: 0,
-            y: 0,
-            w: '100%',
-            h: 1.2,
-            fill: { color: '4f46e5' } // Indigo 600
-          })
-
-          // Slide Title
-          slide.addText(slideTitle || 'Document Presentation', {
-            x: 0.5,
-            y: 0.3,
-            w: 9,
-            h: 0.6,
-            fontSize: 24,
-            bold: true,
-            color: 'FFFFFF',
-            fontFace: 'Arial'
-          })
-
-          // Bullet contents
-          if (slideContent.length > 0) {
-            const bodyText = slideContent.join('\n')
-            slide.addText(bodyText, {
-              x: 0.5,
-              y: 1.6,
-              w: 9,
-              h: 5.0,
-              fontSize: 16,
-              color: '3f3f46', // Zinc 700
-              fontFace: 'Arial',
-              bullet: { type: 'number' },
-              valign: 'top',
-              lineSpacing: 24
-            })
-          }
-        }
-      }
+      const sections: SlideSection[] = []
+      let currentSection: SlideSection = { title: 'Overview', items: [] }
 
       pages.forEach((pageNode: any) => {
         if (pageNode.type !== 'page') return
         const nodes = pageNode.content || []
 
         nodes.forEach((node: any) => {
-          if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2)) {
-            // Commit previous slide
-            createSlide()
-
-            // Start a new slide
-            slideTitle = node.content?.map((c: any) => c.text).join('') || 'Section Title'
-            slideContent = []
-          } else if (node.type === 'paragraph' || node.type === 'bulletList' || node.type === 'orderedList') {
-            const text = node.content?.map((c: any) => c.text).join('') || ''
-            
-            if (node.type === 'bulletList' || node.type === 'orderedList') {
-              node.content?.forEach((item: any) => {
-                const itemText = item.content?.map((p: any) => {
-                  return p.content?.map((t: any) => t.text).join('') || ''
-                }).join('') || ''
-                if (itemText) slideContent.push(itemText)
-              })
-            } else if (text) {
-              // Keep bullets brief
-              if (text.length > 180) {
-                slideContent.push(text.slice(0, 180) + '...')
+          if (node.type === 'heading' && (node.attrs?.level === 1 || node.attrs?.level === 2 || node.attrs?.level === 3)) {
+            const headingText = node.content?.map((c: any) => c.text).join('') || ''
+            if (headingText.trim()) {
+              if (currentSection.items.length > 0 || currentSection.title !== 'Overview') {
+                sections.push(currentSection)
+                currentSection = { title: headingText.trim(), items: [] }
               } else {
-                slideContent.push(text)
+                currentSection.title = headingText.trim()
               }
+            }
+          } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+            const isOrdered = node.type === 'orderedList'
+            node.content?.forEach((listItem: any) => {
+              let itemText = ''
+              if (listItem.content) {
+                itemText = listItem.content.map((p: any) => {
+                  if (p.content) {
+                    return p.content.map((t: any) => t.text).join('')
+                  }
+                  return p.text || ''
+                }).join('\n')
+              } else {
+                itemText = listItem.text || ''
+              }
+              if (itemText.trim()) {
+                currentSection.items.push({
+                  type: isOrdered ? 'number' : 'bullet',
+                  text: itemText.trim()
+                })
+              }
+            })
+          } else if (node.type === 'blockquote') {
+            let quoteText = ''
+            if (node.content) {
+              quoteText = node.content.map((p: any) => {
+                if (p.content) {
+                  return p.content.map((t: any) => t.text).join('')
+                }
+                return p.text || ''
+              }).join('\n')
+            } else {
+              quoteText = node.text || ''
+            }
+            if (quoteText.trim()) {
+              currentSection.items.push({
+                type: 'blockquote',
+                text: quoteText.trim()
+              })
+            }
+          } else if (node.type === 'paragraph') {
+            const paraText = node.content?.map((c: any) => c.text).join('') || ''
+            if (paraText.trim()) {
+              currentSection.items.push({
+                type: 'paragraph',
+                text: paraText.trim()
+              })
             }
           }
         })
       })
 
-      // Commit the final slide
-      createSlide()
-
-      // Create fallback title slide if empty
-      if (!hasSlidesCreated) {
-        const slide = pptx.addSlide()
-        slide.addText(documentTitle, { 
-          x: 1, 
-          y: 2, 
-          w: 8, 
-          h: 2, 
-          fontSize: 32, 
-          bold: true, 
-          color: '4f46e5', 
-          align: 'center' 
-        })
+      // Push final section
+      if (currentSection.items.length > 0 || currentSection.title !== 'Overview') {
+        sections.push(currentSection)
       }
+
+      // 3. GENERATE SLIDES FROM SECTIONS WITH MAX 5 ITEMS AUTO-SPLITTING
+      sections.forEach((section) => {
+        // Chunk items into lists of 5
+        const chunks: SlideContentItem[][] = []
+        for (let i = 0; i < section.items.length; i += 5) {
+          chunks.push(section.items.slice(i, i + 5))
+        }
+
+        // If a section exists but has no items, create a single slide for it
+        if (chunks.length === 0) {
+          chunks.push([])
+        }
+
+        chunks.forEach((chunk, chunkIdx) => {
+          const slide = pptx.addSlide()
+
+          // Subtle slate-50 background for content slides
+          slide.addShape('rect' as any, {
+            x: 0,
+            y: 0,
+            w: '100%',
+            h: '100%',
+            fill: { color: 'f8fafc' } // Slate 50
+          })
+
+          // Left accent vertical bar next to slide title
+          slide.addShape('rect' as any, {
+            x: 0.6,
+            y: 0.5,
+            w: 0.1,
+            h: 0.7,
+            fill: { color: '4f46e5' } // Indigo 600
+          })
+
+          const displayTitle = chunkIdx > 0 ? `${section.title} (Cont.)` : section.title
+          slide.addText(displayTitle, {
+            x: 0.9,
+            y: 0.5,
+            w: 11.5,
+            h: 0.7,
+            fontSize: 24,
+            bold: true,
+            color: '1e293b', // Slate 800
+            fontFace: 'Arial',
+            valign: 'middle'
+          })
+
+          // Separator line under title
+          slide.addShape('rect' as any, {
+            x: 0.6,
+            y: 1.3,
+            w: 12.13,
+            h: 0.02,
+            fill: { color: 'e2e8f0' } // Slate 200
+          })
+
+          if (chunk.length > 0) {
+            const textPropsArray: any[] = chunk.map((item, idx) => {
+              const isLast = idx === chunk.length - 1
+              const spacing = isLast ? "" : (item.type === 'paragraph' || item.type === 'blockquote' ? "\n\n" : "\n")
+              
+              if (item.type === 'bullet') {
+                return {
+                  text: item.text + spacing,
+                  options: {
+                    bullet: true,
+                    fontSize: 15,
+                    color: '334155', // Slate 700
+                    fontFace: 'Arial',
+                    lineSpacing: 24
+                  }
+                }
+              } else if (item.type === 'number') {
+                return {
+                  text: item.text + spacing,
+                  options: {
+                    bullet: { type: 'number' },
+                    fontSize: 15,
+                    color: '334155', // Slate 700
+                    fontFace: 'Arial',
+                    lineSpacing: 24
+                  }
+                }
+              } else if (item.type === 'blockquote') {
+                return {
+                  text: `“ ${item.text} ”` + spacing,
+                  options: {
+                    italic: true,
+                    fontSize: 15,
+                    color: '4f46e5', // Indigo 600
+                    fontFace: 'Arial',
+                    lineSpacing: 22
+                  }
+                }
+              } else { // paragraph
+                return {
+                  text: item.text + spacing,
+                  options: {
+                    fontSize: 15,
+                    color: '0f172a', // Slate 900
+                    fontFace: 'Arial',
+                    lineSpacing: 22
+                  }
+                }
+              }
+            })
+
+            slide.addText(textPropsArray, {
+              x: 0.8,
+              y: 1.7,
+              w: 11.7,
+              h: 4.8,
+              valign: 'top'
+            })
+          } else {
+            slide.addText("No content in this section.", {
+              x: 0.8,
+              y: 1.7,
+              w: 11.7,
+              h: 4.8,
+              fontSize: 14,
+              italic: true,
+              color: '94a3b8',
+              valign: 'top'
+            })
+          }
+
+          // Small footer
+          slide.addText(`DocsAI | ${documentTitle}`, {
+            x: 0.8,
+            y: 6.9,
+            w: 10.0,
+            h: 0.3,
+            fontSize: 10,
+            color: '94a3b8',
+            fontFace: 'Arial'
+          })
+        })
+      })
+
+      // 4. ADD CLOSING SLIDE
+      const closingSlide = pptx.addSlide()
+      closingSlide.addShape('rect' as any, {
+        x: 0,
+        y: 0,
+        w: '100%',
+        h: '100%',
+        fill: { color: '0f172a' } // Slate 900
+      })
+
+      closingSlide.addText('Thank You', {
+        x: 0.8,
+        y: 2.5,
+        w: 11.73,
+        h: 1.2,
+        fontSize: 44,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        fontFace: 'Arial'
+      })
+
+      closingSlide.addShape('rect' as any, {
+        x: 4.66,
+        y: 3.9,
+        w: 4.0,
+        h: 0.04,
+        fill: { color: '6366f1' }
+      })
+
+      closingSlide.addText('End of Presentation', {
+        x: 0.8,
+        y: 4.2,
+        w: 11.73,
+        h: 1.0,
+        fontSize: 18,
+        color: '94a3b8',
+        align: 'center',
+        fontFace: 'Arial'
+      })
 
       await pptx.writeFile({ fileName: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pptx` })
     } catch (err: any) {
@@ -2649,7 +2901,22 @@ export default function Editor() {
       const file = files[i]
       try {
         const parsed = await parseSourceFile(file)
-        newSources.push(parsed)
+        if (activeProjectIdRef.current) {
+          try {
+            const saved = await saveSource(activeProjectIdRef.current, parsed.name, parsed.content, parsed.type)
+            newSources.push({
+              id: saved.id,
+              name: saved.name,
+              content: saved.content,
+              type: saved.type
+            })
+          } catch (dbErr) {
+            console.error("Failed to save uploaded file to IndexedDB:", dbErr)
+            newSources.push(parsed)
+          }
+        } else {
+          newSources.push(parsed)
+        }
       } catch (err: any) {
         alert(`Error parsing "${file.name}": ${err.message}`)
       }
@@ -2691,9 +2958,31 @@ export default function Editor() {
     setShowDashboard(false)
 
     // Function to save the project snapshot
-    const saveProjectSnapshot = (htmlContent: string) => {
+    const saveProjectSnapshot = async (htmlContent: string) => {
       const tempEditor = editor
       let contentJSON = tempEditor ? tempEditor.getJSON() : {}
+
+      // Migrate temporary uploader sources (without IDs) to IndexedDB
+      const finalSources: any[] = []
+      for (const tempSrc of projectSources) {
+        if (tempSrc.id === undefined) {
+          try {
+            const saved = await saveSource(newProjId, tempSrc.name, tempSrc.content, tempSrc.type)
+            finalSources.push({
+              id: saved.id,
+              name: saved.name,
+              content: saved.content,
+              type: saved.type
+            })
+          } catch (e) {
+            console.error("Failed to migrate temp source to IndexedDB:", e)
+            finalSources.push(tempSrc)
+          }
+        } else {
+          finalSources.push(tempSrc)
+        }
+      }
+      setProjectSources(finalSources)
       
       const newProj: Project = {
         id: newProjId,
@@ -2948,7 +3237,7 @@ export default function Editor() {
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 px-3 py-1 bg-indigo-600 rounded-lg text-white font-bold text-lg shadow-sm">
-            <Sparkles className="w-5 h-5 animate-pulse" />
+            <FileText className="w-5 h-5" />
             <span>Project Pilot</span>
           </div>
           
@@ -2981,7 +3270,7 @@ export default function Editor() {
               className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
               title="Reset workspace and launch Onboarding Wizard"
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5" />
               <span>New Project</span>
             </button>
             
@@ -3105,8 +3394,8 @@ export default function Editor() {
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-md transition-colors cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-            <span>AI Sidebar</span>
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Assistant</span>
             {sidebarOpen ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
           </button>
         </div>
@@ -3463,8 +3752,8 @@ export default function Editor() {
             <div className="flex flex-col h-full w-80">
               <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
                 <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold">
-                  <Sparkles className="w-4 h-4 animate-bounce" />
-                  <span>Gemini Copilot</span>
+                  <Edit3 className="w-4 h-4" />
+                  <span>Gemini Assistant</span>
                   <span className="text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 px-1.5 py-0.5 rounded font-mono font-normal">
                     PHASE 2
                   </span>
@@ -3525,10 +3814,7 @@ export default function Editor() {
                                   </span>
                                 </div>
                                 <button
-                                  onClick={() => {
-                                    const updated = projectSources.filter((_, idx) => idx !== index)
-                                    setProjectSources(updated)
-                                  }}
+                                  onClick={() => deleteIngestedSourceAtIndex(index)}
                                   className="text-red-500 hover:text-red-750 p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-950/20 cursor-pointer"
                                   title="Remove source"
                                 >
@@ -3583,7 +3869,7 @@ export default function Editor() {
                     {isSimulatingAI ? (
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5" />
                     )}
                     <span>Generate Response</span>
                   </button>
@@ -3773,8 +4059,8 @@ export default function Editor() {
         >
           <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-1.5">
             <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Contextual AI Editor</span>
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Contextual Editor</span>
             </div>
             <button 
               onClick={() => {
@@ -3889,7 +4175,7 @@ export default function Editor() {
             {/* Header Banner */}
             <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-5 text-white relative">
               <h3 className="font-bold text-base flex items-center gap-2">
-                <Sparkles className="w-5 h-5 animate-pulse" />
+                <FileText className="w-5 h-5" />
                 <span>Project Pilot Onboarding Wizard</span>
               </h3>
               <p className="text-[11px] text-indigo-100 mt-1">
@@ -4171,10 +4457,7 @@ export default function Editor() {
                               </span>
                             </div>
                             <button
-                              onClick={() => {
-                                const updated = projectSources.filter((_, idx) => idx !== index)
-                                setProjectSources(updated)
-                              }}
+                              onClick={() => deleteIngestedSourceAtIndex(index)}
                               className="text-red-500 hover:text-red-750 p-1 rounded hover:bg-red-55/20 cursor-pointer"
                               title="Delete source"
                             >
@@ -4229,7 +4512,7 @@ export default function Editor() {
                       onClick={() => handleWizardComplete('ai_blueprint')}
                       className="w-full p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 text-left flex items-start gap-3 hover:bg-indigo-50/20 hover:border-indigo-300 dark:hover:bg-indigo-950/10 dark:hover:border-indigo-900/30 transition-all cursor-pointer"
                     >
-                      <Sparkles className="w-5 h-5 text-indigo-500 mt-0.5 flex-shrink-0 animate-pulse" />
+                      <Edit3 className="w-5 h-5 text-indigo-500 mt-0.5 flex-shrink-0" />
                       <div>
                         <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
                           Generate AI Thesis Blueprint & Outline
