@@ -1025,7 +1025,7 @@ export default function Editor() {
       setDocFooter(project.docFooter || '')
       setWordCount(project.wordCount)
       setCharCount(project.charCount)
-      setShowDashboard(false)
+      setShowDashboard(true)
 
       // Load project reference documents from IndexedDB
       getSourcesForProject(storedActiveId).then(projSources => {
