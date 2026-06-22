@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Project Pilot AI Copilot</title>
+  <title>WordPI AI Copilot</title>
   <!-- Load Office.js API -->
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
   
@@ -27,7 +27,7 @@
       font-size: 14px;
       height: 100vh;
       display: flex;
-      flex-direction: flex-col;
+      flex-direction: column;
       overflow: hidden;
     }
 
@@ -210,14 +210,14 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: #6366f1;">
           <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
         </svg>
-        <span>Project Pilot Copilot</span>
+        <span>WordPI Copilot</span>
       </div>
       <div class="badge">WORD ADD-IN</div>
     </header>
 
     <div class="chat-area" id="chatArea">
       <div class="message system">
-        Welcome to the Project Pilot Add-in! Highlight any section of your MS Word document for AI suggestions, or chat directly to generate academic content.
+        Welcome to the WordPI Add-in! Highlight any section of your MS Word document for AI suggestions, or chat directly to generate academic content.
       </div>
       <div class="message ai" id="welcomeMsg">
         Hello! I can help you draft sections, write introductions, summarize chapters, or rewrite highlighted paragraphs. Select text in Word and ask me a command!
@@ -269,7 +269,7 @@
 
       appendSystemMessage("AI is thinking...");
       
-      // Simulate Gemini stream call or query direct mock setup
+      // Simulate WordPI stream call or query direct mock setup
       setTimeout(() => {
         removeSystemMessages();
         
@@ -294,6 +294,7 @@
       chatArea.scrollTop = chatArea.scrollHeight;
     }
 
+    // Helper function to write to Chat UI
     function appendSystemMessage(text) {
       const msg = document.createElement('div');
       msg.className = 'message system temp-sys';

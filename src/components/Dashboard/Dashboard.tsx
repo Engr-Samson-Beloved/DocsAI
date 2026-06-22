@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react'
 import {
-  Sparkles,
   Plus,
   Search,
   LayoutGrid,
@@ -114,9 +113,9 @@ export default function Dashboard({
       {/* Dashboard Header */}
       <header className="flex items-center justify-between px-8 py-4 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 sticky top-0 z-10 shadow-sm flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3.5 py-1.5 bg-indigo-600 rounded-xl text-white font-bold text-base shadow-md">
-            <Sparkles className="w-4 h-4 animate-pulse" />
-            <span>Project Pilot</span>
+          <div className="flex items-center gap-2">
+            <img src="/WordPI.png" alt="WordPI Logo" className="w-7 h-7 object-contain rounded-lg shadow-sm" />
+            <span className="font-bold text-lg text-zinc-900 dark:text-zinc-50 tracking-tight">WordPI</span>
           </div>
           <span className="text-zinc-400 dark:text-zinc-600 font-bold font-mono text-[10px] tracking-wider uppercase">
             Document Center

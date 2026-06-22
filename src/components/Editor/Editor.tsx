@@ -51,9 +51,9 @@ import {
 // Default template content for the editor
 const DEFAULT_CONTENT = `
 <h1>An Analysis of AI-Assisted Document Editing for Academic Workflows</h1>
-<p>This document is created using <strong>Project Pilot</strong>, a client-side word processor optimized for educational and research tasks. It is running entirely in your browser without requiring a backend server.</p>
+<p>This document is created using <strong>WordPI</strong>, a client-side word processor optimized for educational and research tasks. It is running entirely in your browser without requiring a backend server.</p>
 <h2>1. Project Vision</h2>
-<p>Students face significant hurdles when compiling academic projects, including formatting compliance, citation structuring, and outline design. Traditional word processors offer formatting tools but lack context-aware assistance. Project Pilot attempts to solve this by providing a highly responsive editor coupled with an offline-first data model.</p>
+<p>Students face significant hurdles when compiling academic projects, including formatting compliance, citation structuring, and outline design. Traditional word processors offer formatting tools but lack context-aware assistance. WordPI attempts to solve this by providing a highly responsive editor coupled with an offline-first data model.</p>
 <blockquote>
   "The future of academic software lies in Zero-Server architectures that grant students absolute control over their content privacy and tool availability without subscription limits."
 </blockquote>
@@ -501,7 +501,7 @@ class PageNodeView {
     headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-100 dark:border-zinc-800 pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     headerEl.innerHTML = `
       <span class="header-text truncate max-w-[400px]"></span>
-      <span class="text-[10px] tracking-wider uppercase font-semibold text-zinc-300 dark:text-zinc-700">Project Pilot</span>
+      <span class="text-[10px] tracking-wider uppercase font-semibold text-zinc-300 dark:text-zinc-700">WordPI</span>
     `
     this.dom.appendChild(headerEl)
 
@@ -669,8 +669,8 @@ interface OutlineItem {
 
 
 
-const STORAGE_KEY_PROJECTS = 'project-pilot-writings';
-const STORAGE_KEY_ACTIVE_ID = 'project-pilot-active-id';
+const STORAGE_KEY_PROJECTS = 'wordpi-writings';
+const STORAGE_KEY_ACTIVE_ID = 'wordpi-active-id';
 
 export default function Editor() {
   // Dashboard & Multi-Project Storage States
@@ -732,7 +732,7 @@ export default function Editor() {
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
-  // Project Pilot Setup Wizard & Context Window States
+  // WordPI Setup Wizard & Context Window States
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(1) // 1: Welcome/Details, 2: Ingestion, 3: Setup Choice
   const [wizardTopic, setWizardTopic] = useState('')
@@ -2132,7 +2132,7 @@ export default function Editor() {
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docHeader || "Project Pilot Document Draft",
+                        text: docHeader || "WordPI Document Draft",
                         size: 18, // 9pt (half-points in docx)
                         color: "71717a", // Zinc 500
                         font: "Arial"
@@ -2635,7 +2635,7 @@ export default function Editor() {
     setImportFileData(null)
   }
 
-  // Phase 2 AI Prompt execution (Streams response from Gemini API route proxy)
+  // Phase 2 AI Prompt execution (Streams response from WordPI AI route proxy)
   const handleAiAction = async (action: string) => {
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
@@ -3366,9 +3366,9 @@ export default function Editor() {
           {/* Top Application Bar */}
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 px-3 py-1 bg-indigo-600 rounded-lg text-white font-bold text-lg shadow-sm">
-            <FileText className="w-5 h-5" />
-            <span>Project Pilot</span>
+          <div className="flex items-center gap-2">
+            <img src="/WordPI.png" alt="WordPI Logo" className="w-6.5 h-6.5 object-contain rounded-md" />
+            <span className="font-bold text-lg text-zinc-900 dark:text-zinc-50 tracking-tight">WordPI</span>
           </div>
           
           <div className="flex items-center gap-2">
@@ -3884,7 +3884,7 @@ export default function Editor() {
               <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800">
                 <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold">
                   <Edit3 className="w-4 h-4" />
-                  <span>Gemini Assistant</span>
+                  <span>WordPI Assistant</span>
                   <span className="text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 px-1.5 py-0.5 rounded font-mono font-normal">
                     PHASE 2
                   </span>
@@ -3902,7 +3902,7 @@ export default function Editor() {
                 
                  {/* AI Instructions Info Alert */}
                 <div className="bg-indigo-50 border border-indigo-100 text-indigo-950 dark:bg-indigo-950/20 dark:border-indigo-900/30 dark:text-indigo-300 rounded-lg p-3 text-xs leading-5">
-                  <span className="font-bold">Gemini AI Workspace:</span> Highlight any section of your document for context, choose a preset, or write a custom instruction to refine your writing.
+                  <span className="font-bold">WordPI AI Workspace:</span> Highlight any section of your document for context, choose a preset, or write a custom instruction to refine your writing.
                 </div>
 
                 {/* Context Window & Ingested Sources Panel */}
@@ -3978,7 +3978,7 @@ export default function Editor() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-                      Prompt Gemini
+                      Prompt WordPI AI
                     </label>
                     {activeAiModel && (
                       <span className="text-[9px] font-mono bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 px-1.5 py-0.5 rounded">
@@ -4140,9 +4140,9 @@ export default function Editor() {
 
               {/* Sidebar Footer Information */}
               <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-[10px] text-zinc-400 dark:text-zinc-500 space-y-1">
-                <p>Gemini Free Tier API parameters:</p>
+                <p>WordPI AI parameters:</p>
                 <ul className="list-disc pl-3.5 space-y-0.5">
-                  <li>Model: Gemini 1.5 Flash</li>
+                  <li>Model: WordPI Flash</li>
                   <li>Rate Limit: 15 Requests / min</li>
                   <li>Client API Secret obfuscated via Next.js routes</li>
                 </ul>
@@ -4306,11 +4306,11 @@ export default function Editor() {
             {/* Header Banner */}
             <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-5 text-white relative">
               <h3 className="font-bold text-base flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                <span>Project Pilot Onboarding Wizard</span>
+                <img src="/WordPI.png" alt="WordPI Logo" className="w-5.5 h-5.5 object-contain bg-white/15 p-0.5 rounded" />
+                <span>WordPI Onboarding Wizard</span>
               </h3>
               <p className="text-[11px] text-indigo-100 mt-1">
-                Configure your writing pilot and ingest source context in less than a minute.
+                Configure your writing assistant and ingest source context in less than a minute.
               </p>
               
               <div className="absolute top-5 right-6 flex items-center gap-1.5">
@@ -4531,7 +4531,7 @@ export default function Editor() {
                       Upload Source Context (PDF or DOCX)
                     </h4>
                     <p className="text-[11px] text-zinc-400">
-                      Ingest reference books, drafts, or syllabus documents into your Pilot's local context window.
+                      Ingest reference books, drafts, or syllabus documents into your WordPI local context window.
                     </p>
                   </div>
 

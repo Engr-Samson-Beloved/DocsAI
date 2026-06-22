@@ -1,7 +1,7 @@
-# Project Pilot MS Word AI Copilot Add-in: Installation & User Guide
+# WordPI MS Word AI Copilot Add-in: Installation & User Guide
 
 ## Introduction
-The Project Pilot MS Word Add-in brings the full context-aware academic AI writing assistant directly inside Microsoft Word desktop and web editions. It allows users to:
+The WordPI MS Word Add-in brings the full context-aware academic AI writing assistant directly inside Microsoft Word desktop and web editions. It allows users to:
 1. Highlight paragraphs in a Word document and prompt the AI to rewrite, expand, or format them.
 2. Draft new sections or thesis blueprints and insert them at the cursor position with a single click.
 
@@ -13,7 +13,7 @@ Since modern Office Add-ins run inside an embedded web container, Word must load
    If Next.js is running locally, it defaults to port `3000`.
 2. **Crucial HTTPS requirement**: MS Word requires HTTPS for taskpane add-ins. For development, you can use standard localhost SSL tools (like `mkcert`) or serve the files using a simple local proxy.
    > [!TIP]
-   > If you do not have SSL configured locally, you can use a quick tunnel tool like `ngrok` to map your local port `3000` to a secure public HTTPS URL (e.g., `ngrok http 3000`). If you do this, make sure to update the URLs in the manifest file ([`project_pilot_word_addin_manifest.xml`](file:///E:/DOCU_AI/project_pilot_word_addin_manifest.xml)) to use the ngrok HTTPS domain instead of `https://localhost:3000`.
+   > If you do not have SSL configured locally, you can use a quick tunnel tool like `ngrok` to map your local port `3000` to a secure public HTTPS URL (e.g., `ngrok http 3000`). If you do this, make sure to update the URLs in the manifest file ([`wordpi_word_addin_manifest.xml`](file:///E:/DOCU_AI/wordpi_word_addin_manifest.xml)) to use the ngrok HTTPS domain instead of `https://localhost:3000`.
 
 ---
 
@@ -21,7 +21,7 @@ Since modern Office Add-ins run inside an embedded web container, Word must load
 
 ### Method A: Word for Windows (Desktop)
 1. **Share the manifest folder**:
-   - Create a folder on your system and place [`project_pilot_word_addin_manifest.xml`](file:///E:/DOCU_AI/project_pilot_word_addin_manifest.xml) inside it.
+   - Create a folder on your system and place [`wordpi_word_addin_manifest.xml`](file:///E:/DOCU_AI/wordpi_word_addin_manifest.xml) inside it.
    - Right-click the folder -> **Properties** -> **Sharing** -> **Share**.
    - Add yourself, click **Share**, and copy the **Network Path** (e.g., `\\PC-NAME\Folder`).
 2. **Add Trust Center catalog in MS Word**:
@@ -32,14 +32,14 @@ Since modern Office Add-ins run inside an embedded web container, Word must load
    - Click **OK**, and restart MS Word.
 3. **Insert the Add-in**:
    - Go to **Developer** or **Insert** tab -> **Add-ins** -> **My Add-ins** -> **Shared Folder**.
-   - Select **Project Pilot AI Copilot** and click **Add**. The taskpane will open on the right!
+   - Select **WordPI AI Copilot** and click **Add**. The taskpane will open on the right!
 
 ### Method B: Word for the Web (Office Online)
 1. Go to [Office.com](https://office.com) and open a document in Word Online.
 2. Click the **Insert** tab -> **Add-ins**.
 3. Under the Add-ins panel, click **Upload My Add-in** (or **Manage My Add-ins** -> **Upload My Add-in**).
-4. Browse and select your [`project_pilot_word_addin_manifest.xml`](file:///E:/DOCU_AI/project_pilot_word_addin_manifest.xml) file.
-5. Click **Upload**. The Project Pilot sidebar will appear on the right side of the screen.
+4. Browse and select your [`wordpi_word_addin_manifest.xml`](file:///E:/DOCU_AI/wordpi_word_addin_manifest.xml) file.
+5. Click **Upload**. The WordPI sidebar will appear on the right side of the screen.
 
 ---
 
@@ -56,6 +56,6 @@ Since modern Office Add-ins run inside an embedded web container, Word must load
 
 | Symptoms | Cause | Solution |
 | :--- | :--- | :--- |
-| **"Add-in Error: We couldn't connect..."** or blank taskpane | The HTTPS dev server is offline or the SSL certificate is untrusted. | 1. Ensure your Next.js server is running.<br>2. Visit `https://localhost:3000/project_pilot_word_addin.html` in your browser and click "Proceed/Accept Certificate" to bypass local SSL alerts. |
+| **"Add-in Error: We couldn't connect..."** or blank taskpane | The HTTPS dev server is offline or the SSL certificate is untrusted. | 1. Ensure your Next.js server is running.<br>2. Visit `https://localhost:3000/wordpi_word_addin.html` in your browser and click "Proceed/Accept Certificate" to bypass local SSL alerts. |
 | **"Cannot read selected text"** | Selection API timing lag or missing manifest permissions. | Verify that `<Permissions>ReadWriteDocument</Permissions>` is present in the manifest.xml. |
 | **Add-in doesn't appear in shared folder** | Trust Center configuration caching. | 1. Clear Add-in Cache: File -> Options -> Trust Center -> Settings -> Add-ins -> check "Start next time with cached cleared".<br>2. Restart MS Word. |

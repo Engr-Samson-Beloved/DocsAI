@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Project Pilot - Client-Side Document Processor",
-  description: "A zero-cost, serverless AI-powered academic document setup and writing pilot.",
+  title: "WordPI - Client-Side Document Processor",
+  description: "A zero-cost, serverless AI-powered academic document setup and writing assistant.",
 };
 
 export default function RootLayout({

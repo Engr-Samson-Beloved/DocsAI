@@ -9,7 +9,7 @@ export interface IngestedSource {
   addedAt: number
 }
 
-const DB_NAME = 'project-pilot-db'
+const DB_NAME = 'wordpi-db'
 const DB_VERSION = 1
 const STORE_NAME = 'project-sources'
 
