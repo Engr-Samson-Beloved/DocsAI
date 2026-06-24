@@ -34,6 +34,7 @@ export interface Project {
   charCount: number
   documentType: 'Seminar' | 'Proposal' | 'Project' | 'Custom'
   academicLevel: string
+  academicTone?: string
   docHeader?: string
   docFooter?: string
 }

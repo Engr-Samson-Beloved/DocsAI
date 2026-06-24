@@ -734,9 +734,11 @@ export default function Editor() {
 
   // WordPI Setup Wizard & Context Window States
   const [showWizard, setShowWizard] = useState(false)
+  const [showGeneratorPopup, setShowGeneratorPopup] = useState(false)
   const [wizardStep, setWizardStep] = useState(1) // 1: Welcome/Details, 2: Ingestion, 3: Setup Choice
   const [wizardTopic, setWizardTopic] = useState('')
   const [wizardAcademicLevel, setWizardAcademicLevel] = useState('Undergraduate')
+  const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
@@ -799,6 +801,7 @@ export default function Editor() {
       charCount: 0,
       documentType: 'Custom',
       academicLevel: 'Undergraduate',
+      academicTone: 'Analytical',
       docHeader: '',
       docFooter: ''
     }
@@ -888,6 +891,7 @@ export default function Editor() {
       charCount: editor ? editor.getText().length : 0,
       documentType: type,
       academicLevel: 'Undergraduate',
+      academicTone: 'Analytical',
       docHeader: '',
       docFooter: ''
     }
@@ -965,6 +969,7 @@ export default function Editor() {
     setWordCount(project.wordCount)
     setCharCount(project.charCount)
     setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+    setWizardAcademicTone(project.academicTone || 'Analytical')
     setWizardDocType(project.documentType || 'Project')
 
     // Load ingested sources from IndexedDB
@@ -1124,6 +1129,7 @@ export default function Editor() {
         charCount: charCount || 0,
         documentType: 'Custom',
         academicLevel: 'Undergraduate',
+        academicTone: 'Analytical',
         docHeader: localStorage.getItem('docHeader') || '',
         docFooter: localStorage.getItem('docFooter') || ''
       }
@@ -1151,6 +1157,7 @@ export default function Editor() {
       setWordCount(project.wordCount)
       setCharCount(project.charCount)
       setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+      setWizardAcademicTone(project.academicTone || 'Analytical')
       setWizardDocType(project.documentType || 'Project')
       setShowDashboard(true)
 
@@ -3512,6 +3519,24 @@ export default function Editor() {
     }
   }
 
+  const handleAcademicToneChange = (tone: string) => {
+    setWizardAcademicTone(tone)
+    if (activeProjectId) {
+      const updated = projects.map(p => {
+        if (p.id === activeProjectId) {
+          return {
+            ...p,
+            academicTone: tone,
+            updatedAt: Date.now()
+          }
+        }
+        return p
+      })
+      setProjects(updated)
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+    }
+  }
+
   const handleDocumentTypeChangeInEditor = (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
     setWizardDocType(type)
     
@@ -3559,6 +3584,188 @@ export default function Editor() {
       })
       setProjects(updated)
       localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+    }
+  }
+
+  const generateFullDocumentBlueprint = async () => {
+    const finalTitle = documentTitle.trim() || 'Untitled Project'
+    setIsSimulatingAI(true)
+    setSimulatedAiResult('')
+    setActiveAiModel('')
+    
+    let contextText = ''
+    if (projectSources.length > 0) {
+      contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ": " + s.content.slice(0, 1000)).join('\n\n')
+    }
+
+    // Generate structural guide based on doc type
+    let outlineStructurePrompt = ''
+    if (wizardDocType === 'Seminar') {
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and subheadings:
+      Chapter 1.
+      1.1. Introduction 
+      1.2. Problem Definition and Motivation 
+      1.4. Advantages and Limitations
+
+      Chapter 2
+      Literature Review/Related work 
+      2.1. Summary of exit works
+      2.2. Overview of previous research 
+      Research Gaps.
+
+      Chapter 3
+      Methodology/Working Principle 
+      3.1. Core Concepts: Theoretical Background 
+      3.2. Working Principle/Process Flow 
+      3.3. Techniques/Tool Used
+
+      Chapter 4
+      4.1. Summary of key takeaways and main findings 
+      4.2. Future Scope.`
+    } else if (wizardDocType === 'Proposal') {
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Proposal report following these chapters and subheadings:
+      Chapter 1
+      Introduction
+      1.1. Background of Study
+      1.2. Problem Statement
+      1.3. Aim and Objectives
+      1.4. Significance of Study
+      1.5. Scope and Limitation
+
+      Chapter 2
+      Literature Review
+      2.1. Conceptual Review
+      2.2. Theoretical Review
+      2.3. Empirical Review
+
+      Chapter 3
+      Research Methodology
+      3.1. Research Design
+      3.2. Population of the Study
+      3.3. Method of Data Collection
+      3.4. Method of Data Analysis`
+    } else if (wizardDocType === 'Project') {
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Project report following these chapters and subheadings:
+      Chapter 1
+      Introduction
+      1.1. Background of the Study
+      1.2. Statement of the Problem
+      1.3. Objectives of the Study
+      1.4. Research Questions
+      1.5. Significance of the Study
+
+      Chapter 2
+      Literature Review
+      2.1. Conceptual Framework
+      2.2. Theoretical Framework
+      2.3. Empirical Framework
+
+      Chapter 3
+      System Analysis and Design / Methodology
+      3.1. Description of the Existing System
+      3.2. Method of Data Gathering
+      3.3. Analysis of the Proposed System
+      3.4. Design of the Proposed System
+
+      Chapter 4
+      Implementation and Results
+      4.1. System Requirements
+      4.2. Installation and Configurations
+      4.3. Interface Mockups and Explanations
+      4.4. Test Results and Evaluation
+
+      Chapter 5
+      Conclusion and Recommendations
+      5.1. Summary of Findings
+      5.2. Practical Recommendations
+      5.3. Recommendations for Future Research`
+    } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
+      outlineStructurePrompt = `The document MUST follow this custom chapter outline exactly:\n${customChapterOutline}`
+    }
+
+    try {
+      setLoadingMessage('Generating Full Document Blueprint...')
+      setIsExporting(true)
+
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
+          
+          ${outlineStructurePrompt}
+          
+          For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 1500 words of rich content.
+          Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
+          Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.`,
+          context: contextText,
+          academicLevel: wizardAcademicLevel || 'Undergraduate',
+          academicTone: wizardAcademicTone || 'Analytical',
+          documentType: wizardDocType || 'Custom'
+        })
+      })
+
+      if (!response.ok) throw new Error('API request failed')
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let accumulatedText = ''
+
+      if (reader) {
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          const lines = chunk.split('\n')
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const content = line.slice(6).trim()
+              if (content === '[DONE]') break
+              try {
+                const parsed = JSON.parse(content)
+                if (parsed.text) {
+                  accumulatedText += parsed.text
+                }
+              } catch (e) {
+                // Ignore meta
+              }
+            }
+          }
+        }
+      }
+
+      if (editor && accumulatedText.trim()) {
+        const formattedHtml = ensurePaginatedHtml(accumulatedText)
+        editor.commands.setContent(formattedHtml)
+        setIsSaved(false)
+        applyOnboardingStyles(editor)
+        
+        // Save snapshot immediately
+        if (activeProjectId) {
+          const contentJSON = editor.getJSON()
+          const updated = projects.map(p => {
+            if (p.id === activeProjectId) {
+              return {
+                ...p,
+                content: JSON.stringify(contentJSON),
+                updatedAt: Date.now(),
+                wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
+                charCount: editor.getText().length
+              }
+            }
+            return p
+          })
+          setProjects(updated)
+          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+          setIsSaved(true)
+        }
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Failed to generate document blueprint: " + (err as any).message)
+    } finally {
+      setIsSimulatingAI(false)
+      setIsExporting(false)
     }
   }
 
@@ -3639,6 +3846,15 @@ export default function Editor() {
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear Document</span>
+            </button>
+
+            <button
+              onClick={() => setShowGeneratorPopup(true)}
+              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-650 hover:bg-indigo-700 text-white rounded border border-indigo-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              title="Open full document blueprint generator popup"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Generate Full Blueprint</span>
             </button>
             
             <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
@@ -4247,6 +4463,24 @@ export default function Editor() {
                           <option value="Custom">Custom Outline</option>
                         </select>
                       </div>
+
+                      {/* Academic Tone Dropdown */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase font-semibold block">
+                          Academic Tone
+                        </label>
+                        <select
+                          value={wizardAcademicTone}
+                          onChange={(e) => handleAcademicToneChange(e.target.value)}
+                          className="w-full text-xs p-2 rounded border border-zinc-200 dark:border-zinc-800 focus:ring-1 focus:ring-indigo-500 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                        >
+                          <option value="Analytical">Analytical</option>
+                          <option value="Scholarly">Scholarly / Formal</option>
+                          <option value="Critical">Critical / Evaluative</option>
+                          <option value="Objective">Objective / Neutral</option>
+                          <option value="Persuasive">Persuasive / Argumentative</option>
+                        </select>
+                      </div>
                     </div>
                   </details>
                 </div>
@@ -4289,6 +4523,17 @@ export default function Editor() {
                     One-Click Prompt Presets
                   </label>
                   <div className="grid grid-cols-1 gap-2">
+                    <button
+                      onClick={() => setShowGeneratorPopup(true)}
+                      className="w-full text-left p-2.5 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50/55 hover:bg-indigo-100/70 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40 text-xs font-semibold text-indigo-750 dark:text-indigo-300 transition-all group flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Generate Full Document Blueprint</span>
+                      </span>
+                      <ChevronRight className="w-3 h-3 text-indigo-550 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+
                     <button
                       onClick={() => handleAiAction('intro')}
                       className="w-full text-left p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-850 hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/20 dark:hover:border-indigo-900/30 text-xs font-medium transition-all group flex items-center justify-between"
@@ -5129,6 +5374,164 @@ export default function Editor() {
                 className="px-5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
               >
                 Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGeneratorPopup && (
+        <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200 text-left">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-5 text-white relative">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-white animate-pulse" />
+                <span>One-Click Academic Seminar & Paper Generator</span>
+              </h3>
+              <p className="text-[11px] text-indigo-100 mt-1">
+                Configure your document settings to instantly generate a fully realized academic draft.
+              </p>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {/* Topic / Seminar Topic */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  Seminar / Document Topic
+                </label>
+                <input
+                  type="text"
+                  value={documentTitle}
+                  onChange={(e) => {
+                    setDocumentTitle(e.target.value)
+                    setIsSaved(false)
+                  }}
+                  placeholder="e.g., The Impact of Renewable Energy on Developing Economies"
+                  className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 font-medium"
+                />
+              </div>
+
+              {/* Document Type & Academic Level */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                    Document Type
+                  </label>
+                  <select
+                    value={wizardDocType}
+                    onChange={(e) => handleDocumentTypeChangeInEditor(e.target.value as any)}
+                    className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer animate-fade-in"
+                  >
+                    <option value="Seminar">Seminar Report</option>
+                    <option value="Proposal">Research Proposal</option>
+                    <option value="Project">Graduation Thesis</option>
+                    <option value="Custom">Custom Outline</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                    Academic Level
+                  </label>
+                  <select
+                    value={wizardAcademicLevel}
+                    onChange={(e) => handleAcademicLevelChange(e.target.value)}
+                    className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  >
+                    <option value="High School">High School</option>
+                    <option value="Undergraduate">Undergraduate</option>
+                    <option value="Master's">Master's</option>
+                    <option value="Ph.D.">Ph.D.</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Academic Tone */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  Academic Writing Tone
+                </label>
+                <select
+                  value={wizardAcademicTone}
+                  onChange={(e) => handleAcademicToneChange(e.target.value)}
+                  className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  <option value="Analytical">Analytical</option>
+                  <option value="Scholarly">Scholarly / Formal</option>
+                  <option value="Critical">Critical / Evaluative</option>
+                  <option value="Objective">Objective / Neutral</option>
+                  <option value="Persuasive">Persuasive / Argumentative</option>
+                </select>
+              </div>
+
+              {/* Ingested journals & reference materials */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  Reference Journals & Sources ({projectSources.length})
+                </label>
+                {projectSources.length === 0 ? (
+                  <div className="text-xs italic text-zinc-400 text-center py-4 bg-zinc-50 dark:bg-zinc-850 rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800">
+                    No reference files uploaded yet. Upload reference journals below to synthesize them.
+                  </div>
+                ) : (
+                  <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
+                    {projectSources.map((source, index) => (
+                      <div 
+                        key={index}
+                        className="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-850 rounded-lg border border-zinc-200 dark:border-zinc-800 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <FileText className={`w-4 h-4 flex-shrink-0 ${source.type === 'pdf' ? 'text-red-500' : 'text-blue-500'}`} />
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 font-medium" title={source.name}>
+                            {source.name}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => deleteIngestedSourceAtIndex(index)}
+                          className="text-red-500 hover:text-red-750 p-1 rounded hover:bg-red-55/20 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Upload Action */}
+                <label className="w-full flex items-center justify-center gap-1.5 bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg border border-zinc-250 dark:border-zinc-750 py-2 text-xs font-semibold transition-colors cursor-pointer">
+                  <Upload className="w-3.5 h-3.5 text-zinc-400 animate-bounce" />
+                  <span>{isProcessingSource ? 'Uploading and parsing references...' : 'Ingest PDF or Word Reference File'}</span>
+                  <input
+                    type="file"
+                    accept=".docx,.pdf"
+                    multiple
+                    disabled={isProcessingSource}
+                    onChange={handleWizardFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="bg-zinc-50 dark:bg-zinc-950 px-6 py-4 flex items-center justify-end gap-2 border-t border-zinc-150 dark:border-zinc-850">
+              <button
+                onClick={() => setShowGeneratorPopup(false)}
+                className="px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setShowGeneratorPopup(false)
+                  generateFullDocumentBlueprint()
+                }}
+                className="px-5 py-2 bg-indigo-650 hover:bg-indigo-750 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Generate Full Document</span>
               </button>
             </div>
           </div>
