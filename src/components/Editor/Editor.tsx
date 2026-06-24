@@ -964,6 +964,8 @@ export default function Editor() {
     setDocFooter(project.docFooter || '')
     setWordCount(project.wordCount)
     setCharCount(project.charCount)
+    setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+    setWizardDocType(project.documentType || 'Project')
 
     // Load ingested sources from IndexedDB
     try {
@@ -1148,6 +1150,8 @@ export default function Editor() {
       setDocFooter(project.docFooter || '')
       setWordCount(project.wordCount)
       setCharCount(project.charCount)
+      setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+      setWizardDocType(project.documentType || 'Project')
       setShowDashboard(true)
 
       // Load project reference documents from IndexedDB
@@ -2800,12 +2804,15 @@ export default function Editor() {
         unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
       }
 
+      const activeProject = projects.find(p => p.id === activeProjectId)
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          context: unifiedContext
+          context: unifiedContext,
+          academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
+          documentType: activeProject?.documentType || wizardDocType || 'Custom'
         })
       })
 
@@ -2942,12 +2949,15 @@ export default function Editor() {
         unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
       }
 
+      const activeProject = projects.find(p => p.id === activeProjectId)
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: promptText,
-          context: unifiedContext
+          context: unifiedContext,
+          academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
+          documentType: activeProject?.documentType || wizardDocType || 'Custom'
         })
       })
 
@@ -3380,7 +3390,9 @@ export default function Editor() {
             For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 800 words of rich content.
             Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
             Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`,
-            context: contextText
+            context: contextText,
+            academicLevel: wizardAcademicLevel || 'Undergraduate',
+            documentType: wizardDocType || 'Custom'
           })
         })
 
@@ -3458,6 +3470,76 @@ export default function Editor() {
     setWizardStep(1)
     setWizardTopic('')
   }
+
+  const handleAcademicLevelChange = (level: string) => {
+    setWizardAcademicLevel(level)
+    if (activeProjectId) {
+      const updated = projects.map(p => {
+        if (p.id === activeProjectId) {
+          return {
+            ...p,
+            academicLevel: level,
+            updatedAt: Date.now()
+          }
+        }
+        return p
+      })
+      setProjects(updated)
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+    }
+  }
+
+  const handleDocumentTypeChangeInEditor = (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
+    setWizardDocType(type)
+    
+    // Apply styling presets automatically on the canvas when the document type is switched
+    let nextFont: 'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier' = 'default'
+    let nextSpacing = '1.5'
+    
+    if (type === 'Seminar') {
+      nextFont = 'playfair' // Times New Roman / Playfair (APA style)
+      nextSpacing = '2.0' // Double spacing
+    } else if (type === 'Proposal') {
+      nextFont = 'arial'
+      nextSpacing = '1.5'
+    } else if (type === 'Project') {
+      nextFont = 'arial'
+      nextSpacing = '1.5'
+    }
+
+    setWizardFontFamily(nextFont)
+    setWizardLineSpacing(nextSpacing)
+
+    if (editor) {
+      setTimeout(() => {
+        let chain = editor.chain().focus().selectAll()
+        if (nextFont === 'default') {
+          chain = chain.unsetFontFamily()
+        } else {
+          chain = chain.setFontFamily(nextFont)
+        }
+        chain.setLineHeight(nextSpacing).run()
+        runPagination(editor)
+      }, 150)
+    }
+
+    if (activeProjectId) {
+      const updated = projects.map(p => {
+        if (p.id === activeProjectId) {
+          return {
+            ...p,
+            documentType: type,
+            updatedAt: Date.now()
+          }
+        }
+        return p
+      })
+      setProjects(updated)
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+    }
+  }
+
+  const activeProject = projects.find(p => p.id === activeProjectId)
 
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
@@ -4093,6 +4175,54 @@ export default function Editor() {
                             className="hidden"
                           />
                         </label>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+
+                {/* Academic Settings Section */}
+                <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-zinc-50/50 dark:bg-zinc-900/30">
+                  <details className="group" open>
+                    <summary className="flex items-center justify-between p-3 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-850 select-none">
+                      <div className="flex items-center gap-1.5">
+                        <Folder className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Academic Settings</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-zinc-400" />
+                    </summary>
+                    <div className="p-3 border-t border-zinc-150 dark:border-zinc-850 space-y-3 bg-white dark:bg-zinc-900/50">
+                      {/* Academic Level Dropdown */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase font-semibold block">
+                          Academic Level
+                        </label>
+                        <select
+                          value={wizardAcademicLevel}
+                          onChange={(e) => handleAcademicLevelChange(e.target.value)}
+                          className="w-full text-xs p-2 rounded border border-zinc-200 dark:border-zinc-800 focus:ring-1 focus:ring-indigo-500 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                        >
+                          <option value="High School">High School</option>
+                          <option value="Undergraduate">Undergraduate</option>
+                          <option value="Master's">Master's</option>
+                          <option value="Ph.D.">Ph.D.</option>
+                        </select>
+                      </div>
+
+                      {/* Document Type Dropdown */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase font-semibold block">
+                          Document Type
+                        </label>
+                        <select
+                          value={wizardDocType}
+                          onChange={(e) => handleDocumentTypeChangeInEditor(e.target.value as any)}
+                          className="w-full text-xs p-2 rounded border border-zinc-200 dark:border-zinc-800 focus:ring-1 focus:ring-indigo-500 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                        >
+                          <option value="Seminar">Seminar Report</option>
+                          <option value="Proposal">Research Proposal</option>
+                          <option value="Project">Graduation Thesis</option>
+                          <option value="Custom">Custom Outline</option>
+                        </select>
                       </div>
                     </div>
                   </details>
