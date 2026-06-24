@@ -1781,6 +1781,29 @@ export default function Editor() {
     }
   }, [])
 
+  // Explicit mouse wheel scrolling handler to guarantee mouse wheel scroll works on pages
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) return // Allow browser/system pinch-to-zoom
+      if (e.deltaY !== 0 || e.deltaX !== 0) {
+        e.preventDefault()
+        container.scrollBy({
+          top: e.deltaY,
+          left: e.deltaX,
+          behavior: 'auto'
+        })
+      }
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+    }
+  }, [])
+
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
     if (editor && editor.storage && (editor.storage as any).page) {
