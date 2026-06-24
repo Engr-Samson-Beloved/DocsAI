@@ -167,8 +167,12 @@ export default function Dashboard({
           
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-2 ml-1 cursor-pointer" onClick={() => window.location.reload()}>
-            <img src="/WordPI.png" alt="WordPI Logo" className="w-7 h-7 object-contain rounded-md" />
-            <span className="font-semibold text-lg text-zinc-800 dark:text-zinc-100 tracking-tight">Docs</span>
+            <img src="/WordPI.png" alt="WordPiLot Logo" className="w-7 h-7 object-contain rounded-md" />
+            <span className="font-bold text-lg tracking-tight select-none">
+              <span className="text-[#1B1F23] dark:text-[#E5E7EB]">Word</span>
+              <span className="text-[#185ABD] dark:text-[#3B82F6]">Pi</span>
+              <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
+            </span>
           </div>
         </div>
 
@@ -301,8 +305,12 @@ export default function Dashboard({
           <div className="fixed inset-0 bg-black/30 dark:bg-black/60 z-30 animate-in fade-in duration-200" onClick={() => setShowHamburgerDrawer(false)}></div>
           <aside className="fixed left-0 top-0 bottom-0 w-64 bg-white dark:bg-zinc-900 shadow-2xl border-r border-zinc-200 dark:border-zinc-850 z-40 p-4 flex flex-col gap-4 animate-in slide-in-from-left duration-250">
             <div className="flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 pb-3">
-              <img src="/WordPI.png" alt="WordPI Logo" className="w-7 h-7 object-contain rounded-md" />
-              <span className="font-bold text-base text-zinc-900 dark:text-zinc-50">WordPI Suite</span>
+              <img src="/WordPI.png" alt="WordPiLot Logo" className="w-7 h-7 object-contain rounded-md" />
+              <span className="font-bold text-base tracking-tight select-none">
+                <span className="text-[#1B1F23] dark:text-[#E5E7EB]">Word</span>
+                <span className="text-[#185ABD] dark:text-[#3B82F6]">Pi</span>
+                <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
+              </span>
             </div>
             
             <div className="flex-1 flex flex-col gap-1.5 text-xs font-semibold text-zinc-650 dark:text-zinc-350">

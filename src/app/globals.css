@@ -1,28 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f4f5; /* Zinc 100 for paper-behind canvas */
-  --foreground: #171717;
-  --paper-bg: #ffffff;
-  --paper-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --paper-border: #e4e4e7; /* Zinc 200 */
+  --background: #F1F3F5; /* Soft Gray for backgrounds/cards */
+  --foreground: #2D3748; /* Readable dark slate text */
+  --paper-bg: #FAFAFA;   /* Paper White for paper-sheets / document canvases */
+  --paper-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --paper-border: #E2E8F0; /* Slate 200 border */
+  
+  --primary-blue: #185ABD; /* WordPiLot Blue */
+  --ink-black: #1B1F23;
+  --academic-teal: #0F766E;
+  --academic-gold: #B68A35;
+}
+
+.dark {
+  --background: #111827; /* Editor Dark */
+  --foreground: #E5E7EB; /* Light gray text */
+  --paper-bg: #1F2937;   /* Slate Dark for pages/sidebars */
+  --paper-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --paper-border: #374151; /* Gray 700 border */
+  
+  --primary-blue: #3B82F6; /* Active Blue for dark mode accent */
+  --ink-black: #E5E7EB;
+  --academic-teal: #0D9488;
+  --academic-gold: #B68A35; /* Subtle research paper gold */
+}
+
+/* System preference fallback */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: #111827;
+    --foreground: #E5E7EB;
+    --paper-bg: #1F2937;
+    --paper-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+    --paper-border: #374151;
+    
+    --primary-blue: #3B82F6;
+    --ink-black: #E5E7EB;
+    --academic-teal: #0D9488;
+    --academic-gold: #B68A35;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* Map standard tailwind color tokens to new brand direction */
+  --color-zinc-50: var(--background);       /* Soft Gray (#F1F3F5) in light, Editor Dark (#111827) in dark */
+  --color-zinc-100: var(--background);      /* Canvas behind-page wrapper */
+  --color-zinc-950: var(--background);      /* Canvas container main background */
+  
+  --color-white: var(--paper-bg);            /* Paper sheets, sidebar body, header: Paper White in light, Slate Dark in dark */
+  --color-zinc-900: var(--paper-bg);         /* Dark mode surface wrappers */
+  
+  --color-zinc-800: var(--foreground);       /* Readable text: #2D3748 in light, #E5E7EB in dark */
+  --color-zinc-750: var(--foreground);
+  --color-zinc-700: var(--foreground);
+  --color-zinc-650: var(--foreground);
+  --color-zinc-500: var(--foreground);
+  --color-zinc-450: var(--foreground);
+  --color-zinc-400: var(--foreground);
+  --color-zinc-350: var(--foreground);
+  --color-zinc-300: var(--foreground);
+  --color-zinc-200: var(--foreground);       
+  
+  /* Brand accents override standard Indigo utility styles so all buttons update instantly */
+  --color-indigo-50: color-mix(in srgb, var(--primary-blue) 8%, transparent);
+  --color-indigo-100: color-mix(in srgb, var(--primary-blue) 15%, transparent);
+  --color-indigo-600: var(--primary-blue);
+  --color-indigo-700: #185ABD;
+  --color-indigo-950: #1B1F23;
+  
+  /* Palette specific references */
+  --color-wordpilot-blue: var(--primary-blue);
+  --color-ink-black: var(--ink-black);
+  --color-academic-teal: var(--academic-teal);
+  --color-academic-gold: var(--academic-gold);
+  --color-paper-white: var(--paper-bg);
+  
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b; /* Zinc 950 */
-    --foreground: #f4f4f5; /* Zinc 100 */
-    --paper-bg: #18181b; /* Zinc 900 for dark mode paper style */
-    --paper-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
-    --paper-border: #27272a; /* Zinc 800 */
-  }
 }
 
 body {

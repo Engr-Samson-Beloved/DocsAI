@@ -3791,8 +3791,12 @@ export default function Editor() {
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <img src="/WordPI.png" alt="WordPI Logo" className="w-6.5 h-6.5 object-contain rounded-md" />
-            <span className="font-bold text-lg text-zinc-900 dark:text-zinc-50 tracking-tight">WordPI</span>
+            <img src="/WordPI.png" alt="WordPiLot Logo" className="w-6.5 h-6.5 object-contain rounded-md" />
+            <span className="font-bold text-lg tracking-tight select-none">
+              <span className="text-[#1B1F23] dark:text-[#E5E7EB]">Word</span>
+              <span className="text-[#185ABD] dark:text-[#3B82F6]">Pi</span>
+              <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
+            </span>
           </div>
           
           <div className="flex items-center gap-2">
