@@ -402,74 +402,73 @@ export default function Dashboard({
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Brochure</span>
                 <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Geometric</span>
               </div>
-
-              {/* Resume serif Card */}
+              {/* Research Proposal Card */}
               <div className="flex flex-col gap-1.5">
                 <button 
-                  onClick={() => onCreateProjectWithTemplate('Seminar')}
+                  onClick={() => onCreateProjectWithTemplate('Proposal')}
                   className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
                 >
                   <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="flex flex-col items-center gap-1 border-b border-zinc-100 dark:border-zinc-800 pb-1 flex-shrink-0">
-                      <div className="h-1.5 bg-zinc-800 dark:bg-zinc-100 w-1/2 rounded-xs"></div>
-                      <div className="h-0.5 bg-zinc-400 dark:bg-zinc-500 w-1/3 rounded-xs"></div>
+                    <div className="h-3 bg-indigo-650 rounded-xs w-full flex items-center justify-between p-1 flex-shrink-0">
+                      <div className="w-4 h-1 bg-white/40 rounded-xs"></div>
                     </div>
-                    <div className="flex gap-2 flex-1 mt-1 overflow-hidden">
-                      <div className="w-1/4 flex flex-col gap-1 border-r border-zinc-200 dark:border-zinc-800 pr-1 flex-shrink-0">
-                        <div className="h-1 bg-blue-500 w-full rounded-xs"></div>
-                        <div className="h-1 bg-zinc-200 dark:bg-zinc-700 w-full rounded-xs"></div>
-                      </div>
-                      <div className="w-3/4 flex flex-col gap-1">
-                        <div className="h-1 bg-zinc-400 w-2/3 rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-11/12 rounded-xs"></div>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Resume</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Serif</span>
-              </div>
-
-              {/* Resume coral Card */}
-              <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Seminar')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
-                >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="bg-rose-500 h-2 w-full rounded-xs flex items-center p-1 flex-shrink-0"></div>
-                    <div className="flex gap-2 flex-1 mt-1 overflow-hidden">
-                      <div className="w-full flex flex-col gap-1.5">
-                        <div className="h-1.5 bg-zinc-650 dark:bg-zinc-300 w-1/2 rounded-xs"></div>
-                        <div className="h-1 bg-zinc-200 dark:bg-zinc-700 w-11/12 rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-5/6 rounded-xs"></div>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Resume</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Coral</span>
-              </div>
-
-              {/* Letter spearmint Card */}
-              <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Custom')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
-                >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="h-2 w-8 bg-emerald-500 rounded-xs self-end flex-shrink-0"></div>
                     <div className="space-y-1.5 mt-2">
-                      <div className="h-1.5 bg-zinc-400 dark:bg-zinc-500 w-1/3 rounded-xs"></div>
-                      <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
-                      <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
-                      <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-4/5 rounded-xs"></div>
+                      <div className="h-1.5 bg-zinc-700 dark:bg-zinc-300 w-2/3 rounded-xs"></div>
+                      <div className="h-1 bg-zinc-350 dark:bg-zinc-650 w-full rounded-xs"></div>
+                      <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-11/12 rounded-xs"></div>
+                      <div className="h-1 bg-zinc-200 dark:bg-zinc-755 w-5/6 rounded-xs"></div>
                     </div>
                   </div>
                 </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Letter</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Spearmint</span>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Research Proposal</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Proposal</span>
+              </div>
+
+              {/* Graduation Thesis Card */}
+              <div className="flex flex-col gap-1.5">
+                <button 
+                  onClick={() => onCreateProjectWithTemplate('Project')}
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
+                >
+                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
+                    <div className="flex flex-col items-center gap-1 border-b border-zinc-200 dark:border-zinc-700 pb-1 flex-shrink-0">
+                      <div className="h-1.5 bg-zinc-850 dark:bg-zinc-100 w-2/3 rounded-xs"></div>
+                      <div className="h-0.5 bg-zinc-400 dark:bg-zinc-500 w-1/2 rounded-xs"></div>
+                    </div>
+                    <div className="flex gap-2 flex-1 mt-1 overflow-hidden">
+                      <div className="w-full flex flex-col gap-1">
+                        <div className="h-1 bg-zinc-500 w-1/3 rounded-xs"></div>
+                        <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-full rounded-xs"></div>
+                        <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
+                        <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-5/6 rounded-xs"></div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Graduation Thesis</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Project</span>
+              </div>
+
+              {/* Seminar Report Card */}
+              <div className="flex flex-col gap-1.5">
+                <button 
+                  onClick={() => onCreateProjectWithTemplate('Seminar')}
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
+                >
+                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
+                    <div className="flex flex-col items-center gap-1 mt-3 flex-shrink-0">
+                      <div className="h-1.5 bg-zinc-800 dark:bg-zinc-100 w-1/2 rounded-xs"></div>
+                      <div className="h-1 bg-zinc-400 dark:bg-zinc-500 w-1/3 rounded-xs"></div>
+                    </div>
+                    <div className="space-y-1.5 mt-4">
+                      <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-full rounded-xs"></div>
+                      <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-full rounded-xs"></div>
+                      <div className="h-1 bg-zinc-200 dark:bg-zinc-755 w-4/5 rounded-xs"></div>
+                    </div>
+                  </div>
+                </button>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Seminar Report</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Seminar</span>
               </div>
 
               {/* Project proposal tropic Card */}

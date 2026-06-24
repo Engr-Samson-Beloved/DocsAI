@@ -758,24 +758,147 @@ export default function Editor() {
     }
   }
 
-  // Create a blank project
+  // Create a blank project directly without popup
   const createNewProject = () => {
-    setWizardTopic('')
-    setWizardStep(1)
-    setWizardDocType('Project')
+    const finalTitle = 'Untitled Document'
+    const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    
+    // Set active states
+    setActiveProjectId(newProjId)
+    localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
+    setDocumentTitle(finalTitle)
+    setDocHeader('')
+    setDocFooter('')
+    setShowDashboard(false)
     setProjectSources([])
-    setCustomChapterOutline('')
-    setShowWizard(true)
+    
+    // Set defaults
+    setWizardDocType('Custom')
+    setWizardFontFamily('default')
+    setWizardLineSpacing('1.5')
+    setWizardTopic(finalTitle)
+    
+    const templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
+    const formattedHtml = ensurePaginatedHtml(templateContent)
+
+    if (editor) {
+      editor.commands.setContent(formattedHtml)
+      setTimeout(() => {
+        editor.chain().focus().selectAll().unsetFontFamily().setLineHeight('1.5').run()
+        runPagination(editor)
+      }, 150)
+    }
+
+    const newProj: Project = {
+      id: newProjId,
+      title: finalTitle,
+      content: JSON.stringify(editor ? editor.getJSON() : {}),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      wordCount: 0,
+      charCount: 0,
+      documentType: 'Custom',
+      academicLevel: 'Undergraduate',
+      docHeader: '',
+      docFooter: ''
+    }
+
+    setProjects(prev => {
+      const filtered = prev.filter(p => p.id !== newProjId)
+      const updated = [newProj, ...filtered]
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      return updated
+    })
+    setIsSaved(true)
   }
 
-  // Create project from templates directly in dashboard
+  // Create project from templates directly in dashboard without popup
   const createNewProjectWithTemplate = (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => {
-    setWizardTopic(type === 'Seminar' ? 'Research Seminar Report' : type === 'Proposal' ? 'Thesis Proposal Outline' : 'Graduation Thesis Project')
-    setWizardStep(1)
-    handleDocTypeChange(type)
+    const finalTitle = type === 'Seminar' ? 'Seminar Report Blueprint' 
+                     : type === 'Proposal' ? 'Research Proposal Outline' 
+                     : type === 'Project' ? 'Graduation Thesis Project' 
+                     : 'Untitled Document'
+    const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    
+    // Determine settings
+    let fontFamily: 'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier' = 'default'
+    let lineSpacing = '1.5'
+    
+    if (type === 'Seminar') {
+      fontFamily = 'playfair'
+      lineSpacing = '2.0'
+    } else if (type === 'Proposal') {
+      fontFamily = 'arial'
+      lineSpacing = '1.5'
+    } else if (type === 'Project') {
+      fontFamily = 'arial'
+      lineSpacing = '1.5'
+    }
+
+    // Determine content template
+    let templateContent = ''
+    if (type === 'Seminar') {
+      templateContent = SEMINAR_TEMPLATE.replace('[Insert Seminar Topic Here]', finalTitle)
+    } else if (type === 'Proposal') {
+      templateContent = PROPOSAL_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
+    } else if (type === 'Project') {
+      templateContent = PROJECT_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
+    } else {
+      templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
+    }
+
+    const formattedHtml = ensurePaginatedHtml(templateContent)
+
+    // Set active states
+    setActiveProjectId(newProjId)
+    localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
+    setDocumentTitle(finalTitle)
+    setDocHeader('')
+    setDocFooter('')
+    setShowDashboard(false)
     setProjectSources([])
-    setCustomChapterOutline('')
-    setShowWizard(true)
+    
+    // Set settings
+    setWizardDocType(type)
+    setWizardFontFamily(fontFamily)
+    setWizardLineSpacing(lineSpacing)
+    setWizardTopic(finalTitle)
+
+    if (editor) {
+      editor.commands.setContent(formattedHtml)
+      setTimeout(() => {
+        let chain = editor.chain().focus().selectAll()
+        if (fontFamily === 'default') {
+          chain = chain.unsetFontFamily()
+        } else {
+          chain = chain.setFontFamily(fontFamily)
+        }
+        chain.setLineHeight(lineSpacing).run()
+        runPagination(editor)
+      }, 150)
+    }
+
+    const newProj: Project = {
+      id: newProjId,
+      title: finalTitle,
+      content: JSON.stringify(editor ? editor.getJSON() : {}),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      wordCount: editor ? (editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0) : 0,
+      charCount: editor ? editor.getText().length : 0,
+      documentType: type,
+      academicLevel: 'Undergraduate',
+      docHeader: '',
+      docFooter: ''
+    }
+
+    setProjects(prev => {
+      const filtered = prev.filter(p => p.id !== newProjId)
+      const updated = [newProj, ...filtered]
+      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      return updated
+    })
+    setIsSaved(true)
   }
 
   // Delete a project
@@ -4300,7 +4423,7 @@ export default function Editor() {
         </>
       )}
 
-      {showWizard && (
+      {false && showWizard && (
         <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none">
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
             {/* Header Banner */}
@@ -4690,7 +4813,7 @@ export default function Editor() {
                 <button
                   onClick={() => {
                     setShowWizard(false)
-                    if (!editor.getText().trim()) {
+                    if (editor && !editor.getText().trim()) {
                       editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
                     }
                   }}
