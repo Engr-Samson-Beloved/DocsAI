@@ -1276,8 +1276,18 @@ export default function Editor() {
   const scrollToHeading = (index: number) => {
     const headingElements = document.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
     const target = headingElements[index] as HTMLElement
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const container = scrollContainerRef.current
+    if (target && container) {
+      const containerRect = container.getBoundingClientRect()
+      const targetRect = target.getBoundingClientRect()
+      
+      // Calculate top position of target relative to container's content viewport
+      const offsetTop = targetRect.top - containerRect.top + container.scrollTop - (container.clientHeight / 2) + (targetRect.height / 2)
+      
+      container.scrollTo({
+        top: offsetTop,
+        behavior: 'smooth'
+      })
       
       // Visual feedback highlight
       target.classList.add('bg-indigo-50', 'dark:bg-indigo-950/40', 'transition-all', 'duration-500')
@@ -1788,28 +1798,7 @@ export default function Editor() {
     }
   }, [])
 
-  // Explicit mouse wheel scrolling handler to guarantee mouse wheel scroll works on pages
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
 
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) return // Allow browser/system pinch-to-zoom
-      if (e.deltaY !== 0 || e.deltaX !== 0) {
-        e.preventDefault()
-        container.scrollBy({
-          top: e.deltaY,
-          left: e.deltaX,
-          behavior: 'auto'
-        })
-      }
-    }
-
-    container.addEventListener('wheel', handleWheel, { passive: false })
-    return () => {
-      container.removeEventListener('wheel', handleWheel)
-    }
-  }, [])
 
   // Sync headers and footers with Tiptap storage
   useEffect(() => {
