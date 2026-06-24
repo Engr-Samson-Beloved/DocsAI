@@ -4367,7 +4367,7 @@ export default function Editor() {
         <div 
           ref={scrollContainerRef}
           tabIndex={0}
-          className="scroll-container flex-1 min-h-0 w-full overflow-y-auto py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center focus:outline-none"
+          className="scroll-container flex-1 min-h-0 w-full overflow-y-scroll py-8 px-4 sm:px-8 bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center focus:outline-none"
           style={{
             scrollbarGutter: 'stable',
             overscrollBehaviorY: 'contain'
