@@ -10,7 +10,16 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
-import { saveSource, getSourcesForProject, deleteSource, deleteSourcesForProject } from '../../utils/db'
+import { 
+  saveSource, 
+  getSourcesForProject, 
+  deleteSource, 
+  deleteSourcesForProject,
+  saveProject,
+  getAllProjects,
+  deleteProject as dbDeleteProject,
+  saveProjectsBatch
+} from '../../utils/db'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -809,7 +818,7 @@ export default function Editor() {
     setProjects(prev => {
       const filtered = prev.filter(p => p.id !== newProjId)
       const updated = [newProj, ...filtered]
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      saveProject(newProj).catch(e => console.error("Failed to save project to IndexedDB", e))
       return updated
     })
     setIsSaved(true)
@@ -899,7 +908,7 @@ export default function Editor() {
     setProjects(prev => {
       const filtered = prev.filter(p => p.id !== newProjId)
       const updated = [newProj, ...filtered]
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      saveProject(newProj).catch(e => console.error("Failed to save project to IndexedDB", e))
       return updated
     })
     setIsSaved(true)
@@ -910,10 +919,9 @@ export default function Editor() {
     if (window.confirm('Are you sure you want to delete this project writing? This action cannot be undone.')) {
       const updated = projects.filter(p => p.id !== id)
       setProjects(updated)
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
       
-      // Delete associated sources from IndexedDB
-      deleteSourcesForProject(id)
+      // Async IndexedDB delete (which deletes project and its sources)
+      dbDeleteProject(id).catch(e => console.error("Failed to delete project from IndexedDB", e))
       
       // If deleted project is active, reset active project ID
       if (activeProjectId === id) {
@@ -947,7 +955,10 @@ export default function Editor() {
         return p
       })
       setProjects(updated)
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+      const updatedProj = updated.find(p => p.id === id)
+      if (updatedProj) {
+        saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+      }
 
       // If active project is renamed, update state title
       if (activeProjectId === id) {
@@ -1077,19 +1088,15 @@ export default function Editor() {
       setProjects(prevProjects => {
         const project = prevProjects.find(p => p.id === activeProjectId)
         if (project && (project.title !== documentTitle || project.docHeader !== docHeader || project.docFooter !== docFooter)) {
-          const updated = prevProjects.map(p => {
-            if (p.id === activeProjectId) {
-              return {
-                ...p,
-                title: documentTitle,
-                docHeader,
-                docFooter,
-                updatedAt: Date.now()
-              }
-            }
-            return p
-          })
-          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+          const updatedProj = {
+            ...project,
+            title: documentTitle,
+            docHeader,
+            docFooter,
+            updatedAt: Date.now()
+          }
+          const updated = prevProjects.map(p => p.id === activeProjectId ? updatedProj : p)
+          saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
           setIsSaved(true)
           return updated
         }
@@ -1100,81 +1107,102 @@ export default function Editor() {
     return () => clearTimeout(timer)
   }, [documentTitle, docHeader, docFooter, activeProjectId, projects.length])
 
-  // Load/initialize projects list and active project on mount (with single-doc migration support)
+  // Load/initialize projects list and active project on mount (with IndexedDB migration support)
   useEffect(() => {
-    const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
-    const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
-    
-    let list: Project[] = []
-    if (storedProjects) {
+    const initializeStorage = async () => {
+      let list: Project[] = []
+      
       try {
-        list = JSON.parse(storedProjects)
-      } catch (e) {
-        console.error("Failed to parse projects list", e)
-      }
-    }
+        // 1. Try to load projects from IndexedDB
+        list = await getAllProjects()
+        
+        // 2. If IndexedDB is empty, check for legacy localStorage projects to migrate
+        const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
+        const legacyContent = localStorage.getItem('tiptap-content')
+        const legacyTitle = localStorage.getItem('docTitle') || 'Untitled Document'
 
-    // Migration for legacy single-document data
-    const legacyContent = localStorage.getItem('tiptap-content')
-    const legacyTitle = localStorage.getItem('docTitle') || 'Untitled Document'
-    
-    if (list.length === 0 && legacyContent) {
-      const migratedProj: Project = {
-        id: 'proj_migrated_' + Date.now(),
-        title: legacyTitle,
-        content: legacyContent,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        wordCount: wordCount || 0,
-        charCount: charCount || 0,
-        documentType: 'Custom',
-        academicLevel: 'Undergraduate',
-        academicTone: 'Analytical',
-        docHeader: localStorage.getItem('docHeader') || '',
-        docFooter: localStorage.getItem('docFooter') || ''
+        if (list.length === 0) {
+          if (storedProjects) {
+            try {
+              const legacyList = JSON.parse(storedProjects) as Project[]
+              if (legacyList && legacyList.length > 0) {
+                // Batch migrate legacy projects to IndexedDB
+                await saveProjectsBatch(legacyList)
+                list = legacyList
+                console.log(`Successfully migrated ${legacyList.length} legacy projects to IndexedDB.`)
+                // Clean up legacy localStorage keys
+                localStorage.removeItem(STORAGE_KEY_PROJECTS)
+              }
+            } catch (e) {
+              console.error("Failed to parse/migrate legacy projects list", e)
+            }
+          } else if (legacyContent) {
+            // Migration fallback for legacy single-document data (very old version)
+            const migratedProj: Project = {
+              id: 'proj_migrated_' + Date.now(),
+              title: legacyTitle,
+              content: legacyContent,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              wordCount: wordCount || 0,
+              charCount: charCount || 0,
+              documentType: 'Custom',
+              academicLevel: 'Undergraduate',
+              academicTone: 'Analytical',
+              docHeader: localStorage.getItem('docHeader') || '',
+              docFooter: localStorage.getItem('docFooter') || ''
+            }
+            await saveProject(migratedProj)
+            list = [migratedProj]
+            localStorage.setItem(STORAGE_KEY_ACTIVE_ID, migratedProj.id)
+            
+            // Clean up single legacy keys
+            localStorage.removeItem('tiptap-content')
+            localStorage.removeItem('docTitle')
+            localStorage.removeItem('docHeader')
+            localStorage.removeItem('docFooter')
+          }
+        }
+      } catch (err) {
+        console.error("Failed to initialize IndexedDB storage", err)
       }
-      list = [migratedProj]
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(list))
-      localStorage.setItem(STORAGE_KEY_ACTIVE_ID, migratedProj.id)
+
+      // Update React state with loaded/migrated projects
       setProjects(list)
-      setActiveProjectId(migratedProj.id)
-      setDocumentTitle(migratedProj.title)
-      setDocHeader(migratedProj.docHeader || '')
-      setDocFooter(migratedProj.docFooter || '')
-      setShowDashboard(false)
-      return
+
+      // 3. Setup the active project
+      const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+      if (storedActiveId && list.some(p => p.id === storedActiveId)) {
+        setActiveProjectId(storedActiveId)
+        
+        const project = list.find(p => p.id === storedActiveId)!
+        setDocumentTitle(project.title)
+        setDocHeader(project.docHeader || '')
+        setDocFooter(project.docFooter || '')
+        setWordCount(project.wordCount)
+        setCharCount(project.charCount)
+        setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+        setWizardAcademicTone(project.academicTone || 'Analytical')
+        setWizardDocType(project.documentType || 'Project')
+        setShowDashboard(true)
+
+        // Load project reference documents from IndexedDB
+        getSourcesForProject(storedActiveId).then(projSources => {
+          setProjectSources(projSources.map(s => ({
+            id: s.id,
+            name: s.name,
+            content: s.content,
+            type: s.type
+          })))
+        }).catch(e => {
+          console.error("Failed to load project sources on mount:", e)
+        })
+      } else {
+        setShowDashboard(true)
+      }
     }
 
-    setProjects(list)
-
-    if (storedActiveId && list.some(p => p.id === storedActiveId)) {
-      setActiveProjectId(storedActiveId)
-      // Load states
-      const project = list.find(p => p.id === storedActiveId)!
-      setDocumentTitle(project.title)
-      setDocHeader(project.docHeader || '')
-      setDocFooter(project.docFooter || '')
-      setWordCount(project.wordCount)
-      setCharCount(project.charCount)
-      setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
-      setWizardAcademicTone(project.academicTone || 'Analytical')
-      setWizardDocType(project.documentType || 'Project')
-      setShowDashboard(true)
-
-      // Load project reference documents from IndexedDB
-      getSourcesForProject(storedActiveId).then(projSources => {
-        setProjectSources(projSources.map(s => ({
-          id: s.id,
-          name: s.name,
-          content: s.content,
-          type: s.type
-        })))
-      }).catch(e => {
-        console.error("Failed to load project sources on mount:", e)
-      })
-    } else {
-      setShowDashboard(true)
-    }
+    initializeStorage()
   }, [])
 
   // Toggle dark/light theme
@@ -1646,19 +1674,23 @@ export default function Editor() {
 
       if (activeProjectIdRef.current) {
         setProjects(prevProjects => {
+          let updatedProj: Project | null = null
           const updated = prevProjects.map(p => {
             if (p.id === activeProjectIdRef.current) {
-              return {
+              updatedProj = {
                 ...p,
                 content: JSON.stringify(contentJSON),
                 updatedAt: Date.now(),
                 wordCount: words,
                 charCount: chars
               }
+              return updatedProj
             }
             return p
           })
-          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+          if (updatedProj) {
+            saveProject(updatedProj).catch(e => console.error("Failed to auto-save project to IndexedDB", e))
+          }
           return updated
         })
         setIsSaved(true)
@@ -1817,13 +1849,20 @@ export default function Editor() {
     }
   }, [])
 
-  // Explicit mouse wheel scrolling handler to guarantee mouse wheel scroll works on pages
+  // Explicit mouse wheel scrolling handler to guarantee mouse wheel scroll works on pages.
+  // Wheel events over .page-sheet / .page-content (overflow:hidden) do NOT bubble
+  // up to the scroll container natively. We listen at window level to catch them.
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey) return // Allow browser/system pinch-to-zoom
+
+      // Only intercept wheel events when cursor is inside the scroll container area
+      const target = e.target as HTMLElement
+      if (!container.contains(target) && target !== container) return
+
       if (e.deltaY !== 0 || e.deltaX !== 0) {
         e.preventDefault()
         container.scrollBy({
@@ -1834,9 +1873,10 @@ export default function Editor() {
       }
     }
 
-    container.addEventListener('wheel', handleWheel, { passive: false })
+    // Attach to window to catch events trapped by overflow:hidden children
+    window.addEventListener('wheel', handleWheel, { passive: false })
     return () => {
-      container.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('wheel', handleWheel)
     }
   }, [])
 
@@ -1861,55 +1901,63 @@ export default function Editor() {
     }
   }, [docHeader, docFooter, editor])
 
-  // Load editor content on mount from localstorage (multi-project active document loading)
+  // Load editor content on mount (multi-project active document loading)
   useEffect(() => {
     if (!editor) return
 
-    const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
-    const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
-    
-    let loaded = false
-    if (storedActiveId && storedProjects) {
-      try {
-        const list = JSON.parse(storedProjects) as Project[]
-        const project = list.find(p => p.id === storedActiveId)
-        if (project) {
-          editor.commands.setContent(ensurePaginatedJson(JSON.parse(project.content)))
-          applyOnboardingStyles(editor)
-          loaded = true
-        }
-      } catch (e) {
-        console.error("Failed to load active project content on editor mount:", e)
-      }
-    }
+    const loadActiveContent = async () => {
+      const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+      let loaded = false
 
-    if (!loaded) {
-      // Check for legacy single-document content
-      const legacyContent = localStorage.getItem('tiptap-content')
-      if (legacyContent) {
+      if (storedActiveId) {
         try {
-          editor.commands.setContent(ensurePaginatedJson(JSON.parse(legacyContent)))
-          applyOnboardingStyles(editor)
+          // Attempt to load from the projects state first, or fallback to IndexedDB directly
+          let project = projects.find(p => p.id === storedActiveId)
+          if (!project) {
+            const allProj = await getAllProjects()
+            project = allProj.find(p => p.id === storedActiveId)
+          }
+
+          if (project) {
+            editor.commands.setContent(ensurePaginatedJson(JSON.parse(project.content)))
+            applyOnboardingStyles(editor)
+            loaded = true
+          }
         } catch (e) {
-          editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
+          console.error("Failed to load active project content on editor mount:", e)
         }
-      } else {
-        editor.commands.setContent(ensurePaginatedHtml(''))
       }
+
+      if (!loaded) {
+        // Check for legacy single-document content
+        const legacyContent = localStorage.getItem('tiptap-content')
+        if (legacyContent) {
+          try {
+            editor.commands.setContent(ensurePaginatedJson(JSON.parse(legacyContent)))
+            applyOnboardingStyles(editor)
+          } catch (e) {
+            editor.commands.setContent(ensurePaginatedHtml(DEFAULT_CONTENT))
+          }
+        } else {
+          editor.commands.setContent(ensurePaginatedHtml(''))
+        }
+      }
+
+      // Initial stat calculations
+      setTimeout(() => {
+        const text = editor.getText()
+        setCharCount(text.length)
+        setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0)
+        setReadTime(Math.ceil((text.trim() ? text.trim().split(/\s+/).length : 0) / 200))
+        updateOutline()
+        handleScroll()
+        
+        // Run pagination immediately on mount
+        runPagination(editor)
+      }, 150)
     }
 
-    // Initial stat calculations
-    setTimeout(() => {
-      const text = editor.getText()
-      setCharCount(text.length)
-      setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0)
-      setReadTime(Math.ceil((text.trim() ? text.trim().split(/\s+/).length : 0) / 200))
-      updateOutline()
-      handleScroll()
-      
-      // Run pagination immediately on mount
-      runPagination(editor)
-    }, 150)
+    loadActiveContent()
   }, [editor])
 
   // Periodic Auto-save effect
@@ -3331,7 +3379,7 @@ export default function Editor() {
       setProjects(prev => {
         const filtered = prev.filter(p => p.id !== newProjId)
         const updated = [newProj, ...filtered]
-        localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+        saveProject(newProj).catch(e => console.error("Failed to save project to IndexedDB", e))
         return updated
       })
       setIsSaved(true)
@@ -3541,36 +3589,32 @@ export default function Editor() {
   const handleAcademicLevelChange = (level: string) => {
     setWizardAcademicLevel(level)
     if (activeProjectId) {
-      const updated = projects.map(p => {
-        if (p.id === activeProjectId) {
-          return {
-            ...p,
-            academicLevel: level,
-            updatedAt: Date.now()
-          }
+      const project = projects.find(p => p.id === activeProjectId)
+      if (project) {
+        const updatedProj = {
+          ...project,
+          academicLevel: level,
+          updatedAt: Date.now()
         }
-        return p
-      })
-      setProjects(updated)
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+        saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+      }
     }
   }
 
   const handleAcademicToneChange = (tone: string) => {
     setWizardAcademicTone(tone)
     if (activeProjectId) {
-      const updated = projects.map(p => {
-        if (p.id === activeProjectId) {
-          return {
-            ...p,
-            academicTone: tone,
-            updatedAt: Date.now()
-          }
+      const project = projects.find(p => p.id === activeProjectId)
+      if (project) {
+        const updatedProj = {
+          ...project,
+          academicTone: tone,
+          updatedAt: Date.now()
         }
-        return p
-      })
-      setProjects(updated)
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+        saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+      }
     }
   }
 
@@ -3609,18 +3653,16 @@ export default function Editor() {
     }
 
     if (activeProjectId) {
-      const updated = projects.map(p => {
-        if (p.id === activeProjectId) {
-          return {
-            ...p,
-            documentType: type,
-            updatedAt: Date.now()
-          }
+      const project = projects.find(p => p.id === activeProjectId)
+      if (project) {
+        const updatedProj = {
+          ...project,
+          documentType: type,
+          updatedAt: Date.now()
         }
-        return p
-      })
-      setProjects(updated)
-      localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+        saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+      }
     }
   }
 
@@ -3780,21 +3822,19 @@ export default function Editor() {
         // Save snapshot immediately
         if (activeProjectId) {
           const contentJSON = editor.getJSON()
-          const updated = projects.map(p => {
-            if (p.id === activeProjectId) {
-              return {
-                ...p,
-                content: JSON.stringify(contentJSON),
-                updatedAt: Date.now(),
-                wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
-                charCount: editor.getText().length
-              }
+          const project = projects.find(p => p.id === activeProjectId)
+          if (project) {
+            const updatedProj = {
+              ...project,
+              content: JSON.stringify(contentJSON),
+              updatedAt: Date.now(),
+              wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
+              charCount: editor.getText().length
             }
-            return p
-          })
-          setProjects(updated)
-          localStorage.setItem(STORAGE_KEY_PROJECTS, JSON.stringify(updated))
-          setIsSaved(true)
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+            saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+            setIsSaved(true)
+          }
         }
       }
     } catch (err) {
