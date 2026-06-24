@@ -1276,18 +1276,37 @@ export default function Editor() {
   const scrollToHeading = (index: number) => {
     const headingElements = document.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
     const target = headingElements[index] as HTMLElement
-    const container = scrollContainerRef.current
-    if (target && container) {
-      const containerRect = container.getBoundingClientRect()
-      const targetRect = target.getBoundingClientRect()
-      
-      // Calculate top position of target relative to container's content viewport
-      const offsetTop = targetRect.top - containerRect.top + container.scrollTop - (container.clientHeight / 2) + (targetRect.height / 2)
-      
-      container.scrollTo({
-        top: offsetTop,
-        behavior: 'smooth'
-      })
+    if (target) {
+      // Restore the smooth browser-native scrollIntoView logic from commit 6c40eeb
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+      // Set active heading index in sidebar outline immediately
+      setActiveHeadingIndex(index)
+
+      // Place editor focus and text selection on the heading content
+      if (editor) {
+        try {
+          const pos = editor.view.posAtDOM(target, 0)
+          if (pos !== undefined && pos >= 0) {
+            const headingNode = editor.state.doc.nodeAt(pos)
+            if (headingNode) {
+              const startPos = pos + 1
+              const endPos = pos + headingNode.nodeSize - 1
+              
+              // Update text selection in editor
+              editor.commands.setTextSelection({ from: startPos, to: endPos })
+              
+              // Focus editor DOM container without default jumpy browser scroll
+              const domEl = editor.view.dom as HTMLElement
+              if (domEl) {
+                domEl.focus({ preventScroll: true })
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Could not set editor selection for heading:", err)
+        }
+      }
       
       // Visual feedback highlight
       target.classList.add('bg-indigo-50', 'dark:bg-indigo-950/40', 'transition-all', 'duration-500')
