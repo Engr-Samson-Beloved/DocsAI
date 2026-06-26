@@ -2202,7 +2202,7 @@ export default function Editor() {
           filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
           image: { type: 'jpeg', quality: 0.98 },
           html2canvas: { 
-            scale: 2, 
+            scale: 1.5, 
             useCORS: true, 
             logging: false 
           },
@@ -2226,6 +2226,11 @@ export default function Editor() {
         setIsExporting(false)
       }
     }, 150)
+  }
+
+  // Export to PDF using browser native print engine (Fast, Searchable Vector format)
+  const exportToPdfPrint = () => {
+    window.print()
   }
 
   // Clear the document completely, leaving it with a blank document (one blank page)
@@ -4121,12 +4126,21 @@ export default function Editor() {
                 </button>
                 <button 
                   onClick={() => {
+                    exportToPdfPrint()
+                    setShowExportMenu(false)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  PDF Document (Fast / Searchable)
+                </button>
+                <button 
+                  onClick={() => {
                     exportToPdf()
                     setShowExportMenu(false)
                   }}
                   className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
                 >
-                  PDF Document (.pdf)
+                  PDF Document (Legacy Image)
                 </button>
                 <button 
                   onClick={() => {

@@ -243,6 +243,44 @@ body {
 
 /* Printing styles to hide the visual page-break divider in final compile */
 @media print {
+  /* Hide headers, sidebars, outline, wizard, and print-action controls */
+  header,
+  aside,
+  button,
+  .print\:hidden,
+  .print-hidden,
+  .delete-page-btn,
+  .add-page-btn {
+    display: none !important;
+  }
+
+  /* Make sure the main layout occupies the full print space and allows overflow */
+  body, 
+  html, 
+  main, 
+  #__next,
+  .scroll-container,
+  .document-container {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Override fixed dimensions on container sheets */
+  .cursor-text[style] {
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
   .tiptap .page-break {
     border-top: none !important;
     color: transparent !important;
@@ -253,21 +291,19 @@ body {
     line-height: 0 !important;
   }
 
-  body {
-    background: white !important;
-    color: black !important;
-  }
-
+  /* Ensure pages break natively and span the full print width */
   .page-sheet {
-    box-shadow: none !important;
-    border: none !important;
+    width: 100% !important;
+    height: 297mm !important; /* Standard A4 height */
     margin: 0 !important;
+    padding: 20mm 20mm 20mm 20mm !important; /* Printable margins */
     page-break-after: always !important;
     break-after: page !important;
-  }
-
-  .print\:hidden {
-    display: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    box-sizing: border-box !important;
+    background: white !important;
+    color: black !important;
   }
 }
 
