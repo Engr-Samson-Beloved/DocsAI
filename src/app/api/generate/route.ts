@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     const isGrokTarget = modelTarget === 'grok'
 
     if (isGrokTarget && process.env.GROK_API_KEY) {
-      activeModelName = 'grok-2'
+      activeModelName = 'grok-2-1212'
       console.log('Routing request directly to xAI Grok API')
     } else {
       // Try prioritized Gemini models
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
       // Automatically fall back to Grok if Gemini is rate-limited or fails
       if ((!responseStream || !activeModelName) && process.env.GROK_API_KEY) {
         console.warn('All Gemini models failed. Initiating cooperative failover to xAI Grok API')
-        activeModelName = 'grok-2'
+        activeModelName = 'grok-2-1212'
       }
     }
 
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
                 'Authorization': `Bearer ${grokApiKey}`
               },
               body: JSON.stringify({
-                model: 'grok-2',
+                model: 'grok-2-1212',
                 stream: true,
                 messages: [
                   { role: 'system', content: systemInstruction },
