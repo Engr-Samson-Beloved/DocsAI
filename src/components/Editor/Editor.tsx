@@ -20,6 +20,7 @@ import {
   deleteProject as dbDeleteProject,
   saveProjectsBatch
 } from '../../utils/db'
+import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -2912,11 +2913,35 @@ export default function Editor() {
     }
 
     try {
-      // Build unified context including ingested sources if they exist
-      let unifiedContext = selectedText || editor.getText()
+      // Build optimized context to save tokens and improve relevance
+      let documentContext = ''
+      if (selectedText) {
+        documentContext = selectedText
+      } else {
+        // Extract cursor-centered sliding window: 2000 chars before, 1000 chars after cursor position
+        const { state } = editor
+        const { selection } = state
+        const { from } = selection
+        const startPos = Math.max(0, from - 2000)
+        const endPos = Math.min(state.doc.content.size, from + 1000)
+        documentContext = state.doc.textBetween(startPos, endPos, ' ')
+      }
+
+      let unifiedContext = documentContext
       if (projectSources.length > 0) {
-        const sourcesText = projectSources.map(s => `[Source Research File: ${s.name}]\n${s.content.replace(/<[^>]*>/g, '')}`).join('\n\n')
-        unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
+        // Pre-chunk all ingested sources to support local retrieval
+        const allChunks = projectSources.flatMap(s => 
+          chunkDocument(s.name, s.content.replace(/<[^>]*>/g, ''))
+        )
+        // Retrieve top 3 most relevant source chunks matching the user's prompt text
+        const relevantChunks = retrieveRelevantChunks(promptText, allChunks, 3)
+        
+        if (relevantChunks.length > 0) {
+          const sourcesText = relevantChunks
+            .map(c => `[Source Research File: ${c.sourceName}]\n... ${c.text} ...`)
+            .join('\n\n')
+          unifiedContext = `Relevant Ingested Source Excerpts:\n\"\"\"\n${sourcesText}\n\"\"\"\n\nDocument Context Around Cursor:\n\"\"\"\n${documentContext}\n\"\"\"`
+        }
       }
 
       const activeProject = projects.find(p => p.id === activeProjectId)
@@ -3057,11 +3082,22 @@ export default function Editor() {
     const promptText = `Rewrite or edit the following text context as requested: "${finalPrompt}". Return ONLY the revised version of this paragraph/sentence, styled with standard HTML if needed.`
 
     try {
-      // Build unified context including ingested sources if they exist
+      // Build optimized context to save tokens and improve relevance
       let unifiedContext = popupContextText
       if (projectSources.length > 0) {
-        const sourcesText = projectSources.map(s => `[Source Research File: ${s.name}]\n${s.content.replace(/<[^>]*>/g, '')}`).join('\n\n')
-        unifiedContext = `Ingested Project Sources:\n\"\"\"\n${sourcesText}\n\"\"\"\n\n${unifiedContext}`
+        // Pre-chunk all ingested sources to support local retrieval
+        const allChunks = projectSources.flatMap(s => 
+          chunkDocument(s.name, s.content.replace(/<[^>]*>/g, ''))
+        )
+        // Retrieve top 3 most relevant source chunks matching the rewrite request query
+        const relevantChunks = retrieveRelevantChunks(promptText, allChunks, 3)
+        
+        if (relevantChunks.length > 0) {
+          const sourcesText = relevantChunks
+            .map(c => `[Source Research File: ${c.sourceName}]\n... ${c.text} ...`)
+            .join('\n\n')
+          unifiedContext = `Relevant Ingested Source Excerpts:\n\"\"\"\n${sourcesText}\n\"\"\"\n\nText Context to Edit:\n\"\"\"\n${popupContextText}\n\"\"\"`
+        }
       }
 
       const activeProject = projects.find(p => p.id === activeProjectId)
