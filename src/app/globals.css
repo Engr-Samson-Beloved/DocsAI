@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #F1F3F5; /* Soft Gray for backgrounds/cards */
   --foreground: #2D3748; /* Readable dark slate text */
