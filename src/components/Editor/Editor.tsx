@@ -2915,8 +2915,77 @@ export default function Editor() {
     try {
       // Build optimized context to save tokens and improve relevance
       let documentContext = ''
+      let contextLocationText = 'Cursor Sliding Window'
+
+      // Parse prompt for page/section location targets
+      const pageMatch = promptText.match(/(?:page\s+|p\.\s*)(\d+)/i)
+      const sectionMatch = promptText.match(/(?:section\s+|sec\.\s*|chapter\s+)(\d+\.\d+|\d+)/i)
+
       if (selectedText) {
         documentContext = selectedText
+        contextLocationText = 'Highlighted Selection'
+      } else if (pageMatch) {
+        const pageNum = parseInt(pageMatch[1])
+        const targetPageIdx = pageNum - 1
+        let pageText = ''
+        let count = 0
+        
+        editor.state.doc.forEach((node) => {
+          if (node.type.name === 'page') {
+            if (count === targetPageIdx) {
+              pageText = node.textContent
+            }
+            count++
+          }
+        })
+
+        if (pageText) {
+          documentContext = pageText
+          contextLocationText = `Page ${pageNum}`
+        } else {
+          // Fallback to cursor sliding window
+          const { state } = editor
+          const { from } = state.selection
+          const startPos = Math.max(0, from - 2000)
+          const endPos = Math.min(state.doc.content.size, from + 1000)
+          documentContext = state.doc.textBetween(startPos, endPos, ' ')
+          contextLocationText = `Cursor Sliding Window (Page ${pageNum} not found)`
+        }
+      } else if (sectionMatch) {
+        const sectionNum = sectionMatch[1]
+        let headingText = ''
+        let sectionText = ''
+        let capture = false
+        
+        editor.state.doc.descendants((node) => {
+          if (node.type.name === 'heading') {
+            const hText = node.textContent
+            if (hText.toLowerCase().includes(sectionNum.toLowerCase()) || 
+                hText.toLowerCase().replace(/[^a-z0-9]/g, '').includes(sectionNum.toLowerCase().replace(/[^a-z0-9]/g, ''))) {
+              headingText = hText
+              capture = true
+              sectionText = '' // Reset and capture from here
+            } else if (capture) {
+              capture = false // Stop capturing on next heading
+            }
+          } else if (capture && node.isTextblock) {
+            sectionText += node.textContent + '\n'
+          }
+          return true
+        })
+
+        if (sectionText.trim()) {
+          documentContext = `Heading: ${headingText}\nContent:\n${sectionText}`
+          contextLocationText = `Section ${sectionNum}`
+        } else {
+          // Fallback to cursor sliding window
+          const { state } = editor
+          const { from } = state.selection
+          const startPos = Math.max(0, from - 2000)
+          const endPos = Math.min(state.doc.content.size, from + 1000)
+          documentContext = state.doc.textBetween(startPos, endPos, ' ')
+          contextLocationText = `Cursor Sliding Window (Section ${sectionNum} not found)`
+        }
       } else {
         // Extract cursor-centered sliding window: 2000 chars before, 1000 chars after cursor position
         const { state } = editor
@@ -2940,8 +3009,12 @@ export default function Editor() {
           const sourcesText = relevantChunks
             .map(c => `[Source Research File: ${c.sourceName}]\n... ${c.text} ...`)
             .join('\n\n')
-          unifiedContext = `Relevant Ingested Source Excerpts:\n\"\"\"\n${sourcesText}\n\"\"\"\n\nDocument Context Around Cursor:\n\"\"\"\n${documentContext}\n\"\"\"`
+          unifiedContext = `Relevant Ingested Source Excerpts:\n\"\"\"\n${sourcesText}\n\"\"\"\n\nDocument Context [${contextLocationText}]:\n\"\"\"\n${documentContext}\n\"\"\"`
+        } else {
+          unifiedContext = `Document Context [${contextLocationText}]:\n\"\"\"\n${documentContext}\n\"\"\"`
         }
+      } else {
+        unifiedContext = `Document Context [${contextLocationText}]:\n\"\"\"\n${documentContext}\n\"\"\"`
       }
 
       const activeProject = projects.find(p => p.id === activeProjectId)
@@ -4616,9 +4689,12 @@ export default function Editor() {
                   <textarea
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
-                    placeholder="E.g., Rewrite this paragraph to be more academic..."
+                    placeholder="E.g., Go to page 2 and expand the limitations paragraph..."
                     className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 dark:focus:ring-indigo-600 outline-none text-zinc-700 dark:text-zinc-300 h-24 resize-none"
                   />
+                  <div className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-normal bg-zinc-50/50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-150 dark:border-zinc-800 border-dashed">
+                    💡 <strong>Pro Tip:</strong> Type <strong>page 2</strong>, <strong>Chapter 2</strong>, or <strong>section 1.2</strong> in your prompt. WordPI will automatically find and target that exact part of your document!
+                  </div>
                   <button
                     disabled={isSimulatingAI || !aiPrompt.trim()}
                     onClick={() => handleAiAction('custom')}
