@@ -749,6 +749,7 @@ export default function Editor() {
   const [wizardTopic, setWizardTopic] = useState('')
   const [wizardAcademicLevel, setWizardAcademicLevel] = useState('Undergraduate')
   const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
+  const [aiEngine, setAiEngine] = useState<'gemini' | 'grok'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
@@ -3025,7 +3026,8 @@ export default function Editor() {
           prompt: promptText,
           context: unifiedContext,
           academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
-          documentType: activeProject?.documentType || wizardDocType || 'Custom'
+          documentType: activeProject?.documentType || wizardDocType || 'Custom',
+          modelTarget: aiEngine
         })
       })
 
@@ -3181,7 +3183,8 @@ export default function Editor() {
           prompt: promptText,
           context: unifiedContext,
           academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
-          documentType: activeProject?.documentType || wizardDocType || 'Custom'
+          documentType: activeProject?.documentType || wizardDocType || 'Custom',
+          modelTarget: aiEngine
         })
       })
 
@@ -3616,7 +3619,8 @@ export default function Editor() {
             Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`,
             context: contextText,
             academicLevel: wizardAcademicLevel || 'Undergraduate',
-            documentType: wizardDocType || 'Custom'
+            documentType: wizardDocType || 'Custom',
+            modelTarget: aiEngine
           })
         })
 
@@ -3889,7 +3893,8 @@ export default function Editor() {
           context: contextText,
           academicLevel: wizardAcademicLevel || 'Undergraduate',
           academicTone: wizardAcademicTone || 'Analytical',
-          documentType: wizardDocType || 'Custom'
+          documentType: wizardDocType || 'Custom',
+          modelTarget: aiEngine
         })
       })
 
@@ -4669,6 +4674,21 @@ export default function Editor() {
                           <option value="Critical">Critical / Evaluative</option>
                           <option value="Objective">Objective / Neutral</option>
                           <option value="Persuasive">Persuasive / Argumentative</option>
+                        </select>
+                      </div>
+
+                      {/* AI Generation Engine Dropdown */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase font-semibold block">
+                          AI Generation Engine
+                        </label>
+                        <select
+                          value={aiEngine}
+                          onChange={(e) => setAiEngine(e.target.value as 'gemini' | 'grok')}
+                          className="w-full text-xs p-2 rounded border border-zinc-200 dark:border-zinc-800 focus:ring-1 focus:ring-indigo-500 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
+                        >
+                          <option value="gemini">WordPI Core (Gemini 2.5 Flash)</option>
+                          <option value="grok">WordPI Searcher (xAI Grok-2)</option>
                         </select>
                       </div>
                     </div>

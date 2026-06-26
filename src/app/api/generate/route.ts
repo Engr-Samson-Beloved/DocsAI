@@ -12,7 +12,7 @@ const PRIORITIZED_MODELS = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, context, academicLevel, documentType } = await req.json()
+    const { prompt, context, academicLevel, documentType, modelTarget } = await req.json()
 
     if (!prompt) {
       return new Response(
@@ -93,30 +93,44 @@ export async function POST(req: NextRequest) {
     let activeModelName = ''
     let lastError: any = null
 
-    // Try prioritized models in sequence to handle server-side rate limits (503) or availability issues (404)
-    for (const modelName of PRIORITIZED_MODELS) {
-      try {
-        console.log(`Starting generation attempt with model: ${modelName}`)
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          systemInstruction: systemInstruction
-        })
+    // Determine target engine
+    const isGrokTarget = modelTarget === 'grok'
 
-        // Call stream generator
-        responseStream = await model.generateContentStream({
-          contents: [{ role: 'user', parts: [{ text: contentPrompt }] }],
-        })
+    if (isGrokTarget && process.env.GROK_API_KEY) {
+      activeModelName = 'grok-2'
+      console.log('Routing request directly to xAI Grok API')
+    } else {
+      // Try prioritized Gemini models
+      for (const modelName of PRIORITIZED_MODELS) {
+        try {
+          console.log(`Starting generation attempt with model: ${modelName}`)
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: systemInstruction
+          })
 
-        activeModelName = modelName
-        console.log(`Successfully established stream using model: ${modelName}`)
-        break
-      } catch (err: any) {
-        console.warn(`Model ${modelName} failed or unavailable. Error:`, err.message || err)
-        lastError = err
+          // Call stream generator
+          responseStream = await model.generateContentStream({
+            contents: [{ role: 'user', parts: [{ text: contentPrompt }] }],
+          })
+
+          activeModelName = modelName
+          console.log(`Successfully established stream using model: ${modelName}`)
+          break
+        } catch (err: any) {
+          console.warn(`Model ${modelName} failed or unavailable. Error:`, err.message || err)
+          lastError = err
+        }
+      }
+
+      // Automatically fall back to Grok if Gemini is rate-limited or fails
+      if ((!responseStream || !activeModelName) && process.env.GROK_API_KEY) {
+        console.warn('All Gemini models failed. Initiating cooperative failover to xAI Grok API')
+        activeModelName = 'grok-2'
       }
     }
 
-    if (!responseStream || !activeModelName) {
+    if (!activeModelName) {
       return new Response(
         JSON.stringify({ 
           error: `All configured Gemini models returned errors. Last error details: ${lastError?.message || lastError || 'Unknown Error'}. Please retry shortly or verify your key access.` 
@@ -129,13 +143,93 @@ export async function POST(req: NextRequest) {
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
-          // Enqueue active model name as initial meta event so the client knows which model served the request
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
+          if (activeModelName.startsWith('grok')) {
+            const grokApiKey = process.env.GROK_API_KEY
+            if (!grokApiKey) {
+              throw new Error('GROK_API_KEY is not configured on the server.')
+            }
 
-          for await (const chunk of responseStream.stream) {
-            const chunkText = chunk.text()
-            if (chunkText) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunkText })}\n\n`))
+            // Enqueue active model name as initial meta event
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
+
+            // Fetch from xAI API (compatible with OpenAI format)
+            const response = await fetch('https://api.x.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${grokApiKey}`
+              },
+              body: JSON.stringify({
+                model: 'grok-2',
+                stream: true,
+                messages: [
+                  { role: 'system', content: systemInstruction },
+                  { role: 'user', content: contentPrompt }
+                ]
+              })
+            })
+
+            if (!response.ok) {
+              const errText = await response.text()
+              throw new Error(`Grok API returned error: ${errText}`)
+            }
+
+            const reader = response.body?.getReader()
+            if (!reader) {
+              throw new Error('Grok response body reader is not available')
+            }
+
+            const decoder = new TextDecoder()
+            let buffer = ''
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop() || ''
+
+                for (const line of lines) {
+                  const cleanLine = line.trim()
+                  if (cleanLine === 'data: [DONE]') continue
+                  if (cleanLine.startsWith('data: ')) {
+                    try {
+                      const parsed = JSON.parse(cleanLine.substring(6))
+                      const text = parsed.choices?.[0]?.delta?.content
+                      if (text) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
+                      }
+                    } catch (e) {
+                      // Skip parsing errors on incomplete JSON segments
+                    }
+                  }
+                }
+              }
+              // Flush any remaining buffer
+              const finalLine = buffer.trim()
+              if (finalLine.startsWith('data: ') && finalLine !== 'data: [DONE]') {
+                try {
+                  const parsed = JSON.parse(finalLine.substring(6))
+                  const text = parsed.choices?.[0]?.delta?.content
+                  if (text) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
+                  }
+                } catch (e) {}
+              }
+            } finally {
+              reader.releaseLock()
+            }
+          } else {
+            // Stream from Gemini API
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
+
+            for await (const chunk of responseStream.stream) {
+              const chunkText = chunk.text()
+              if (chunkText) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunkText })}\n\n`))
+              }
             }
           }
         } catch (error: any) {
@@ -158,7 +252,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Edge generate handler root error:', error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Failed to initialize Gemini stream handler' }),
+      JSON.stringify({ error: error.message || 'Failed to initialize generation stream' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
