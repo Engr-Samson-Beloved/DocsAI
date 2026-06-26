@@ -13,6 +13,17 @@
   --ink-black: #1B1F23;
   --academic-teal: #0F766E;
   --academic-gold: #B68A35;
+
+  /* Custom grays to fix un-themed classes in Editor.tsx */
+  --zinc-150: #EEF0F2;
+  --zinc-205: #E2E4E8;
+  --zinc-250: #D8DBE0;
+  --zinc-350: #BFC4CD;
+  --zinc-450: #8A92A0;
+  --zinc-550: #626A76;
+  --zinc-650: #4B525E;
+  --zinc-750: #31363F;
+  --zinc-850: #22252A;
 }
 
 .dark {
@@ -26,6 +37,17 @@
   --ink-black: #E5E7EB;
   --academic-teal: #0D9488;
   --academic-gold: #B68A35; /* Subtle research paper gold */
+
+  /* Custom grays to fix un-themed classes in Editor.tsx */
+  --zinc-150: #272B35;
+  --zinc-205: #2E333F;
+  --zinc-250: #373E4D;
+  --zinc-350: #4C5569;
+  --zinc-450: #717C95;
+  --zinc-550: #9AA4B8;
+  --zinc-650: #B0BAD0;
+  --zinc-750: #CBD5E1;
+  --zinc-850: #E2E8F0;
 }
 
 /* System preference fallback */
@@ -41,6 +63,17 @@
     --ink-black: #E5E7EB;
     --academic-teal: #0D9488;
     --academic-gold: #B68A35;
+
+    /* Custom grays to fix un-themed classes in Editor.tsx */
+    --zinc-150: #272B35;
+    --zinc-205: #2E333F;
+    --zinc-250: #373E4D;
+    --zinc-350: #4C5569;
+    --zinc-450: #717C95;
+    --zinc-550: #9AA4B8;
+    --zinc-650: #B0BAD0;
+    --zinc-750: #CBD5E1;
+    --zinc-850: #E2E8F0;
   }
 }
 
@@ -53,19 +86,18 @@
   --color-zinc-100: var(--background);      /* Canvas behind-page wrapper */
   --color-zinc-950: var(--background);      /* Canvas container main background */
   
-  --color-white: var(--paper-bg);            /* Paper sheets, sidebar body, header: Paper White in light, Slate Dark in dark */
   --color-zinc-900: var(--paper-bg);         /* Dark mode surface wrappers */
   
-  --color-zinc-800: var(--foreground);       /* Readable text: #2D3748 in light, #E5E7EB in dark */
-  --color-zinc-750: var(--foreground);
-  --color-zinc-700: var(--foreground);
-  --color-zinc-650: var(--foreground);
-  --color-zinc-500: var(--foreground);
-  --color-zinc-450: var(--foreground);
-  --color-zinc-400: var(--foreground);
-  --color-zinc-350: var(--foreground);
-  --color-zinc-300: var(--foreground);
-  --color-zinc-200: var(--foreground);       
+  /* Map custom themed gray color tokens to support UI components correctly */
+  --color-zinc-150: var(--zinc-150);
+  --color-zinc-205: var(--zinc-205);
+  --color-zinc-250: var(--zinc-250);
+  --color-zinc-350: var(--zinc-350);
+  --color-zinc-450: var(--zinc-450);
+  --color-zinc-550: var(--zinc-550);
+  --color-zinc-650: var(--zinc-650);
+  --color-zinc-750: var(--zinc-750);
+  --color-zinc-850: var(--zinc-850);       
   
   /* Brand accents override standard Indigo utility styles so all buttons update instantly */
   --color-indigo-50: color-mix(in srgb, var(--primary-blue) 8%, transparent);
