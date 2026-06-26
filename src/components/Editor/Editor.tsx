@@ -749,7 +749,7 @@ export default function Editor() {
   const [wizardTopic, setWizardTopic] = useState('')
   const [wizardAcademicLevel, setWizardAcademicLevel] = useState('Undergraduate')
   const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
-  const [aiEngine, setAiEngine] = useState<'gemini' | 'grok'>('gemini')
+  const [aiEngine, setAiEngine] = useState<'gemini' | 'grok' | 'groq'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
@@ -4684,11 +4684,12 @@ export default function Editor() {
                         </label>
                         <select
                           value={aiEngine}
-                          onChange={(e) => setAiEngine(e.target.value as 'gemini' | 'grok')}
+                          onChange={(e) => setAiEngine(e.target.value as 'gemini' | 'grok' | 'groq')}
                           className="w-full text-xs p-2 rounded border border-zinc-200 dark:border-zinc-800 focus:ring-1 focus:ring-indigo-500 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
                         >
-                          <option value="gemini">WordPI Core (Gemini 2.5 Flash)</option>
-                          <option value="grok">WordPI Searcher (xAI Grok-2)</option>
+                          <option value="gemini">WordPI Core (Gemini 2.5 Flash - Free)</option>
+                          <option value="groq">WordPI Searcher (Groq Llama 3 - Free & Fast)</option>
+                          <option value="grok">WordPI Searcher (xAI Grok-2 - Requires Subscription)</option>
                         </select>
                       </div>
                     </div>

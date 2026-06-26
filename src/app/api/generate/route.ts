@@ -90,50 +90,102 @@ export async function POST(req: NextRequest) {
       `For general writing or blueprint generation that does not replace existing text, output the response directly without the <<<ORIGINAL>>> format.`
 
     let responseStream: any = null
+    let openAiStreamResponse: Response | null = null
     let activeModelName = ''
     let lastError: any = null
 
-    // Determine target engine
-    const isGrokTarget = modelTarget === 'grok'
-
-    if (isGrokTarget && process.env.GROK_API_KEY) {
-      activeModelName = 'grok-2-1212'
-      console.log('Routing request directly to xAI Grok API')
-    } else {
-      // Try prioritized Gemini models
-      for (const modelName of PRIORITIZED_MODELS) {
-        try {
-          console.log(`Starting generation attempt with model: ${modelName}`)
-          const model = genAI.getGenerativeModel({
-            model: modelName,
-            systemInstruction: systemInstruction
-          })
-
-          // Call stream generator
-          responseStream = await model.generateContentStream({
-            contents: [{ role: 'user', parts: [{ text: contentPrompt }] }],
-          })
-
-          activeModelName = modelName
-          console.log(`Successfully established stream using model: ${modelName}`)
-          break
-        } catch (err: any) {
-          console.warn(`Model ${modelName} failed or unavailable. Error:`, err.message || err)
-          lastError = err
-        }
+    // Helper to request OpenAI-compatible stream targets (Grok or Groq)
+    async function tryOpenAiApi(provider: 'grok' | 'groq'): Promise<{ name: string; response: Response }> {
+      const apiKey = provider === 'groq' ? process.env.GROQ_API_KEY : process.env.GROK_API_KEY
+      if (!apiKey) {
+        throw new Error(`${provider.toUpperCase()}_API_KEY is not configured on the server.`)
       }
 
-      // Automatically fall back to Grok if Gemini is rate-limited or fails
-      if ((!responseStream || !activeModelName) && process.env.GROK_API_KEY) {
-        console.warn('All Gemini models failed. Initiating cooperative failover to xAI Grok API')
-        activeModelName = 'grok-2-1212'
+      const url = provider === 'groq' 
+        ? 'https://api.groq.com/openai/v1/chat/completions' 
+        : 'https://api.x.ai/v1/chat/completions'
+
+      const model = provider === 'groq' ? 'llama-3.3-70b-versatile' : 'grok-2-1212'
+
+      console.log(`Initiating stream request to ${provider} using model: ${model}`)
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          stream: true,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: contentPrompt }
+          ]
+        })
+      })
+
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`${provider.toUpperCase()} API returned error status ${response.status}: ${errText}`)
+      }
+
+      return { name: model, response }
+    }
+
+    // Determine cascade priority list
+    const targetOrder: Array<'gemini' | 'groq' | 'grok'> = []
+    if (modelTarget === 'groq') {
+      targetOrder.push('groq', 'gemini', 'grok')
+    } else if (modelTarget === 'grok') {
+      targetOrder.push('grok', 'groq', 'gemini')
+    } else {
+      targetOrder.push('gemini', 'groq', 'grok')
+    }
+
+    // Execute priority execution chain
+    for (const provider of targetOrder) {
+      try {
+        if (provider === 'gemini') {
+          // Try prioritized Gemini models
+          for (const modelName of PRIORITIZED_MODELS) {
+            try {
+              console.log(`Starting generation attempt with model: ${modelName}`)
+              const model = genAI.getGenerativeModel({
+                model: modelName,
+                systemInstruction: systemInstruction
+              })
+
+              responseStream = await model.generateContentStream({
+                contents: [{ role: 'user', parts: [{ text: contentPrompt }] }],
+              })
+
+              activeModelName = modelName
+              console.log(`Successfully established stream using model: ${modelName}`)
+              break
+            } catch (err: any) {
+              console.warn(`Model ${modelName} failed or unavailable. Error:`, err.message || err)
+              lastError = err
+            }
+          }
+          if (activeModelName) break
+        } else {
+          // Try Groq or Grok
+          const result = await tryOpenAiApi(provider)
+          activeModelName = result.name
+          openAiStreamResponse = result.response
+          console.log(`Successfully established stream using provider: ${provider}`)
+          break
+        }
+      } catch (err: any) {
+        console.warn(`Provider ${provider} failed or was skipped. Error:`, err.message || err)
+        lastError = err
       }
     }
 
     if (!activeModelName) {
       return new Response(
         JSON.stringify({ 
-          error: `All configured Gemini models returned errors. Last error details: ${lastError?.message || lastError || 'Unknown Error'}. Please retry shortly or verify your key access.` 
+          error: `All configured models returned errors. Last error details: ${lastError?.message || lastError || 'Unknown Error'}. Please retry shortly or verify your key access.` 
         }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
       )
@@ -143,40 +195,13 @@ export async function POST(req: NextRequest) {
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
-          if (activeModelName.startsWith('grok')) {
-            const grokApiKey = process.env.GROK_API_KEY
-            if (!grokApiKey) {
-              throw new Error('GROK_API_KEY is not configured on the server.')
-            }
+          // Enqueue active model name as initial meta event
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
 
-            // Enqueue active model name as initial meta event
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
-
-            // Fetch from xAI API (compatible with OpenAI format)
-            const response = await fetch('https://api.x.ai/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${grokApiKey}`
-              },
-              body: JSON.stringify({
-                model: 'grok-2-1212',
-                stream: true,
-                messages: [
-                  { role: 'system', content: systemInstruction },
-                  { role: 'user', content: contentPrompt }
-                ]
-              })
-            })
-
-            if (!response.ok) {
-              const errText = await response.text()
-              throw new Error(`Grok API returned error: ${errText}`)
-            }
-
-            const reader = response.body?.getReader()
+          if (openAiStreamResponse) {
+            const reader = openAiStreamResponse.body?.getReader()
             if (!reader) {
-              throw new Error('Grok response body reader is not available')
+              throw new Error('Response body reader is not available')
             }
 
             const decoder = new TextDecoder()
@@ -221,10 +246,8 @@ export async function POST(req: NextRequest) {
             } finally {
               reader.releaseLock()
             }
-          } else {
+          } else if (responseStream) {
             // Stream from Gemini API
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
-
             for await (const chunk of responseStream.stream) {
               const chunkText = chunk.text()
               if (chunkText) {
