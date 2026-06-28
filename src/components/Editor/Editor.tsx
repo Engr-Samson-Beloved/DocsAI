@@ -78,7 +78,26 @@ const DEFAULT_CONTENT = `
 `
 
 const SEMINAR_TEMPLATE = `
-<h1>An Analysis of [Insert Seminar Topic Here]</h1>
+<div data-type="page">
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <h1 style="text-align: center; line-height: 1.5; font-size: 1.5rem; text-transform: uppercase;"><strong>[Insert Seminar Topic Here]</strong></h1>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center; text-transform: uppercase; font-weight: bold; font-size: 0.95rem;">A SEMINAR REPORT</p>
+  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">PRESENTED TO</p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">THE DEPARTMENT OF COMPUTER ENGINEERING<br>SCHOOL OF ENGINEERING<br>YABA COLLEGE OF TECHNOLOGY, YABA.</p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">BY</p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">[STUDENT NAME]<br>[MATRIC NUMBER]</p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center; font-size: 0.85rem; line-height: 1.6; text-transform: uppercase; max-width: 600px; margin: 0 auto;">A SEMINAR REPORT SUBMITTED IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE HIGHER NATIONAL DIPLOMA (HND) IN COMPUTER ENGINEERING</p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">SUPERVISED BY</p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">[SUPERVISOR NAME]</p>
+  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem;">2025/2026</p>
+</div>
 <div data-type="page">
   <h2>Chapter 1.</h2>
   <h3>1.1. Introduction</h3>

@@ -53,16 +53,18 @@ export async function POST(req: NextRequest) {
       `HUMANIZATION & ANTI-AI-DETECTION RULES (CRITICAL):\n` +
       `- HIGH PERPLEXITY & BURSTINESS: Modern AI detectors look for low perplexity (predictable word choices) and uniform burstiness (similar sentence lengths). You MUST break this pattern:\n` +
       `  * Mix sentence lengths aggressively: Follow a long, multi-clause analytical sentence (30-40 words) with a short, punchy, direct statement (5-8 words).\n` +
+      `  * TARGET SHORT SENTENCE AVERAGE: Human writing averages around 10-14 words per sentence. Do not default to long, complex, run-on structures. Keep sentences concise, clear, and direct.\n` +
       `  * Avoid symmetrical paragraph lengths. Let one paragraph focus deeply on a core concept (200 words), followed by a brief, transitional paragraph (50 words).\n` +
       `  * Vary sentence structure: Do not start consecutive sentences with the same grammatical structure (e.g., Avoid starting sentences with adverbial phrases or gerunds like 'By analyzing...', 'Furthermore...', 'Interestingly...').\n` +
       `  * Use active voice where natural to drive the argument, and reserve passive voice for objective data representation.\n\n` +
       
       `- ELIMINATE AI BUZZWORDS & ROBOTIC TRANSITIONS:\n` +
-      `  * NEVER use: "furthermore", "moreover", "consequently", "subsequently", "thereby", "firstly/secondly/finally" (in lists), "it is crucial to note", "it is important to remember", "testament to", "beacon of", "tapestry", "delve", "demystify", "holistic approach", "in conclusion" (at the end of sections).\n` +
+      `  * NEVER use: "furthermore", "moreover", "consequently", "subsequently", "thereby", "therein", "holistic", "holistically", "firstly/secondly/finally" (in lists), "it is crucial to note", "it is important to remember", "testament to", "beacon of", "tapestry", "delve", "demystify", "holistic approach", "in conclusion" (at the end of sections).\n` +
       `  * Instead of transition adverbs, build flow logically by connecting the subject of a new sentence to the conclusion of the previous one (e.g., instead of "Furthermore, this method has...", use "This method's primary advantage is...").\n` +
       `  * Use conversational yet academic connectors when absolutely necessary: "Yet", "Still", "Indeed", "Instead", "Ultimately", "Historically", "In practice", "In this context".\n\n` +
       
-      `- AVOID RIGID & PERFECT PATTERNS:\n` +
+      `- AVOID PLACEHOLDERS & RIGID PATTERNS:\n` +
+      `  * NEVER output markdown placeholders like "[Source A, Year]" or "[Author, Year]" in the text. If referencing, synthesize a natural academic citation (e.g., "Adeyinka (2025)", "(Bello, 2026)") or write the statement factually without mock placeholder tags.\n` +
       `  * Human writing is organic, not a perfectly balanced machine. Do not structure every paragraph as: 'Introduction Sentence -> Three points -> Conclusion Sentence'.\n` +
       `  * Avoid perfect lists of three (e.g., 'efficiency, stability, and speed'). Focus on analyzing one main variable, contrast it with a secondary one, and explain the nuance.\n` +
       `  * Do NOT summarize the entire section at the end of every section. A human writer stops when the argument is complete and transitions directly to the next point.\n` +
