@@ -82,7 +82,7 @@ const SEMINAR_TEMPLATE = `
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <h1 style="text-align: center; line-height: 1.5; font-size: 1.5rem; text-transform: uppercase;"><strong>[Insert Seminar Topic Here]</strong></h1>
-  <p style="text-align: center;"><strong>&nbsp;</strong></p>
+  <div data-type="yabatech-logo"></div>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <p style="text-align: center; text-transform: uppercase; font-weight: bold; font-size: 0.95rem;">A SEMINAR REPORT</p>
   <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">PRESENTED TO</p>
@@ -690,6 +690,39 @@ const PageNode = Node.create({
   }
 })
 
+const YabatechLogo = Node.create({
+  name: 'yabatechLogo',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  
+  parseHTML() {
+    return [
+      {
+        tag: 'div[data-type="yabatech-logo"]',
+      }
+    ]
+  },
+  
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'div', 
+      mergeAttributes(HTMLAttributes, { 
+        'data-type': 'yabatech-logo',
+        style: 'text-align: center; margin: 15px 0;'
+      }), 
+      [
+        'img', 
+        { 
+          src: '/yabatech_logo.png', 
+          alt: 'Yabatech Logo', 
+          style: 'width: 100px; height: 100px; object-fit: contain; display: inline-block;' 
+        }
+      ]
+    ]
+  }
+})
+
 interface OutlineItem {
   text: string;
   level: number;
@@ -771,6 +804,34 @@ export default function Editor() {
   const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
   const [aiEngine, setAiEngine] = useState<'gemini' | 'grok' | 'groq'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
+  
+  const [studentName, setStudentName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('studentName') || ''
+    }
+    return ''
+  })
+  const [matricNumber, setMatricNumber] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('matricNumber') || ''
+    }
+    return ''
+  })
+  const [supervisorName, setSupervisorName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('supervisorName') || ''
+    }
+    return ''
+  })
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('studentName', studentName)
+      localStorage.setItem('matricNumber', matricNumber)
+      localStorage.setItem('supervisorName', supervisorName)
+    }
+  }, [studentName, matricNumber, supervisorName])
+
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
   const [customChapterOutline, setCustomChapterOutline] = useState<string>('')
@@ -872,7 +933,11 @@ export default function Editor() {
     // Determine content template
     let templateContent = ''
     if (type === 'Seminar') {
-      templateContent = SEMINAR_TEMPLATE.replace('[Insert Seminar Topic Here]', finalTitle)
+      templateContent = SEMINAR_TEMPLATE
+        .replace('[Insert Seminar Topic Here]', finalTitle)
+        .replace('[STUDENT NAME]', studentName.trim() || 'STUDENT NAME')
+        .replace('[MATRIC NUMBER]', matricNumber.trim() || 'MATRIC NUMBER')
+        .replace('[SUPERVISOR NAME]', supervisorName.trim() || 'SUPERVISOR NAME')
     } else if (type === 'Proposal') {
       templateContent = PROPOSAL_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
     } else if (type === 'Project') {
@@ -1642,6 +1707,7 @@ export default function Editor() {
     extensions: [
       CustomDocument,
       PageNode,
+      YabatechLogo,
       StarterKit.configure({
         document: false,
         underline: false,
@@ -3709,7 +3775,11 @@ export default function Editor() {
       // blank/template canvas slate
       let templateContent = ''
       if (wizardDocType === 'Seminar') {
-        templateContent = SEMINAR_TEMPLATE.replace('[Insert Seminar Topic Here]', finalTitle)
+        templateContent = SEMINAR_TEMPLATE
+          .replace('[Insert Seminar Topic Here]', finalTitle)
+          .replace('[STUDENT NAME]', studentName.trim() || 'STUDENT NAME')
+          .replace('[MATRIC NUMBER]', matricNumber.trim() || 'MATRIC NUMBER')
+          .replace('[SUPERVISOR NAME]', supervisorName.trim() || 'SUPERVISOR NAME')
       } else if (wizardDocType === 'Proposal') {
         templateContent = PROPOSAL_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
       } else if (wizardDocType === 'Project') {
@@ -4742,6 +4812,51 @@ export default function Editor() {
                           <option value="grok">WordPI Searcher (xAI Grok-2 - Requires Subscription)</option>
                         </select>
                       </div>
+
+                      {wizardDocType === 'Seminar' && (
+                        <div className="space-y-2 border-t border-zinc-150 dark:border-zinc-805 pt-3 mt-2.5 animate-in fade-in duration-200">
+                          <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                            Cover Page Configuration
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-zinc-700 dark:text-zinc-300 font-semibold block">
+                              Student Name
+                            </label>
+                            <input
+                              type="text"
+                              value={studentName}
+                              onChange={(e) => setStudentName(e.target.value)}
+                              className="w-full text-xs p-2 rounded border border-zinc-250 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-zinc-700 dark:text-zinc-300 font-semibold block">
+                                Matric No
+                              </label>
+                              <input
+                                type="text"
+                                value={matricNumber}
+                                onChange={(e) => setMatricNumber(e.target.value)}
+                                className="w-full text-xs p-2 rounded border border-zinc-250 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] text-zinc-700 dark:text-zinc-300 font-semibold block">
+                                Supervisor
+                              </label>
+                              <input
+                                type="text"
+                                value={supervisorName}
+                                onChange={(e) => setSupervisorName(e.target.value)}
+                                className="w-full text-xs p-2 rounded border border-zinc-250 dark:border-zinc-750 bg-zinc-50 dark:bg-zinc-850 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </details>
                 </div>
@@ -5237,6 +5352,56 @@ export default function Editor() {
                         placeholder="e.g.&#10;Chapter 1: Background&#10;Chapter 2: Context Analysis"
                         className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-800 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 h-24 resize-none font-mono leading-normal"
                       />
+                    </div>
+                  )}
+
+                  {/* Seminar Report Personalized Details (Conditional) */}
+                  {wizardDocType === 'Seminar' && (
+                    <div className="space-y-3 p-3 bg-zinc-50 dark:bg-zinc-850 rounded-xl border border-zinc-150 dark:border-zinc-800 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">
+                        Personalized Seminar Info (for Cover Page)
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                          Student Full Name
+                        </label>
+                        <input
+                          type="text"
+                          value={studentName}
+                          onChange={(e) => setStudentName(e.target.value)}
+                          placeholder="e.g. Adedayo Adeyinka Daniel"
+                          className="w-full text-xs p-2.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                            Matric Number
+                          </label>
+                          <input
+                            type="text"
+                            value={matricNumber}
+                            onChange={(e) => setMatricNumber(e.target.value)}
+                            placeholder="e.g. F/HD/24/3410001"
+                            className="w-full text-xs p-2.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                            Supervisor Name
+                          </label>
+                          <input
+                            type="text"
+                            value={supervisorName}
+                            onChange={(e) => setSupervisorName(e.target.value)}
+                            placeholder="e.g. Dr. Olalekan Bello"
+                            className="w-full text-xs p-2.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 outline-none text-zinc-700 dark:text-zinc-300 focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
 
