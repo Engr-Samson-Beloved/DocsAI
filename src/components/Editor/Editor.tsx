@@ -863,6 +863,7 @@ export default function Editor() {
     setDocumentTitle(finalTitle)
     setDocHeader('')
     setDocFooter('')
+    window.history.pushState({}, '', `/?project=${newProjId}`)
     setShowDashboard(false)
     setProjectSources([])
     
@@ -954,6 +955,7 @@ export default function Editor() {
     setDocumentTitle(finalTitle)
     setDocHeader('')
     setDocFooter('')
+    window.history.pushState({}, '', `/?project=${newProjId}`)
     setShowDashboard(false)
     setProjectSources([])
     
@@ -1014,6 +1016,8 @@ export default function Editor() {
       if (activeProjectId === id) {
         setActiveProjectId(null)
         localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+        window.history.pushState({}, '', '/')
+        setShowDashboard(true)
         // Clear editor content
         if (editor) {
           editor.commands.setContent(ensurePaginatedHtml(''))
@@ -1094,6 +1098,7 @@ export default function Editor() {
       }
     }
 
+    window.history.pushState({}, '', `/?project=${project.id}`)
     setShowDashboard(false)
     setIsSaved(true)
   }
@@ -1257,12 +1262,17 @@ export default function Editor() {
       // Update React state with loaded/migrated projects
       setProjects(list)
 
-      // 3. Setup the active project
-      const storedActiveId = localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
-      if (storedActiveId && list.some(p => p.id === storedActiveId)) {
-        setActiveProjectId(storedActiveId)
+      // 3. Setup the active project based on URL parameter or stored active ID
+      const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+      const targetProjId = searchParams ? searchParams.get('project') : null
+      
+      const activeId = targetProjId || localStorage.getItem(STORAGE_KEY_ACTIVE_ID)
+
+      if (activeId && list.some(p => p.id === activeId)) {
+        setActiveProjectId(activeId)
+        localStorage.setItem(STORAGE_KEY_ACTIVE_ID, activeId)
         
-        const project = list.find(p => p.id === storedActiveId)!
+        const project = list.find(p => p.id === activeId)!
         setDocumentTitle(project.title)
         setDocHeader(project.docHeader || '')
         setDocFooter(project.docFooter || '')
@@ -1271,10 +1281,16 @@ export default function Editor() {
         setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
         setWizardAcademicTone(project.academicTone || 'Analytical')
         setWizardDocType(project.documentType || 'Project')
-        setShowDashboard(true)
+        
+        // If loaded from target URL query param, go straight to the editor!
+        if (targetProjId) {
+          setShowDashboard(false)
+        } else {
+          setShowDashboard(true)
+        }
 
         // Load project reference documents from IndexedDB
-        getSourcesForProject(storedActiveId).then(projSources => {
+        getSourcesForProject(activeId).then(projSources => {
           setProjectSources(projSources.map(s => ({
             id: s.id,
             name: s.name,
@@ -1286,11 +1302,45 @@ export default function Editor() {
         })
       } else {
         setShowDashboard(true)
+        // Clear project query param from URL if it's invalid
+        if (targetProjId) {
+          window.history.replaceState({}, '', '/')
+        }
       }
     }
 
     initializeStorage()
   }, [])
+
+  // Listen to popstate (browser back/forward navigation)
+  useEffect(() => {
+    const handlePopState = () => {
+      const searchParams = new URLSearchParams(window.location.search)
+      const targetProjId = searchParams.get('project')
+
+      if (targetProjId && projects.some(p => p.id === targetProjId)) {
+        setActiveProjectId(targetProjId)
+        localStorage.setItem(STORAGE_KEY_ACTIVE_ID, targetProjId)
+        
+        const project = projects.find(p => p.id === targetProjId)!
+        setDocumentTitle(project.title)
+        setDocHeader(project.docHeader || '')
+        setDocFooter(project.docFooter || '')
+        setWordCount(project.wordCount)
+        setCharCount(project.charCount)
+        setWizardAcademicLevel(project.academicLevel || 'Undergraduate')
+        setWizardAcademicTone(project.academicTone || 'Analytical')
+        setWizardDocType(project.documentType || 'Project')
+        setShowDashboard(false)
+      } else {
+        setShowDashboard(true)
+        setActiveProjectId('')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [projects])
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -3552,6 +3602,7 @@ export default function Editor() {
     setDocumentTitle(finalTitle)
     setDocHeader('')
     setDocFooter('')
+    window.history.pushState({}, '', `/?project=${newProjId}`)
     setShowDashboard(false)
 
     // Function to save the project snapshot
@@ -4124,7 +4175,11 @@ export default function Editor() {
             />
             
             <button
-              onClick={() => setShowDashboard(true)}
+              onClick={() => {
+                window.history.pushState({}, '', '/')
+                setShowDashboard(true)
+                setActiveProjectId('')
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
               title="Return to Document Center Dashboard"
             >
