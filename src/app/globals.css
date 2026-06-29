@@ -24,6 +24,12 @@
   --zinc-650: #4B525E;
   --zinc-750: #31363F;
   --zinc-850: #22252A;
+
+  /* Tailwind Zinc Color Fixes for Light Mode */
+  --tailwind-zinc-50: #f9fafb;
+  --tailwind-zinc-100: #f4f4f5;
+  --tailwind-zinc-900: #18181b;
+  --tailwind-zinc-950: #09090b;
 }
 
 .dark {
@@ -48,6 +54,12 @@
   --zinc-650: #B0BAD0;
   --zinc-750: #CBD5E1;
   --zinc-850: #E2E8F0;
+
+  /* Tailwind Zinc Color Fixes for Dark Mode */
+  --tailwind-zinc-50: #111827;
+  --tailwind-zinc-100: #111827;
+  --tailwind-zinc-900: #1F2937;
+  --tailwind-zinc-950: #111827;
 }
 
 /* System preference fallback */
@@ -74,6 +86,12 @@
     --zinc-650: #B0BAD0;
     --zinc-750: #CBD5E1;
     --zinc-850: #E2E8F0;
+
+    /* Tailwind Zinc Color Fixes for Dark Mode Prefs */
+    --tailwind-zinc-50: #111827;
+    --tailwind-zinc-100: #111827;
+    --tailwind-zinc-900: #1F2937;
+    --tailwind-zinc-950: #111827;
   }
 }
 
@@ -82,11 +100,10 @@
   --color-foreground: var(--foreground);
 
   /* Map standard tailwind color tokens to new brand direction */
-  --color-zinc-50: var(--background);       /* Soft Gray (#F1F3F5) in light, Editor Dark (#111827) in dark */
-  --color-zinc-100: var(--background);      /* Canvas behind-page wrapper */
-  --color-zinc-950: var(--background);      /* Canvas container main background */
-  
-  --color-zinc-900: var(--paper-bg);         /* Dark mode surface wrappers */
+  --color-zinc-50: var(--tailwind-zinc-50);
+  --color-zinc-100: var(--tailwind-zinc-100);
+  --color-zinc-950: var(--tailwind-zinc-950);
+  --color-zinc-900: var(--tailwind-zinc-900);
   
   /* Map custom themed gray color tokens to support UI components correctly */
   --color-zinc-150: var(--zinc-150);

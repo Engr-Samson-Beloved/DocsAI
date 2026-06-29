@@ -1351,10 +1351,12 @@ export default function Editor() {
     if (savedTheme) {
       setTheme(savedTheme)
       document.documentElement.classList.toggle('dark', savedTheme === 'dark')
+      document.documentElement.classList.toggle('light', savedTheme === 'light')
     } else {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
       setTheme(systemTheme)
       document.documentElement.classList.toggle('dark', systemTheme === 'dark')
+      document.documentElement.classList.toggle('light', systemTheme === 'light')
     }
 
     if (docTitle) {
@@ -1743,6 +1745,7 @@ export default function Editor() {
     setTheme(nextTheme)
     localStorage.setItem('theme', nextTheme)
     document.documentElement.classList.toggle('dark', nextTheme === 'dark')
+    document.documentElement.classList.toggle('light', nextTheme === 'light')
   }
 
   // Ref for activeProjectId to prevent stale closures inside Tiptap event handlers
