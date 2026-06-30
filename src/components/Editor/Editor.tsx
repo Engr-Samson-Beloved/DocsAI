@@ -4491,7 +4491,7 @@ export default function Editor() {
           {/* Formatting Toolbar */}
           <div className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2 z-30 flex justify-center flex-shrink-0">
             <div className="w-full max-w-[816px] flex flex-wrap gap-1 items-center justify-start sm:justify-between">
-            <div className="flex flex-wrap items-center gap-0.5">
+            <div className="flex flex-wrap items-center gap-0.5 text-zinc-650 dark:text-zinc-400">
               {/* Heading Dropdown */}
               <select
                 value={getActiveHeading()}
@@ -4597,7 +4597,7 @@ export default function Editor() {
               </button>
             </div>
 
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-0.5 text-zinc-650 dark:text-zinc-400">
               {/* Line Spacing Selection */}
               <select
                 onChange={(e) => setLineSpacing(e.target.value)}
@@ -4933,7 +4933,7 @@ export default function Editor() {
                       </div>
 
                       {wizardDocType === 'Seminar' && (
-                        <div className="space-y-2 border-t border-zinc-150 dark:border-zinc-805 pt-3 mt-2.5 animate-in fade-in duration-200">
+                        <div className="space-y-2 border-t border-zinc-150 dark:border-zinc-850 pt-3 mt-2.5 animate-in fade-in duration-200">
                           <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                             Cover Page Configuration
                           </div>
@@ -5473,8 +5473,7 @@ export default function Editor() {
                       />
                     </div>
                   )}
-
-                  {/* Seminar Report Personalized Details (Conditional) */}
+                                {/* Seminar Report Personalized Details (Conditional) */}
                   {wizardDocType === 'Seminar' && (
                     <div className="space-y-3 p-3 bg-zinc-50 dark:bg-zinc-850 rounded-xl border border-zinc-150 dark:border-zinc-800 animate-in fade-in slide-in-from-top-1 duration-200">
                       <div className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">
@@ -5482,7 +5481,7 @@ export default function Editor() {
                       </div>
                       
                       <div className="space-y-1.5">
-                        <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                        <label className="text-[10px] text-zinc-600 dark:text-zinc-450 font-bold uppercase tracking-wider block">
                           Student Full Name
                         </label>
                         <input
@@ -5496,7 +5495,7 @@ export default function Editor() {
 
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1.5">
-                          <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                          <label className="text-[10px] text-zinc-600 dark:text-zinc-450 font-bold uppercase tracking-wider block">
                             Matric Number
                           </label>
                           <input
@@ -5509,7 +5508,7 @@ export default function Editor() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <label className="text-[10px] text-zinc-600 dark:text-zinc-405 font-bold uppercase tracking-wider block">
+                          <label className="text-[10px] text-zinc-600 dark:text-zinc-450 font-bold uppercase tracking-wider block">
                             Supervisor Name
                           </label>
                           <input

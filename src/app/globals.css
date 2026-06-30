@@ -122,6 +122,17 @@
   --color-indigo-600: var(--primary-blue);
   --color-indigo-700: #185ABD;
   --color-indigo-950: #1B1F23;
+
+  /* Custom mapped colors used in components */
+  --color-indigo-650: color-mix(in srgb, var(--primary-blue) 80%, black);
+  --color-indigo-750: #185ABD;
+  
+  --color-red-55: #FEF2F2;
+  --color-red-750: #B91C1C;
+  
+  --color-emerald-250: #A7F3D0;
+  --color-emerald-350: #34D399;
+  --color-emerald-550: #059669;
   
   /* Palette specific references */
   --color-wordpilot-blue: var(--primary-blue);
