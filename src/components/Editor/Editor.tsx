@@ -524,7 +524,7 @@ class PageNodeView {
 
     // Outer sheet box representing A4
     this.dom = document.createElement('div')
-    this.dom.className = 'page-sheet group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1)] mx-auto my-4 w-[794px] h-[1123px] select-none text-zinc-850 dark:text-zinc-100 overflow-hidden box-border print:shadow-none print:border-none print:m-0'
+    this.dom.className = 'page-sheet group relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1)] mx-auto my-4 w-[794px] h-[1123px] select-none text-zinc-850 dark:text-white overflow-hidden box-border print:shadow-none print:border-none print:m-0'
 
     // Header container
     const headerEl = document.createElement('div')
@@ -1932,15 +1932,17 @@ export default function Editor() {
       const container = scrollContainerRef.current
       if (!container) return
 
-      // Don't intercept if the user is typing in an input, textarea, or contenteditable element
+      // Don't intercept if the user is typing in a text input or textarea
       const activeEl = document.activeElement
-      if (
-        activeEl && (
-          activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          activeEl.getAttribute('contenteditable') === 'true'
-        )
-      ) {
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return
+      }
+
+      // If user is focused in a contenteditable (the editor), only intercept page-navigation keys
+      // that don't conflict with normal typing (PageUp, PageDown, Home, End).
+      const isEditable = activeEl && activeEl.getAttribute('contenteditable') === 'true'
+      const isScrollKey = ['PageUp', 'PageDown', 'Home', 'End'].includes(e.key)
+      if (isEditable && !isScrollKey) {
         return
       }
 
@@ -1958,7 +1960,7 @@ export default function Editor() {
           container.scrollBy({ top: -scrollAmount, behavior: 'auto' })
           break
         case 'PageDown':
-        case ' ': // Spacebar
+        case ' ': // Spacebar (only when not in editor)
           if (e.key === ' ' && e.shiftKey) {
             e.preventDefault()
             container.scrollBy({ top: -pageScrollAmount, behavior: 'auto' })
@@ -1994,23 +1996,36 @@ export default function Editor() {
   // Wheel events over .page-sheet / .page-content (overflow:hidden) do NOT bubble
   // up to the scroll container natively. We listen at window level to catch them.
   useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-
     const handleWheel = (e: WheelEvent) => {
+      const container = scrollContainerRef.current
+      if (!container) return
+
       if (e.ctrlKey) return // Allow browser/system pinch-to-zoom
 
-      // Only intercept wheel events when cursor is inside the scroll container area
+      // Only intercept wheel events when cursor is inside the scroll container area.
+      // If the target has been detached from the DOM during rendering, we bypass the containment check.
       const target = e.target as HTMLElement
-      if (!container.contains(target) && target !== container) return
+      if (target && target.ownerDocument && target.ownerDocument.body.contains(target)) {
+        if (!container.contains(target) && target !== container) return
+      }
 
-      if (e.deltaY !== 0 || e.deltaX !== 0) {
+      // Normalize delta values across different hardware and OS scroll settings (lines vs pixels)
+      let dy = e.deltaY
+      let dx = e.deltaX
+
+      if (e.deltaMode === 1) { // DOM_DELTA_LINE
+        dy *= 20
+        dx *= 20
+      } else if (e.deltaMode === 2) { // DOM_DELTA_PAGE
+        dy *= container.clientHeight
+        dx *= container.clientWidth
+      }
+
+      if (dy !== 0 || dx !== 0) {
         e.preventDefault()
-        container.scrollBy({
-          top: e.deltaY,
-          left: e.deltaX,
-          behavior: 'auto'
-        })
+        // Directly adjust scroll coordinates to allow fluid trackpad momentum and precision
+        container.scrollTop += dy
+        container.scrollLeft += dx
       }
     }
 
@@ -2018,6 +2033,52 @@ export default function Editor() {
     window.addEventListener('wheel', handleWheel, { passive: false })
     return () => {
       window.removeEventListener('wheel', handleWheel)
+    }
+  }, [])
+
+  // Touch scroll handler for touchscreen drag scrolling over pages
+  useEffect(() => {
+    let lastTouchY = 0
+    let lastTouchX = 0
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        lastTouchY = e.touches[0].clientY
+        lastTouchX = e.touches[0].clientX
+      }
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const container = scrollContainerRef.current
+      if (!container) return
+
+      const target = e.target as HTMLElement
+      if (!container.contains(target) && target !== container) return
+
+      if (e.touches.length === 1) {
+        const touchY = e.touches[0].clientY
+        const touchX = e.touches[0].clientX
+        const deltaY = lastTouchY - touchY
+        const deltaX = lastTouchX - touchX
+
+        if (deltaY !== 0 || deltaX !== 0) {
+          if (target.closest('.page-sheet')) {
+            container.scrollTop += deltaY
+            container.scrollLeft += deltaX
+            e.preventDefault()
+          }
+        }
+
+        lastTouchY = touchY
+        lastTouchX = touchX
+      }
+    }
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true })
+    window.addEventListener('touchmove', handleTouchMove, { passive: false })
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart)
+      window.removeEventListener('touchmove', handleTouchMove)
     }
   }, [])
 

@@ -391,3 +391,64 @@ body {
 .dark .scroll-container::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--primary-blue) 80%, white);
 }
+
+/* --- Dark Mode Accessibility & Visibility Fixes --- */
+
+/* Ensure dropdown select menus and options in dark mode have white text and proper dark backgrounds */
+.dark select,
+.dark select option,
+.dark option {
+  background-color: #1f2937 !important; /* matches --paper-bg */
+  color: #ffffff !important;
+}
+
+.dark input,
+.dark textarea {
+  color: #ffffff !important;
+}
+
+/* Ensure all options labels and secondary description texts in dark mode options panels are highly visible */
+.dark label,
+.dark summary,
+.dark legend {
+  color: #ffffff !important;
+}
+
+.dark .text-zinc-400,
+.dark .text-zinc-500,
+.dark .text-zinc-650,
+.dark .text-zinc-350,
+.dark .text-zinc-450,
+.dark .text-zinc-550 {
+  color: #f3f4f6 !important; /* Soft white/light gray */
+}
+
+/* Fallbacks for prefers-color-scheme dark mode */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) select,
+  :root:not(.light) select option,
+  :root:not(.light) option {
+    background-color: #1f2937 !important;
+    color: #ffffff !important;
+  }
+
+  :root:not(.light) input,
+  :root:not(.light) textarea {
+    color: #ffffff !important;
+  }
+
+  :root:not(.light) label,
+  :root:not(.light) summary,
+  :root:not(.light) legend {
+    color: #ffffff !important;
+  }
+
+  :root:not(.light) .text-zinc-400,
+  :root:not(.light) .text-zinc-500,
+  :root:not(.light) .text-zinc-650,
+  :root:not(.light) .text-zinc-350,
+  :root:not(.light) .text-zinc-450,
+  :root:not(.light) .text-zinc-550 {
+    color: #f3f4f6 !important;
+  }
+}
