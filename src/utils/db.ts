@@ -65,6 +65,13 @@ export async function saveProject(project: Project): Promise<void> {
     const request = store.put(project)
 
     request.onsuccess = () => {
+      // Sync to local filesystem server in background
+      fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(project)
+      }).catch(e => console.warn('Background project sync failed:', e))
+      
       resolve()
     }
 
@@ -77,7 +84,7 @@ export async function saveProject(project: Project): Promise<void> {
 export async function getAllProjects(): Promise<Project[]> {
   try {
     const db = await initDB()
-    return new Promise((resolve, reject) => {
+    const idbProjects = await new Promise<Project[]>((resolve, reject) => {
       const transaction = db.transaction(STORE_PROJECTS, 'readonly')
       const store = transaction.objectStore(STORE_PROJECTS)
       const request = store.getAll()
@@ -90,8 +97,32 @@ export async function getAllProjects(): Promise<Project[]> {
         reject(new Error('Failed to retrieve projects from IndexedDB'))
       }
     })
+
+    // If IndexedDB is empty, check server filesystem backup to restore it!
+    if (idbProjects.length === 0) {
+      console.log('IndexedDB is empty, checking local filesystem storage backup...')
+      const res = await fetch('/api/projects')
+      if (res.ok) {
+        const serverProjects = await res.json() as Project[]
+        if (serverProjects && serverProjects.length > 0) {
+          console.log(`Found ${serverProjects.length} projects on disk backup. Restoring to IndexedDB...`)
+          await saveProjectsBatch(serverProjects)
+          return serverProjects
+        }
+      }
+    }
+
+    return idbProjects
   } catch (e) {
-    console.error("IndexedDB getAllProjects error:", e)
+    console.error("getAllProjects error:", e)
+    
+    // Fallback to fetch from server directly if IndexedDB fails entirely
+    try {
+      const res = await fetch('/api/projects')
+      if (res.ok) return await res.json()
+    } catch (apiErr) {
+      console.error("Server fallback fetch failed:", apiErr)
+    }
     return []
   }
 }
@@ -108,6 +139,11 @@ export async function deleteProject(projectId: string): Promise<void> {
     const request = store.delete(projectId)
 
     request.onsuccess = () => {
+      // Sync delete to local filesystem server in background
+      fetch(`/api/projects?id=${projectId}`, {
+        method: 'DELETE'
+      }).catch(e => console.warn('Background project delete sync failed:', e))
+
       resolve()
     }
 
@@ -124,6 +160,14 @@ export async function saveProjectsBatch(projects: Project[]): Promise<void> {
     const store = transaction.objectStore(STORE_PROJECTS)
     
     transaction.oncomplete = () => {
+      // Sync batch in background
+      projects.forEach(project => {
+        fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(project)
+        }).catch(e => console.warn('Background project batch sync failed:', e))
+      })
       resolve()
     }
     
@@ -155,6 +199,14 @@ export async function saveSource(projectId: string, name: string, content: strin
 
     request.onsuccess = () => {
       source.id = request.result as number
+      
+      // Sync source to local server filesystem in background
+      fetch('/api/projects/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(source)
+      }).catch(e => console.warn('Background source save sync failed:', e))
+
       resolve(source)
     }
 
@@ -167,7 +219,7 @@ export async function saveSource(projectId: string, name: string, content: strin
 export async function getSourcesForProject(projectId: string): Promise<IngestedSource[]> {
   try {
     const db = await initDB()
-    return new Promise((resolve, reject) => {
+    const idbSources = await new Promise<IngestedSource[]>((resolve, reject) => {
       const transaction = db.transaction(STORE_SOURCES, 'readonly')
       const store = transaction.objectStore(STORE_SOURCES)
       const index = store.index('projectId')
@@ -181,8 +233,35 @@ export async function getSourcesForProject(projectId: string): Promise<IngestedS
         reject(new Error('Failed to retrieve project sources from IndexedDB'))
       }
     })
+
+    // If IndexedDB sources are empty, check server filesystem backup to restore it!
+    if (idbSources.length === 0) {
+      console.log(`IndexedDB sources empty for ${projectId}, checking local filesystem storage backup...`)
+      const res = await fetch(`/api/projects/sources?projectId=${projectId}`)
+      if (res.ok) {
+        const serverSources = await res.json() as IngestedSource[]
+        if (serverSources && serverSources.length > 0) {
+          console.log(`Found ${serverSources.length} sources on disk backup. Restoring to IndexedDB...`)
+          // Batch save them to IndexedDB
+          const dbWrite = await initDB()
+          const tx = dbWrite.transaction(STORE_SOURCES, 'readwrite')
+          const sStore = tx.objectStore(STORE_SOURCES)
+          serverSources.forEach(s => sStore.put(s))
+          return serverSources
+        }
+      }
+    }
+
+    return idbSources
   } catch (e) {
-    console.error("IndexedDB getSourcesForProject initialization error:", e)
+    console.error("getSourcesForProject error:", e)
+    // Fallback to fetch from server directly
+    try {
+      const res = await fetch(`/api/projects/sources?projectId=${projectId}`)
+      if (res.ok) return await res.json()
+    } catch (apiErr) {
+      console.error("Server fallback fetch failed for sources:", apiErr)
+    }
     return []
   }
 }
@@ -195,6 +274,11 @@ export async function deleteSource(id: number): Promise<void> {
     const request = store.delete(id)
 
     request.onsuccess = () => {
+      // Sync delete to local filesystem server in background
+      fetch(`/api/projects/sources?id=${id}`, {
+        method: 'DELETE'
+      }).catch(e => console.warn('Background source delete sync failed:', e))
+
       resolve()
     }
 
