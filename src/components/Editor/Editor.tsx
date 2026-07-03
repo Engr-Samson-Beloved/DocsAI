@@ -227,6 +227,26 @@ const PROJECT_TEMPLATE = `
 </div>
 `
 
+const toTitleCase = (str: string): string => {
+  if (!str) return ''
+  const minorWords = ['and', 'as', 'but', 'for', 'if', 'nor', 'or', 'so', 'yet', 'a', 'an', 'the', 'at', 'by', 'for', 'in', 'of', 'on', 'to', 'with', 'from', 'into', 'onto', 'upon', 'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'before', 'behind', 'below', 'beneath', 'beside', 'between', 'beyond', 'during', 'except', 'inside', 'outside', 'over', 'through', 'under', 'underneath', 'until', 'within', 'without']
+  
+  return str.replace(/\b[a-zA-Z']+\b/g, (word, index) => {
+    const isFirstOrLast = index === 0 || index + word.length === str.length
+    const lowerWord = word.toLowerCase()
+    
+    if (!isFirstOrLast && minorWords.includes(lowerWord)) {
+      return lowerWord
+    }
+    
+    if (word === word.toUpperCase() && word.length > 3) {
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    }
+    
+    return word.charAt(0).toUpperCase() + word.slice(1)
+  })
+}
+
 // Helper function to format raw markdown or code-blocked AI outputs to clean HTML tags.
 // This ensures content inserts cleanly into the Tiptap document tree with proper styles.
 const formatAiResponseToHtml = (text: string): string => {
@@ -2272,7 +2292,16 @@ export default function Editor() {
     // Find all pages, check if they have a heading with "References" or "Bibliography"
     const pages = document.querySelectorAll('.page-sheet')
     const modifiedElements: HTMLElement[] = []
+    const originalHeadingsText: { el: HTMLElement; text: string }[] = []
     
+    // Temporarily capitalize all headings in the editor print canvas to Title Case
+    const allHeadings = document.querySelectorAll('.page-sheet h1, .page-sheet h2, .page-sheet h3, .page-sheet h4, .page-sheet h5, .page-sheet h6')
+    allHeadings.forEach((h) => {
+      const htmlEl = h as HTMLElement
+      originalHeadingsText.push({ el: htmlEl, text: htmlEl.innerText })
+      htmlEl.innerText = toTitleCase(htmlEl.innerText)
+    })
+
     pages.forEach((page) => {
       const headings = page.querySelectorAll('h1, h2, h3, h4, h5, h6')
       let hasReferencesHeading = false
@@ -2295,10 +2324,13 @@ export default function Editor() {
     
     window.print()
     
-    // Clean up classes after print dialog opens
+    // Clean up classes and restore headings after print dialog opens
     setTimeout(() => {
       modifiedElements.forEach((el) => {
         el.classList.remove('apa-reference-entry')
+      })
+      originalHeadingsText.forEach(({ el, text }) => {
+        el.innerText = text
       })
     }, 100)
   }
@@ -2361,8 +2393,9 @@ export default function Editor() {
             const runs = (node.content || []).map((childNode: any) => {
               const marks = childNode.marks || []
               return new TextRun({
-                text: childNode.text || '',
-                bold: marks.some((m: any) => m.type === 'bold'),
+                text: toTitleCase(childNode.text || ''),
+                bold: true,
+                color: "000000", // black / uncolored
                 italics: marks.some((m: any) => m.type === 'italic'),
                 underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
                 strike: marks.some((m: any) => m.type === 'strike'),
@@ -2681,14 +2714,14 @@ export default function Editor() {
           fill: { color: '4f46e5' } // Indigo 600
         })
 
-        slide.addText(section.title, {
+        slide.addText(toTitleCase(section.title), {
           x: 0.9,
           y: 0.5,
           w: 11.5,
           h: 0.7,
           fontSize: 24,
           bold: true,
-          color: '1e293b', // Slate 800
+          color: '000000', // uncolored (black)
           fontFace: 'Arial',
           valign: 'middle'
         })

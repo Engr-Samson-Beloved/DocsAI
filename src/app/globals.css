@@ -375,6 +375,16 @@ body {
     line-height: 1.5 !important;
   }
 
+  .page-sheet h1,
+  .page-sheet h2,
+  .page-sheet h3,
+  .page-sheet h4,
+  .page-sheet h5,
+  .page-sheet h6 {
+    font-weight: bold !important;
+    color: black !important;
+  }
+
   .apa-reference-entry {
     padding-left: 0.5in !important;
     text-indent: -0.5in !important;
