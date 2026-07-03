@@ -303,14 +303,16 @@ body {
 
 /* Printing styles to hide the visual page-break divider in final compile */
 @media print {
-  /* Hide headers, sidebars, outline, wizard, and print-action controls */
+  /* Hide headers, sidebars, outline, wizard, print-action controls, and legacy logo */
   header,
   aside,
   button,
   .print\:hidden,
   .print-hidden,
   .delete-page-btn,
-  .add-page-btn {
+  .add-page-btn,
+  div[data-type="yabatech-logo"],
+  [data-type="yabatech-logo"] {
     display: none !important;
   }
 
@@ -364,6 +366,19 @@ body {
     box-sizing: border-box !important;
     background: white !important;
     color: black !important;
+    font-family: 'Times New Roman', Times, serif !important;
+    line-height: 1.5 !important;
+  }
+
+  .page-sheet * {
+    font-family: 'Times New Roman', Times, serif !important;
+    line-height: 1.5 !important;
+  }
+
+  .apa-reference-entry {
+    padding-left: 0.5in !important;
+    text-indent: -0.5in !important;
+    margin-bottom: 0.5em !important;
   }
 }
 

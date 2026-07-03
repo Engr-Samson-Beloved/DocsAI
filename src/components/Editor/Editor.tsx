@@ -2266,171 +2266,41 @@ export default function Editor() {
     URL.revokeObjectURL(link.href)
   }
 
-  // Export to PDF Document (.pdf) using html2pdf.js (dynamic load)
-  const exportToPdf = async () => {
-    setLoadingMessage('Compiling PDF Document...')
-    setIsExporting(true)
-    
-    // Temporarily reset zoomScale to 1 so the elements render at full resolution without scale artifacts
-    const originalScale = zoomScale
-    setZoomScale(1)
-
-    // Helper to temporarily sanitize style rules using oklch, lab, lch color functions to prevent html2canvas crashes
-    const sanitizeStylesheets = () => {
-      const cleanCssText = (text: string): string => {
-        const functions = ['oklch(', 'lab(', 'oklab(', 'lch(']
-        let result = text
-        
-        for (const fn of functions) {
-          let index = result.indexOf(fn)
-          while (index !== -1) {
-            let parenCount = 1
-            let j = index + fn.length
-            while (j < result.length && parenCount > 0) {
-              if (result[j] === '(') parenCount++
-              else if (result[j] === ')') parenCount--
-              j++
-            }
-            
-            if (parenCount === 0) {
-              result = result.substring(0, index) + 'transparent' + result.substring(j)
-            } else {
-              result = result.substring(0, index) + 'transparent' + result.substring(index + fn.length)
-            }
-            index = result.indexOf(fn)
-          }
-        }
-        return result
-      }
-
-      const getSheetCssText = (sheet: CSSStyleSheet): string => {
-        let cssText = ''
-        try {
-          if (sheet.cssRules) {
-            for (let i = 0; i < sheet.cssRules.length; i++) {
-              cssText += sheet.cssRules[i].cssText + '\n'
-            }
-          }
-        } catch (e) {}
-        return cssText
-      }
-
-      const tempStyleElements: HTMLStyleElement[] = []
-      const disabledSheets: { sheet: CSSStyleSheet; disabled: boolean }[] = []
-      const modifiedInlineStyles: { el: Element; style: string }[] = []
-
-      // 1. Process all stylesheets
-      for (let i = 0; i < document.styleSheets.length; i++) {
-        const sheet = document.styleSheets[i] as CSSStyleSheet
-        try {
-          const cssText = getSheetCssText(sheet)
-          if (cssText) {
-            const cleaned = cleanCssText(cssText)
-            
-            // Create a temporary style tag with the sanitized styles
-            const tempStyle = document.createElement('style')
-            tempStyle.setAttribute('data-pdf-temp', 'true')
-            tempStyle.textContent = cleaned
-            document.head.appendChild(tempStyle)
-            tempStyleElements.push(tempStyle)
-          }
-          
-          // Disable the original sheet
-          const originalDisabled = sheet.disabled
-          sheet.disabled = true
-          disabledSheets.push({ sheet, disabled: originalDisabled })
-        } catch (e) {
-          // Cross-origin, just disable
-          try {
-            const originalDisabled = sheet.disabled
-            sheet.disabled = true
-            disabledSheets.push({ sheet, disabled: originalDisabled })
-          } catch (err) {}
-        }
-      }
-
-      // 2. Process all elements with inline styles
-      const styledElements = Array.from(document.querySelectorAll('[style]'))
-      for (const el of styledElements) {
-        const style = el.getAttribute('style')
-        if (style) {
-          const cleaned = cleanCssText(style)
-          if (cleaned !== style) {
-            modifiedInlineStyles.push({ el, style })
-            el.setAttribute('style', cleaned)
-          }
-        }
-      }
-
-      return () => {
-        // Remove temporary style tags
-        for (const el of tempStyleElements) {
-          try {
-            el.remove()
-          } catch (e) {}
-        }
-        
-        // Restore original stylesheets
-        for (const item of disabledSheets) {
-          try {
-            item.sheet.disabled = item.disabled
-          } catch (e) {}
-        }
-
-        // Restore inline styles
-        for (const item of modifiedInlineStyles) {
-          try {
-            item.el.setAttribute('style', item.style)
-          } catch (e) {}
-        }
-      }
-    }
-
-    // Wait a brief tick for layout repaint
-    setTimeout(async () => {
-      const restoreStyles = sanitizeStylesheets()
-      try {
-        const html2pdf = (await import('html2pdf.js')).default
-        const element = document.querySelector('.tiptap') as HTMLElement
-        if (!element) {
-          alert('Editor canvas element not found.')
-          return
-        }
-
-        const opt: any = {
-          margin: 0,
-          filename: `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { 
-            scale: 1.5, 
-            useCORS: true, 
-            logging: false 
-          },
-          jsPDF: { 
-            unit: 'px', 
-            format: [794, 1123], 
-            orientation: 'portrait',
-            hotfixes: ['px_scaling']
-          },
-          pagebreak: { mode: ['css', 'legacy'] }
-        }
-
-        await html2pdf().set(opt).from(element).save()
-      } catch (err: any) {
-        console.error('PDF export error:', err)
-        alert(`Failed to export PDF: ${err.message || err}`)
-      } finally {
-        restoreStyles()
-        // Restore screen scale
-        setZoomScale(originalScale)
-        setIsExporting(false)
-      }
-    }, 150)
-  }
 
   // Export to PDF using browser native print engine (Fast, Searchable Vector format)
   const exportToPdfPrint = () => {
+    // Find all pages, check if they have a heading with "References" or "Bibliography"
+    const pages = document.querySelectorAll('.page-sheet')
+    const modifiedElements: HTMLElement[] = []
+    
+    pages.forEach((page) => {
+      const headings = page.querySelectorAll('h1, h2, h3, h4, h5, h6')
+      let hasReferencesHeading = false
+      headings.forEach((h) => {
+        const text = h.textContent?.trim().toLowerCase() || ''
+        if (text === 'references' || text === 'bibliography') {
+          hasReferencesHeading = true
+        }
+      })
+      
+      if (hasReferencesHeading) {
+        // Add class to paragraphs for APA 7th hanging indent style
+        const paragraphs = page.querySelectorAll('p')
+        paragraphs.forEach((p) => {
+          p.classList.add('apa-reference-entry')
+          modifiedElements.push(p as HTMLElement)
+        })
+      }
+    })
+    
     window.print()
+    
+    // Clean up classes after print dialog opens
+    setTimeout(() => {
+      modifiedElements.forEach((el) => {
+        el.classList.remove('apa-reference-entry')
+      })
+    }, 100)
   }
 
   // Clear the document completely, leaving it with a blank document (one blank page)
@@ -2471,6 +2341,7 @@ export default function Editor() {
         return undefined
       }
 
+      let inReferencesSection = false
       pages.forEach((pageNode: any) => {
         if (pageNode.type !== 'page') return
         const nodes = pageNode.content || []
@@ -2480,6 +2351,13 @@ export default function Editor() {
 
           if (node.type === 'heading') {
             const level = node.attrs?.level || 1
+            const headingText = (node.content || []).map((c: any) => c.text || '').join('').trim().toLowerCase()
+            if (headingText === 'references' || headingText === 'bibliography') {
+              inReferencesSection = true
+            } else {
+              inReferencesSection = false
+            }
+
             const runs = (node.content || []).map((childNode: any) => {
               const marks = childNode.marks || []
               return new TextRun({
@@ -2488,7 +2366,7 @@ export default function Editor() {
                 italics: marks.some((m: any) => m.type === 'italic'),
                 underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
                 strike: marks.some((m: any) => m.type === 'strike'),
-                font: 'Arial'
+                font: 'Times New Roman'
               })
             })
 
@@ -2497,7 +2375,7 @@ export default function Editor() {
                 children: runs,
                 heading: getHeadingLevel(level),
                 alignment: align,
-                spacing: { before: 240, after: 120 }
+                spacing: { before: 240, after: 120, line: 360 }
               })
             )
           } else if (node.type === 'paragraph') {
@@ -2509,7 +2387,7 @@ export default function Editor() {
                 italics: marks.some((m: any) => m.type === 'italic'),
                 underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
                 strike: marks.some((m: any) => m.type === 'strike'),
-                font: 'Arial'
+                font: 'Times New Roman'
               })
             })
 
@@ -2517,6 +2395,7 @@ export default function Editor() {
               new Paragraph({
                 children: runs,
                 alignment: align,
+                indent: inReferencesSection ? { left: 720, hanging: 720 } : undefined,
                 spacing: { after: 120, line: 360 } // 1.5 line height spacing
               })
             )
@@ -2531,7 +2410,7 @@ export default function Editor() {
                     bold: marks.some((m: any) => m.type === 'bold'),
                     italics: marks.some((m: any) => m.type === 'italic'),
                     underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                    font: 'Arial'
+                    font: 'Times New Roman'
                   })
                 })
 
@@ -2540,7 +2419,7 @@ export default function Editor() {
                     children: runs,
                     bullet: isOrdered ? undefined : { level: 0 },
                     indent: isOrdered ? { left: 720 } : undefined,
-                    spacing: { after: 80 }
+                    spacing: { after: 80, line: 360 }
                   })
                 )
               })
@@ -2554,7 +2433,7 @@ export default function Editor() {
                     text: childNode.text || '',
                     italics: true,
                     color: '52525b', // Zinc 600
-                    font: 'Arial'
+                    font: 'Times New Roman'
                   })
                 )
               })
@@ -2564,7 +2443,7 @@ export default function Editor() {
               new Paragraph({
                 children: runs,
                 indent: { left: 720 },
-                spacing: { before: 120, after: 120 }
+                spacing: { before: 120, after: 120, line: 360 }
               })
             )
           }
@@ -2584,11 +2463,11 @@ export default function Editor() {
                         text: docHeader || "WordPI Document Draft",
                         size: 18, // 9pt (half-points in docx)
                         color: "71717a", // Zinc 500
-                        font: "Arial"
+                        font: "Times New Roman"
                       })
                     ],
                     alignment: AlignmentType.RIGHT,
-                    spacing: { after: 120 }
+                    spacing: { after: 120, line: 360 }
                   })
                 ]
               })
@@ -2602,17 +2481,17 @@ export default function Editor() {
                         text: docFooter ? `${docFooter} | ` : "Page ",
                         size: 18,
                         color: "71717a",
-                        font: "Arial"
+                        font: "Times New Roman"
                       }),
                       new TextRun({
                         children: [docx.PageNumber.CURRENT],
                         size: 18,
                         color: "71717a",
-                        font: "Arial"
+                        font: "Times New Roman"
                       })
                     ],
                     alignment: AlignmentType.CENTER,
-                    spacing: { before: 120 }
+                    spacing: { before: 120, line: 360 }
                   })
                 ]
               })
@@ -2780,143 +2659,150 @@ export default function Editor() {
         sections.push(currentSection)
       }
 
-      // 3. GENERATE SLIDES FROM SECTIONS WITH MAX 5 ITEMS AUTO-SPLITTING
+      // 3. GENERATE SEPARATE SLIDES FROM SECTIONS WITHOUT CHUNKING OR MERGING
       sections.forEach((section) => {
-        // Chunk items into lists of 5
-        const chunks: SlideContentItem[][] = []
-        for (let i = 0; i < section.items.length; i += 5) {
-          chunks.push(section.items.slice(i, i + 5))
+        const slide = pptx.addSlide()
+
+        // Subtle slate-50 background for content slides
+        slide.addShape('rect' as any, {
+          x: 0,
+          y: 0,
+          w: '100%',
+          h: '100%',
+          fill: { color: 'f8fafc' } // Slate 50
+        })
+
+        // Left accent vertical bar next to slide title
+        slide.addShape('rect' as any, {
+          x: 0.6,
+          y: 0.5,
+          w: 0.1,
+          h: 0.7,
+          fill: { color: '4f46e5' } // Indigo 600
+        })
+
+        slide.addText(section.title, {
+          x: 0.9,
+          y: 0.5,
+          w: 11.5,
+          h: 0.7,
+          fontSize: 24,
+          bold: true,
+          color: '1e293b', // Slate 800
+          fontFace: 'Arial',
+          valign: 'middle'
+        })
+
+        // Separator line under title
+        slide.addShape('rect' as any, {
+          x: 0.6,
+          y: 1.3,
+          w: 12.13,
+          h: 0.02,
+          fill: { color: 'e2e8f0' } // Slate 200
+        })
+
+        const itemCount = section.items.length
+        // Determine font size and line spacing based on the number of items to scale appropriately
+        let fontSize = 15
+        let lineSpacing = 22
+        if (itemCount <= 3) {
+          fontSize = 18
+          lineSpacing = 28
+        } else if (itemCount === 4) {
+          fontSize = 16
+          lineSpacing = 24
+        } else if (itemCount === 5) {
+          fontSize = 14
+          lineSpacing = 22
+        } else if (itemCount <= 7) {
+          fontSize = 12
+          lineSpacing = 18
+        } else {
+          fontSize = 10
+          lineSpacing = 14
         }
 
-        // If a section exists but has no items, create a single slide for it
-        if (chunks.length === 0) {
-          chunks.push([])
-        }
-
-        chunks.forEach((chunk, chunkIdx) => {
-          const slide = pptx.addSlide()
-
-          // Subtle slate-50 background for content slides
-          slide.addShape('rect' as any, {
-            x: 0,
-            y: 0,
-            w: '100%',
-            h: '100%',
-            fill: { color: 'f8fafc' } // Slate 50
-          })
-
-          // Left accent vertical bar next to slide title
-          slide.addShape('rect' as any, {
-            x: 0.6,
-            y: 0.5,
-            w: 0.1,
-            h: 0.7,
-            fill: { color: '4f46e5' } // Indigo 600
-          })
-
-          const displayTitle = chunkIdx > 0 ? `${section.title} (Cont.)` : section.title
-          slide.addText(displayTitle, {
-            x: 0.9,
-            y: 0.5,
-            w: 11.5,
-            h: 0.7,
-            fontSize: 24,
-            bold: true,
-            color: '1e293b', // Slate 800
-            fontFace: 'Arial',
-            valign: 'middle'
-          })
-
-          // Separator line under title
-          slide.addShape('rect' as any, {
-            x: 0.6,
-            y: 1.3,
-            w: 12.13,
-            h: 0.02,
-            fill: { color: 'e2e8f0' } // Slate 200
-          })
-
-          if (chunk.length > 0) {
-            const textPropsArray: any[] = chunk.map((item, idx) => {
-              const isLast = idx === chunk.length - 1
-              const spacing = isLast ? "" : (item.type === 'paragraph' || item.type === 'blockquote' ? "\n\n" : "\n")
-              
-              if (item.type === 'bullet') {
-                return {
-                  text: item.text + spacing,
-                  options: {
-                    bullet: true,
-                    fontSize: 15,
-                    color: '334155', // Slate 700
-                    fontFace: 'Arial',
-                    lineSpacing: 24
-                  }
-                }
-              } else if (item.type === 'number') {
-                return {
-                  text: item.text + spacing,
-                  options: {
-                    bullet: { type: 'number' },
-                    fontSize: 15,
-                    color: '334155', // Slate 700
-                    fontFace: 'Arial',
-                    lineSpacing: 24
-                  }
-                }
-              } else if (item.type === 'blockquote') {
-                return {
-                  text: `“ ${item.text} ”` + spacing,
-                  options: {
-                    italic: true,
-                    fontSize: 15,
-                    color: '4f46e5', // Indigo 600
-                    fontFace: 'Arial',
-                    lineSpacing: 22
-                  }
-                }
-              } else { // paragraph
-                return {
-                  text: item.text + spacing,
-                  options: {
-                    fontSize: 15,
-                    color: '0f172a', // Slate 900
-                    fontFace: 'Arial',
-                    lineSpacing: 22
-                  }
+        if (itemCount > 0) {
+          const textPropsArray: any[] = section.items.map((item, idx) => {
+            const isLast = idx === itemCount - 1
+            const spacing = isLast ? "" : (item.type === 'paragraph' || item.type === 'blockquote' ? "\n\n" : "\n")
+            
+            if (item.type === 'bullet') {
+              return {
+                text: item.text + spacing,
+                options: {
+                  bullet: true,
+                  fontSize: fontSize,
+                  color: '334155', // Slate 700
+                  fontFace: 'Arial',
+                  lineSpacing: lineSpacing
                 }
               }
-            })
-
-            slide.addText(textPropsArray, {
-              x: 0.8,
-              y: 1.7,
-              w: 11.7,
-              h: 4.8,
-              valign: 'top'
-            })
-          } else {
-            slide.addText("No content in this section.", {
-              x: 0.8,
-              y: 1.7,
-              w: 11.7,
-              h: 4.8,
-              fontSize: 14,
-              italic: true,
-              color: '94a3b8',
-              valign: 'top'
-            })
-          }
-
-          // Small footer
-          slide.addText(`DocsAI | ${documentTitle}`, {
-            x: 0.8,
-            y: 6.9,
-            w: 10.0,
-            h: 0.3,
-            fontSize: 10,
-            color: '94a3b8',
-            fontFace: 'Arial'
+            } else if (item.type === 'number') {
+              return {
+                text: item.text + spacing,
+                options: {
+                  bullet: { type: 'number' },
+                  fontSize: fontSize,
+                  color: '334155', // Slate 700
+                  fontFace: 'Arial',
+                  lineSpacing: lineSpacing
+                }
+              }
+            } else if (item.type === 'blockquote') {
+              return {
+                text: `“ ${item.text} ”` + spacing,
+                options: {
+                  italic: true,
+                  fontSize: fontSize,
+                  color: '4f46e5', // Indigo 600
+                  fontFace: 'Arial',
+                  lineSpacing: Math.max(12, lineSpacing - 2)
+                }
+              }
+            } else { // paragraph
+              return {
+                text: item.text + spacing,
+                options: {
+                  fontSize: fontSize,
+                  color: '0f172a', // Slate 900
+                  fontFace: 'Arial',
+                  lineSpacing: lineSpacing
+                }
+              }
+            }
           })
+
+          slide.addText(textPropsArray, {
+            x: 0.8,
+            y: 1.7,
+            w: 11.7,
+            h: 4.8,
+            valign: 'top'
+          })
+        } else {
+          slide.addText("No content in this section.", {
+            x: 0.8,
+            y: 1.7,
+            w: 11.7,
+            h: 4.8,
+            fontSize: 14,
+            italic: true,
+            color: '94a3b8',
+            valign: 'top'
+          })
+        }
+
+        // Small footer
+        slide.addText(`DocsAI | ${documentTitle}`, {
+          x: 0.8,
+          y: 6.9,
+          w: 10.0,
+          h: 0.3,
+          fontSize: 10,
+          color: '94a3b8',
+          fontFace: 'Arial'
         })
       })
 
@@ -4357,15 +4243,6 @@ export default function Editor() {
                   className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
                 >
                   PDF Document (Fast / Searchable)
-                </button>
-                <button 
-                  onClick={() => {
-                    exportToPdf()
-                    setShowExportMenu(false)
-                  }}
-                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
-                >
-                  PDF Document (Legacy Image)
                 </button>
                 <button 
                   onClick={() => {

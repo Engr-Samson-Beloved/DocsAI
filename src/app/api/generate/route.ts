@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       `- Every section should include detailed analysis, interpretation, evaluation, and comparison rather than generic definitions.\n` +
       `- Answer: Why? How? What are the implications? What are the limitations?\n` +
       `- Incorporate localized academic contexts, industry-specific examples, real-world applications, and relevant case studies (including Nigerian/local context where applicable to the topic).\n` +
-      `- Citation Intelligence: Ensure all factual claims support citation formatting (e.g., APA, IEEE, Harvard, or MLA) based on the document type: "${docType}".\n\n` +
+      `- Citation Intelligence: Ensure all factual claims, references, and citations are formatted strictly according to APA style (7th edition) throughout the document.\n\n` +
       
       `REPLACEMENT DETECTION:\n` +
       `If the user's request is to change, edit, correct, rewrite, or update a specific part of the document context, you MUST output the response using this format:\n` +
