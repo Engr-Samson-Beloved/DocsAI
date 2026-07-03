@@ -697,6 +697,27 @@ const PageNode = Node.create({
     }
   },
 
+  addAttributes() {
+    return {
+      cover: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-cover'),
+        renderHTML: attributes => {
+          if (!attributes.cover) return {}
+          return { 'data-cover': attributes.cover }
+        }
+      },
+      toc: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-toc'),
+        renderHTML: attributes => {
+          if (!attributes.toc) return {}
+          return { 'data-toc': attributes.toc }
+        }
+      }
+    }
+  },
+
   parseHTML() {
     return [{ tag: 'div[data-type="page"]' }]
   },
@@ -707,6 +728,130 @@ const PageNode = Node.create({
 
   addNodeView() {
     return ({ node, editor, getPos }) => new PageNodeView(node, editor, getPos)
+  }
+})
+
+const CustomParagraph = Node.create({
+  name: 'paragraph',
+  group: 'block',
+  content: 'inline*',
+  
+  parseHTML() {
+    return [{ tag: 'p' }]
+  },
+  
+  renderHTML({ HTMLAttributes }) {
+    return ['p', mergeAttributes(HTMLAttributes), 0]
+  },
+  
+  addAttributes() {
+    return {
+      style: {
+        default: null,
+        parseHTML: element => element.getAttribute('style'),
+        renderHTML: attributes => {
+          if (!attributes.style) return {}
+          return { style: attributes.style }
+        }
+      },
+      class: {
+        default: null,
+        parseHTML: element => element.getAttribute('class'),
+        renderHTML: attributes => {
+          if (!attributes.class) return {}
+          return { class: attributes.class }
+        }
+      },
+      'data-level': {
+        default: null,
+        parseHTML: element => element.getAttribute('data-level'),
+        renderHTML: attributes => {
+          if (!attributes['data-level']) return {}
+          return { 'data-level': attributes['data-level'] }
+        }
+      },
+      'data-page': {
+        default: null,
+        parseHTML: element => element.getAttribute('data-page'),
+        renderHTML: attributes => {
+          if (!attributes['data-page']) return {}
+          return { 'data-page': attributes['data-page'] }
+        }
+      }
+    }
+  },
+
+  addCommands() {
+    return {
+      setParagraph: () => ({ commands }) => {
+        return commands.setNode(this.name)
+      },
+    }
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      'Mod-Alt-0': () => this.editor.commands.setParagraph(),
+    }
+  }
+})
+
+const TocItemNode = Node.create({
+  name: 'tocItem',
+  group: 'block',
+  content: 'inline*',
+  defining: true,
+  
+  addAttributes() {
+    return {
+      level: {
+        default: 1,
+        parseHTML: element => parseInt(element.getAttribute('data-level') || '1'),
+        renderHTML: attributes => ({ 'data-level': attributes.level })
+      },
+      page: {
+        default: 1,
+        parseHTML: element => parseInt(element.getAttribute('data-page') || '1'),
+        renderHTML: attributes => ({ 'data-page': attributes.page })
+      }
+    }
+  },
+  
+  parseHTML() {
+    return [{ tag: 'p[data-type="toc-item"]' }]
+  },
+  
+  renderHTML({ node, HTMLAttributes }) {
+    const level = node.attrs.level || 1
+    const page = node.attrs.page || 1
+    const paddingLeft = (level - 1) * 20
+    const fontWeight = level === 1 ? 'bold' : 'normal'
+    
+    return [
+      'p',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'toc-item',
+        class: 'toc-item-row',
+        style: `display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 10px; font-family: 'Times New Roman', Times, serif; padding-left: ${paddingLeft}px; font-weight: ${fontWeight};`
+      }),
+      [
+        'span',
+        { class: 'toc-title' },
+        0
+      ],
+      [
+        'span',
+        { 
+          class: 'toc-dots', 
+          style: 'flex-grow: 1; border-bottom: 1px dotted #71717a; margin: 0 10px; position: relative; top: -4px;' 
+        }
+      ],
+      [
+        'span',
+        { class: 'toc-page', style: 'flex-shrink: 0;' },
+        page.toString()
+      ]
+    ]
   }
 })
 
@@ -851,6 +996,34 @@ export default function Editor() {
       localStorage.setItem('supervisorName', supervisorName)
     }
   }, [studentName, matricNumber, supervisorName])
+
+  const [showCoverPageModal, setShowCoverPageModal] = useState(false)
+  const [coverDetails, setCoverDetails] = useState({
+    title: '',
+    studentName: studentName || '',
+    matricNo: matricNumber || '',
+    department: '',
+    faculty: '',
+    institution: 'Yaba College of Technology',
+    supervisorName: supervisorName || '',
+    academicSession: '2025/2026',
+    submissionDate: 'July 2026'
+  })
+
+  useEffect(() => {
+    setCoverDetails(prev => ({
+      ...prev,
+      studentName: studentName,
+      matricNo: matricNumber,
+      supervisorName: supervisorName
+    }))
+  }, [studentName, matricNumber, supervisorName])
+
+  useEffect(() => {
+    if (showCoverPageModal && !coverDetails.title) {
+      setCoverDetails(prev => ({ ...prev, title: documentTitle.toUpperCase() }))
+    }
+  }, [showCoverPageModal, documentTitle, coverDetails.title])
 
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
@@ -1780,11 +1953,14 @@ export default function Editor() {
     extensions: [
       CustomDocument,
       PageNode,
+      TocItemNode,
       YabatechLogo,
       StarterKit.configure({
         document: false,
         underline: false,
+        paragraph: false,
       }),
+      CustomParagraph,
       TextStyle,
       FontFamily,
       TextAlign.configure({
@@ -2335,6 +2511,138 @@ export default function Editor() {
     }, 100)
   }
 
+  const applyCoverPage = (details: typeof coverDetails) => {
+    if (!editor) return
+    
+    const coverPageHtml = `
+<div data-type="page" data-cover="true" style="page-break-after: always; break-after: page; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; text-align: center; padding: 40mm 20mm 40mm 20mm;">
+  <h1 style="font-size: 24pt; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; line-height: 1.3; font-family: 'Times New Roman', Times, serif; text-align: center;">${details.title}</h1>
+  <p style="font-size: 14pt; margin-top: 60px; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">BY</p>
+  <p style="font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">${details.studentName}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">(${details.matricNo})</p>
+  <p style="font-size: 12pt; text-transform: uppercase; line-height: 1.6; max-width: 550px; margin: 60px auto; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">
+    A PROJECT REPORT SUBMITTED TO THE DEPARTMENT OF ${details.department}, FACULTY OF ${details.faculty}, ${details.institution} IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE AWARD OF THE DEGREE OF BACHELOR OF SCIENCE.
+  </p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold; margin-top: 60px;">SUPERVISOR: ${details.supervisorName}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; margin-top: 30px; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SESSION: ${details.academicSession}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SUBMISSION DATE: ${details.submissionDate}</p>
+</div>
+`
+    const currentContent = editor.getHTML()
+    let newContent = ''
+    
+    if (currentContent.includes('data-cover="true"')) {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(currentContent, 'text/html')
+      const firstPage = doc.body.querySelector('div[data-type="page"]')
+      if (firstPage && firstPage.getAttribute('data-cover') === 'true') {
+        const tempDiv = doc.createElement('div')
+        tempDiv.innerHTML = coverPageHtml.trim()
+        const newCoverPage = tempDiv.firstElementChild
+        if (newCoverPage) {
+          doc.body.replaceChild(newCoverPage, firstPage)
+        }
+      }
+      newContent = doc.body.innerHTML
+    } else {
+      newContent = coverPageHtml + currentContent
+    }
+    
+    editor.commands.setContent(newContent)
+    setIsSaved(false)
+    setShowCoverPageModal(false)
+
+    setTimeout(() => {
+      runPagination(editor)
+      updateOutline()
+    }, 100)
+  }
+
+  const generateTableOfContents = () => {
+    if (!editor) return
+
+    const pageSheets = document.querySelectorAll('.page-sheet')
+    const items: { text: string; level: number; page: number }[] = []
+
+    pageSheets.forEach((pageSheet) => {
+      const pageIndexAttr = pageSheet.getAttribute('data-page-index')
+      let pageNum = 1
+      if (pageIndexAttr !== null) {
+        pageNum = parseInt(pageIndexAttr) + 1
+      }
+
+      const headings = pageSheet.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
+      headings.forEach((h) => {
+        const text = h.textContent?.trim() || ''
+        const level = parseInt(h.tagName.substring(1))
+        
+        if (text.toLowerCase() === 'table of contents') return
+
+        items.push({
+          text,
+          level,
+          page: pageNum
+        })
+      })
+    })
+
+    if (items.length === 0) {
+      alert('No headings found in the document to generate a Table of Contents.')
+      return
+    }
+
+    let tocItemsHtml = ''
+    items.forEach((item) => {
+      tocItemsHtml += `
+<p data-type="toc-item" data-level="${item.level}" data-page="${item.page}">${toTitleCase(item.text)}</p>
+`
+    })
+
+    const tocPageHtml = `
+<div data-type="page" data-toc="true" style="page-break-after: always; break-after: page;">
+  <h2 style="text-align: center; font-weight: bold; font-size: 18pt; margin-bottom: 30px; font-family: 'Times New Roman', Times, serif; text-transform: uppercase;">Table of Contents</h2>
+  ${tocItemsHtml}
+</div>
+`
+
+    const currentHtml = editor.getHTML()
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(currentHtml, 'text/html')
+    
+    const existingToc = doc.body.querySelector('div[data-toc="true"]')
+    if (existingToc) {
+      const tempDiv = doc.createElement('div')
+      tempDiv.innerHTML = tocPageHtml.trim()
+      const newTocElement = tempDiv.firstElementChild
+      if (newTocElement) {
+        doc.body.replaceChild(newTocElement, existingToc)
+      }
+    } else {
+      const existingCover = doc.body.querySelector('div[data-cover="true"]')
+      const tempDiv = doc.createElement('div')
+      tempDiv.innerHTML = tocPageHtml.trim()
+      const newTocElement = tempDiv.firstElementChild
+      
+      if (newTocElement) {
+        if (existingCover && existingCover.nextElementSibling) {
+          doc.body.insertBefore(newTocElement, existingCover.nextElementSibling)
+        } else if (existingCover) {
+          doc.body.appendChild(newTocElement)
+        } else {
+          doc.body.insertBefore(newTocElement, doc.body.firstElementChild)
+        }
+      }
+    }
+
+    editor.commands.setContent(doc.body.innerHTML)
+    setIsSaved(false)
+    
+    setTimeout(() => {
+      runPagination(editor)
+      updateOutline()
+    }, 100)
+  }
+
   // Clear the document completely, leaving it with a blank document (one blank page)
   const clearDocument = () => {
     if (!editor) return
@@ -2351,7 +2659,7 @@ export default function Editor() {
     setIsExporting(true)
     try {
       const docx = await import('docx')
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = docx
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, TabStopType, LeaderType, PageBreak } = docx
 
       const json = editor.getJSON()
       const pages = json.content || []
@@ -2374,14 +2682,50 @@ export default function Editor() {
       }
 
       let inReferencesSection = false
-      pages.forEach((pageNode: any) => {
+      pages.forEach((pageNode: any, pageIdx: number) => {
         if (pageNode.type !== 'page') return
+        const isCover = pageNode.attrs?.cover === 'true' || pageNode.attrs?.cover === true
+        const isToc = pageNode.attrs?.toc === 'true' || pageNode.attrs?.toc === true
         const nodes = pageNode.content || []
 
         nodes.forEach((node: any) => {
-          const align = getAlignment(node.attrs?.textAlign)
+          const align = isCover ? AlignmentType.CENTER : getAlignment(node.attrs?.textAlign)
 
-          if (node.type === 'heading') {
+          if (node.type === 'tocItem') {
+            const level = node.attrs?.level || 1
+            const pageNum = node.attrs?.page || 1
+            const headingText = (node.content || []).map((c: any) => c.text || '').join('')
+            
+            // Indent subheadings in Word
+            const indentLeft = (level - 1) * 360
+            
+            children.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: headingText,
+                    bold: level === 1,
+                    font: 'Times New Roman'
+                  }),
+                  new TextRun("\t"),
+                  new TextRun({
+                    text: pageNum.toString(),
+                    bold: level === 1,
+                    font: 'Times New Roman'
+                  })
+                ],
+                indent: indentLeft > 0 ? { left: indentLeft } : undefined,
+                tabStops: [
+                  {
+                    type: TabStopType.RIGHT,
+                    position: 9000,
+                    leader: LeaderType.DOT
+                  }
+                ],
+                spacing: { after: 120, line: 360 }
+              })
+            )
+          } else if (node.type === 'heading') {
             const level = node.attrs?.level || 1
             const headingText = (node.content || []).map((c: any) => c.text || '').join('').trim().toLowerCase()
             if (headingText === 'references' || headingText === 'bibliography') {
@@ -2416,7 +2760,7 @@ export default function Editor() {
               const marks = childNode.marks || []
               return new TextRun({
                 text: childNode.text || '',
-                bold: marks.some((m: any) => m.type === 'bold'),
+                bold: marks.some((m: any) => m.type === 'bold') || isCover,
                 italics: marks.some((m: any) => m.type === 'italic'),
                 underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
                 strike: marks.some((m: any) => m.type === 'strike'),
@@ -2424,12 +2768,26 @@ export default function Editor() {
               })
             })
 
+            let spacingBefore = 0
+            let spacingAfter = 120
+            if (isCover) {
+              const textContent = (node.content || []).map((c: any) => c.text || '').join('').trim().toLowerCase()
+              if (textContent.includes('submitted to') || textContent.includes('partial fulfillment')) {
+                spacingBefore = 960
+                spacingAfter = 960
+              } else if (textContent.startsWith('supervisor:')) {
+                spacingBefore = 960
+              } else if (textContent.startsWith('by') || textContent.startsWith('session:') || textContent.startsWith('submission date:')) {
+                spacingBefore = 480
+              }
+            }
+
             children.push(
               new Paragraph({
                 children: runs,
                 alignment: align,
                 indent: inReferencesSection ? { left: 720, hanging: 720 } : undefined,
-                spacing: { after: 120, line: 360 } // 1.5 line height spacing
+                spacing: { before: spacingBefore, after: spacingAfter, line: 360 }
               })
             )
           } else if (node.type === 'bulletList' || node.type === 'orderedList') {
@@ -2481,6 +2839,14 @@ export default function Editor() {
             )
           }
         })
+
+        if (pageIdx < pages.length - 1) {
+          children.push(
+            new Paragraph({
+              children: [new PageBreak()]
+            })
+          )
+        }
       })
 
       const doc = new Document({
@@ -4184,6 +4550,15 @@ export default function Editor() {
             </button>
             
             <button
+              onClick={() => setShowCoverPageModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200/50 dark:border-amber-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Create a professional academic cover page"
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-500" />
+              <span>Create Cover Page</span>
+            </button>
+
+            <button
               onClick={clearDocument}
               className="flex items-center gap-1.5 px-3 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
               title="Clear all pages and content to start blank"
@@ -4199,6 +4574,15 @@ export default function Editor() {
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>Generate Full Blueprint</span>
+            </button>
+
+            <button
+              onClick={generateTableOfContents}
+              className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Generate a Table of Contents based on document headings"
+            >
+              <OrderedListIcon className="w-3.5 h-3.5 text-teal-500" />
+              <span>Table of Contents</span>
             </button>
             
             <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
@@ -5842,6 +6226,144 @@ export default function Editor() {
                 className="px-5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
               >
                 Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCoverPageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs select-none p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3 mb-4">
+              <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-500" />
+                <span>Create Academic Cover Page</span>
+              </h3>
+              <button 
+                onClick={() => setShowCoverPageModal(false)}
+                className="p-1 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded cursor-pointer"
+              >
+                <Minimize2 className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="space-y-3.5 max-h-[70vh] overflow-y-auto pr-1">
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Project Title</label>
+                <input 
+                  type="text" 
+                  value={coverDetails.title}
+                  onChange={(e) => setCoverDetails({ ...coverDetails, title: e.target.value })}
+                  placeholder="e.g. DESIGN OF AN OFFLINE-FIRST DOCUMENT SYSTEM"
+                  className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Student Name</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.studentName}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, studentName: e.target.value })}
+                    placeholder="e.g. SAMSON BELOVED"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Matric Number</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.matricNo}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, matricNo: e.target.value })}
+                    placeholder="e.g. HND/23/COM/1012"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Department</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.department}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, department: e.target.value })}
+                    placeholder="e.g. COMPUTER ENGINEERING"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Faculty</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.faculty}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, faculty: e.target.value })}
+                    placeholder="e.g. SCHOOL OF ENGINEERING"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Institution</label>
+                <input 
+                  type="text" 
+                  value={coverDetails.institution}
+                  onChange={(e) => setCoverDetails({ ...coverDetails, institution: e.target.value })}
+                  placeholder="e.g. YABA COLLEGE OF TECHNOLOGY, YABA"
+                  className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Supervisor's Name</label>
+                <input 
+                  type="text" 
+                  value={coverDetails.supervisorName}
+                  onChange={(e) => setCoverDetails({ ...coverDetails, supervisorName: e.target.value })}
+                  placeholder="e.g. DR. O. A. ADEBOLA"
+                  className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Academic Session</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.academicSession}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, academicSession: e.target.value })}
+                    placeholder="e.g. 2025/2026"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Submission Date</label>
+                  <input 
+                    type="text" 
+                    value={coverDetails.submissionDate}
+                    onChange={(e) => setCoverDetails({ ...coverDetails, submissionDate: e.target.value })}
+                    placeholder="e.g. JULY 2026"
+                    className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 pt-3 mt-4">
+              <button 
+                onClick={() => setShowCoverPageModal(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => applyCoverPage(coverDetails)}
+                className="px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded transition-colors cursor-pointer shadow-xs"
+              >
+                Insert Cover Page
               </button>
             </div>
           </div>

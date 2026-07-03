@@ -488,3 +488,40 @@ body {
     color: #f3f4f6 !important;
   }
 }
+
+/* Cover Page styling */
+.page-sheet[data-cover="true"] {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  text-align: center !important;
+  padding: 40mm 20mm 40mm 20mm !important;
+}
+
+/* For editing canvas */
+.tiptap div[data-cover="true"] {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  text-align: center !important;
+  min-height: 842px !important;
+  padding: 80px 40px !important;
+}
+
+/* Table of Contents styling */
+.toc-item-row {
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: space-between !important;
+  margin-bottom: 12px !important;
+  width: 100% !important;
+}
+
+.toc-item-row .toc-dots {
+  flex-grow: 1 !important;
+  border-bottom: 1px dotted #71717a !important;
+  margin: 0 10px !important;
+  position: relative !important;
+  top: -4px !important;
+}
+
