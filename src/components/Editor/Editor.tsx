@@ -674,6 +674,21 @@ class PageNodeView {
     if (pageNumEl) pageNumEl.textContent = `Page ${pageIndex + 1} of ${totalPages}`
 
     this.dom.setAttribute('data-page-index', pageIndex.toString())
+
+    if (!(window as any)._pageNumTimeout) {
+      (window as any)._pageNumTimeout = setTimeout(() => {
+        (window as any)._pageNumTimeout = null
+        const allSheets = document.querySelectorAll('.page-sheet')
+        const total = allSheets.length
+        allSheets.forEach((sheet, idx) => {
+          const numEl = sheet.querySelector('.page-number')
+          if (numEl) {
+            numEl.textContent = `Page ${idx + 1} of ${total}`
+          }
+          sheet.setAttribute('data-page-index', idx.toString())
+        })
+      }, 0)
+    }
   }
 }
 
@@ -5624,7 +5639,7 @@ export default function Editor() {
         </>
       )}
 
-      {false && showWizard && (
+      {showWizard && (
         <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none">
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
             {/* Header Banner */}
