@@ -247,6 +247,23 @@ const toTitleCase = (str: string): string => {
   })
 }
 
+const loadImageData = async (src: string): Promise<ArrayBuffer> => {
+  if (src.startsWith('data:image/')) {
+    const base64String = src.split(',')[1]
+    const binaryString = window.atob(base64String)
+    const len = binaryString.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    return bytes.buffer
+  } else {
+    const response = await fetch(src)
+    return await response.arrayBuffer()
+  }
+}
+
+
 // Helper function to format raw markdown or code-blocked AI outputs to clean HTML tags.
 // This ensures content inserts cleanly into the Tiptap document tree with proper styles.
 const formatAiResponseToHtml = (text: string): string => {
@@ -876,6 +893,20 @@ const YabatechLogo = Node.create({
   selectable: true,
   draggable: true,
   
+  addAttributes() {
+    return {
+      src: {
+        default: '/yabatech_logo.png',
+        parseHTML: element => element.getAttribute('data-src') || element.querySelector('img')?.getAttribute('src') || '/yabatech_logo.png',
+        renderHTML: attributes => {
+          return { 
+            'data-src': attributes.src,
+          }
+        }
+      }
+    }
+  },
+  
   parseHTML() {
     return [
       {
@@ -884,7 +915,8 @@ const YabatechLogo = Node.create({
     ]
   },
   
-  renderHTML({ HTMLAttributes }) {
+  renderHTML({ node, HTMLAttributes }) {
+    const src = node.attrs.src || '/yabatech_logo.png'
     return [
       'div', 
       mergeAttributes(HTMLAttributes, { 
@@ -894,8 +926,8 @@ const YabatechLogo = Node.create({
       [
         'img', 
         { 
-          src: '/yabatech_logo.png', 
-          alt: 'Yabatech Logo', 
+          src: src, 
+          alt: 'School Logo', 
           style: 'width: 100px; height: 100px; object-fit: contain; display: inline-block;' 
         }
       ]
@@ -1039,6 +1071,16 @@ export default function Editor() {
       setCoverDetails(prev => ({ ...prev, title: documentTitle.toUpperCase() }))
     }
   }, [showCoverPageModal, documentTitle, coverDetails.title])
+
+  const [customLogoSrc, setCustomLogoSrc] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('custom_school_logo') || '/yabatech_logo.png'
+    }
+    return '/yabatech_logo.png'
+  })
+
+  const [showTocModal, setShowTocModal] = useState(false)
+  const [exportScope, setExportScope] = useState<'full' | 'cover' | 'toc' | 'content'>('full')
 
   const [wizardFontFamily, setWizardFontFamily] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>('default')
   const [wizardLineSpacing, setWizardLineSpacing] = useState<string>('1.5')
@@ -2479,10 +2521,11 @@ export default function Editor() {
 
 
   // Export to PDF using browser native print engine (Fast, Searchable Vector format)
-  const exportToPdfPrint = () => {
+  const exportToPdfPrint = (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     // Find all pages, check if they have a heading with "References" or "Bibliography"
     const pages = document.querySelectorAll('.page-sheet')
     const modifiedElements: HTMLElement[] = []
+    const hiddenElements: HTMLElement[] = []
     const originalHeadingsText: { el: HTMLElement; text: string }[] = []
     
     // Temporarily capitalize all headings in the editor print canvas to Title Case
@@ -2494,6 +2537,24 @@ export default function Editor() {
     })
 
     pages.forEach((page) => {
+      const htmlPage = page as HTMLElement
+      const isCover = htmlPage.querySelector('div[data-cover="true"]') || htmlPage.getAttribute('data-cover') === 'true'
+      const isToc = htmlPage.querySelector('div[data-toc="true"]') || htmlPage.getAttribute('data-toc') === 'true'
+      
+      let shouldHide = false
+      if (scope === 'cover' && !isCover) {
+        shouldHide = true
+      } else if (scope === 'toc' && !isToc) {
+        shouldHide = true
+      } else if (scope === 'content' && (isCover || isToc)) {
+        shouldHide = true
+      }
+
+      if (shouldHide) {
+        htmlPage.classList.add('print-hidden-override')
+        hiddenElements.push(htmlPage)
+      }
+
       const headings = page.querySelectorAll('h1, h2, h3, h4, h5, h6')
       let hasReferencesHeading = false
       headings.forEach((h) => {
@@ -2519,6 +2580,9 @@ export default function Editor() {
     setTimeout(() => {
       modifiedElements.forEach((el) => {
         el.classList.remove('apa-reference-entry')
+      })
+      hiddenElements.forEach((el) => {
+        el.classList.remove('print-hidden-override')
       })
       originalHeadingsText.forEach(({ el, text }) => {
         el.innerText = text
@@ -2608,8 +2672,15 @@ export default function Editor() {
 
     let tocItemsHtml = ''
     items.forEach((item) => {
+      const title = toTitleCase(item.text)
+      const pageStr = item.page.toString()
+      const indentPadding = (item.level - 1) * 4
+      const dotsCount = Math.max(10, 85 - title.length - pageStr.length - indentPadding)
+      const dots = '.'.repeat(dotsCount)
+      const spacePrefix = ' '.repeat(indentPadding)
+
       tocItemsHtml += `
-<p data-type="toc-item" data-level="${item.level}" data-page="${item.page}">${toTitleCase(item.text)}</p>
+<p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">${spacePrefix}${title} ${dots} ${pageStr}</p>
 `
     })
 
@@ -2658,6 +2729,155 @@ export default function Editor() {
     }, 100)
   }
 
+  const generateCustomTocTemplate = () => {
+    if (!editor) return
+
+    const customTocHtml = `
+<div data-type="page" data-toc="true" style="page-break-after: always; break-after: page;">
+  <h2 style="text-align: center; font-weight: bold; font-size: 18pt; margin-bottom: 30px; font-family: 'Times New Roman', Times, serif; text-transform: uppercase;">Table of Contents</h2>
+  
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">PRELIMINARY PAGES ....................................................................................... i</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">CHAPTER 1: INTRODUCTION ................................................................................ 1</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">    1.1 Background of the Study ................................................................... 1</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">    1.2 Statement of the Problem .................................................................. 2</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">CHAPTER 2: LITERATURE REVIEW ........................................................................... 3</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">    2.1 Theoretical Framework ..................................................................... 3</p>
+  <p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">CHAPTER 3: METHODOLOGY ................................................................................. 7</p>
+</div>
+`
+    const currentHtml = editor.getHTML()
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(currentHtml, 'text/html')
+    
+    const existingToc = doc.body.querySelector('div[data-toc="true"]')
+    if (existingToc) {
+      const tempDiv = doc.createElement('div')
+      tempDiv.innerHTML = customTocHtml.trim()
+      const newTocElement = tempDiv.firstElementChild
+      if (newTocElement) {
+        doc.body.replaceChild(newTocElement, existingToc)
+      }
+    } else {
+      const existingCover = doc.body.querySelector('div[data-cover="true"]')
+      const tempDiv = doc.createElement('div')
+      tempDiv.innerHTML = customTocHtml.trim()
+      const newTocElement = tempDiv.firstElementChild
+      
+      if (newTocElement) {
+        if (existingCover && existingCover.nextElementSibling) {
+          doc.body.insertBefore(newTocElement, existingCover.nextElementSibling)
+        } else if (existingCover) {
+          doc.body.appendChild(newTocElement)
+        } else {
+          doc.body.insertBefore(newTocElement, doc.body.firstElementChild)
+        }
+      }
+    }
+
+    editor.commands.setContent(doc.body.innerHTML)
+    setIsSaved(false)
+    setShowTocModal(false)
+    
+    setTimeout(() => {
+      runPagination(editor)
+      updateOutline()
+    }, 100)
+  }
+
+  const handleTocFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      if (!text) return
+
+      const lines = text.split(/\r?\n/)
+      let tocHtml = ''
+      lines.forEach((line) => {
+        const trimmed = line.trim()
+        if (trimmed) {
+          tocHtml += `<p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">${trimmed}</p>\n`
+        }
+      })
+
+      const tocPageHtml = `
+<div data-type="page" data-toc="true" style="page-break-after: always; break-after: page;">
+  <h2 style="text-align: center; font-weight: bold; font-size: 18pt; margin-bottom: 30px; font-family: 'Times New Roman', Times, serif; text-transform: uppercase;">Table of Contents</h2>
+  ${tocHtml}
+</div>
+`
+      const currentHtml = editor.getHTML()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(currentHtml, 'text/html')
+      const existingToc = doc.body.querySelector('div[data-toc="true"]')
+      
+      if (existingToc) {
+        const tempDiv = doc.createElement('div')
+        tempDiv.innerHTML = tocPageHtml.trim()
+        const newTocElement = tempDiv.firstElementChild
+        if (newTocElement) {
+          doc.body.replaceChild(newTocElement, existingToc)
+        }
+      } else {
+        const existingCover = doc.body.querySelector('div[data-cover="true"]')
+        const tempDiv = doc.createElement('div')
+        tempDiv.innerHTML = tocPageHtml.trim()
+        const newTocElement = tempDiv.firstElementChild
+        
+        if (newTocElement) {
+          if (existingCover && existingCover.nextElementSibling) {
+            doc.body.insertBefore(newTocElement, existingCover.nextElementSibling)
+          } else if (existingCover) {
+            doc.body.appendChild(newTocElement)
+          } else {
+            doc.body.insertBefore(newTocElement, doc.body.firstElementChild)
+          }
+        }
+      }
+
+      editor.commands.setContent(doc.body.innerHTML)
+      setIsSaved(false)
+      setShowTocModal(false)
+
+      setTimeout(() => {
+        runPagination(editor)
+        updateOutline()
+      }, 100)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string
+      if (dataUrl) {
+        setCustomLogoSrc(dataUrl)
+        localStorage.setItem('custom_school_logo', dataUrl)
+        updateDocumentLogos(dataUrl)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const updateDocumentLogos = (newSrc: string) => {
+    if (!editor) return
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'yabatechLogo') {
+        editor.commands.insertContentAt(pos, {
+          type: 'yabatechLogo',
+          attrs: { src: newSrc }
+        })
+      }
+      return true
+    })
+  }
+
   // Clear the document completely, leaving it with a blank document (one blank page)
   const clearDocument = () => {
     if (!editor) return
@@ -2669,16 +2889,34 @@ export default function Editor() {
   }
 
   // Export to Word Document (.docx) using docx.js (dynamic load)
-  const exportToDocx = async () => {
+  const exportToDocx = async (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     setLoadingMessage('Compiling Word Document...')
     setIsExporting(true)
     try {
       const docx = await import('docx')
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, TabStopType, LeaderType, PageBreak } = docx
+      const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, TabStopType, LeaderType, PageBreak, ImageRun } = docx
 
       const json = editor.getJSON()
       const pages = json.content || []
       const children: any[] = []
+
+      // Filter pages based on scope
+      const filteredPages = pages.filter((pageNode: any) => {
+        if (pageNode.type !== 'page') return false
+        const isCover = pageNode.attrs?.cover === 'true' || pageNode.attrs?.cover === true
+        const isToc = pageNode.attrs?.toc === 'true' || pageNode.attrs?.toc === true
+        
+        if (scope === 'cover') return isCover
+        if (scope === 'toc') return isToc
+        if (scope === 'content') return !isCover && !isToc
+        return true
+      })
+
+      if (filteredPages.length === 0) {
+        alert('No pages found for the selected export scope.')
+        setIsExporting(false)
+        return
+      }
 
       // Helper to map alignments
       const getAlignment = (align?: string) => {
@@ -2697,16 +2935,39 @@ export default function Editor() {
       }
 
       let inReferencesSection = false
-      pages.forEach((pageNode: any, pageIdx: number) => {
-        if (pageNode.type !== 'page') return
+      
+      for (let pageIdx = 0; pageIdx < filteredPages.length; pageIdx++) {
+        const pageNode = filteredPages[pageIdx]
         const isCover = pageNode.attrs?.cover === 'true' || pageNode.attrs?.cover === true
         const isToc = pageNode.attrs?.toc === 'true' || pageNode.attrs?.toc === true
-        const nodes = pageNode.content || []
+        const nodes = (pageNode.content || []) as any[]
 
-        nodes.forEach((node: any) => {
+        for (const node of nodes) {
           const align = isCover ? AlignmentType.CENTER : getAlignment(node.attrs?.textAlign)
 
-          if (node.type === 'tocItem') {
+          if (node.type === 'yabatechLogo') {
+            const logoSrc = node.attrs?.src || '/yabatech_logo.png'
+            try {
+              const imgData = await loadImageData(logoSrc)
+              children.push(
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: imgData,
+                      transformation: {
+                        width: 100,
+                        height: 100
+                      }
+                    } as any)
+                  ],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 240, after: 240 }
+                })
+              )
+            } catch (err) {
+              console.error('Failed to load logo image for Word export:', err)
+            }
+          } else if (node.type === 'tocItem') {
             const level = node.attrs?.level || 1
             const pageNum = node.attrs?.page || 1
             const headingText = (node.content || []).map((c: any) => c.text || '').join('')
@@ -2771,40 +3032,80 @@ export default function Editor() {
               })
             )
           } else if (node.type === 'paragraph') {
-            const runs = (node.content || []).map((childNode: any) => {
-              const marks = childNode.marks || []
-              return new TextRun({
-                text: childNode.text || '',
-                bold: marks.some((m: any) => m.type === 'bold') || isCover,
-                italics: marks.some((m: any) => m.type === 'italic'),
-                underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                strike: marks.some((m: any) => m.type === 'strike'),
-                font: 'Times New Roman'
+            const isTocItem = node.attrs?.class === 'toc-item-row' || isToc
+            const textContent = (node.content || []).map((c: any) => c.text || '').join('')
+            
+            // Check if it's a ToC page item with page number at the end
+            const tocMatch = isTocItem ? textContent.match(/^(.*?)\s*[\.\s\-\_]+\s*([a-zA-Z\d]+)$/) : null
+            
+            if (tocMatch) {
+              const title = tocMatch[1].trim()
+              const pageNum = tocMatch[2]
+              const level = textContent.startsWith('    ') ? 2 : (textContent.startsWith('        ') ? 3 : 1)
+              const indentLeft = (level - 1) * 360
+              
+              children.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: title,
+                      bold: level === 1,
+                      font: 'Times New Roman'
+                    }),
+                    new TextRun("\t"),
+                    new TextRun({
+                      text: pageNum,
+                      bold: level === 1,
+                      font: 'Times New Roman'
+                    })
+                  ],
+                  indent: indentLeft > 0 ? { left: indentLeft } : undefined,
+                  tabStops: [
+                    {
+                      type: TabStopType.RIGHT,
+                      position: 9000,
+                      leader: LeaderType.DOT
+                    }
+                  ],
+                  spacing: { after: 120, line: 360 }
+                })
+              )
+            } else {
+              const runs = (node.content || []).map((childNode: any) => {
+                const marks = childNode.marks || []
+                return new TextRun({
+                  text: childNode.text || '',
+                  bold: marks.some((m: any) => m.type === 'bold') || isCover,
+                  italics: marks.some((m: any) => m.type === 'italic'),
+                  underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
+                  strike: marks.some((m: any) => m.type === 'strike'),
+                  font: 'Times New Roman'
+                })
               })
-            })
 
-            let spacingBefore = 0
-            let spacingAfter = 120
-            if (isCover) {
-              const textContent = (node.content || []).map((c: any) => c.text || '').join('').trim().toLowerCase()
-              if (textContent.includes('submitted to') || textContent.includes('partial fulfillment')) {
-                spacingBefore = 960
-                spacingAfter = 960
-              } else if (textContent.startsWith('supervisor:')) {
-                spacingBefore = 960
-              } else if (textContent.startsWith('by') || textContent.startsWith('session:') || textContent.startsWith('submission date:')) {
-                spacingBefore = 480
+              let spacingBefore = 0
+              let spacingAfter = 120
+              if (isCover) {
+                const textContent = (node.content || []).map((c: any) => c.text || '').join('').trim().toLowerCase()
+                if (textContent.includes('submitted to') || textContent.includes('partial fulfillment')) {
+                  spacingBefore = 960
+                  spacingAfter = 960
+                } else if (textContent.startsWith('supervisor:')) {
+                  spacingBefore = 960
+                } else if (textContent.startsWith('by') || textContent.startsWith('session:') || textContent.startsWith('submission date:')) {
+                  spacingBefore = 480
+                }
               }
-            }
 
-            children.push(
-              new Paragraph({
-                children: runs,
-                alignment: align,
-                indent: inReferencesSection ? { left: 720, hanging: 720 } : undefined,
-                spacing: { before: spacingBefore, after: spacingAfter, line: 360 }
-              })
-            )
+              children.push(
+                new Paragraph({
+                  children: runs,
+                  alignment: align,
+                  indent: inReferencesSection ? { left: 720, hanging: 720 } : undefined,
+                  spacing: { before: spacingBefore, after: spacingAfter, line: 360 }
+                })
+              )
+            }
           } else if (node.type === 'bulletList' || node.type === 'orderedList') {
             const isOrdered = node.type === 'orderedList'
             node.content?.forEach((listItem: any) => {
@@ -2853,16 +3154,16 @@ export default function Editor() {
               })
             )
           }
-        })
+        }
 
-        if (pageIdx < pages.length - 1) {
+        if (pageIdx < filteredPages.length - 1) {
           children.push(
             new Paragraph({
               children: [new PageBreak()]
             })
           )
         }
-      })
+      }
 
       const doc = new Document({
         sections: [
@@ -4592,7 +4893,7 @@ export default function Editor() {
             </button>
 
             <button
-              onClick={generateTableOfContents}
+              onClick={() => setShowTocModal(true)}
               className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
               title="Generate a Table of Contents based on document headings"
             >
@@ -4635,7 +4936,23 @@ export default function Editor() {
               <span>Export</span>
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-1.5 w-40 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="absolute right-0 mt-1.5 w-48 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="px-4 py-1 pb-1 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                  Export Scope
+                </div>
+                <div className="px-4 pb-2">
+                  <select 
+                    value={exportScope}
+                    onChange={(e: any) => setExportScope(e.target.value)}
+                    className="w-full text-xs bg-zinc-50 border border-zinc-200 rounded p-1 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 outline-none cursor-pointer"
+                  >
+                    <option value="full">Full Document</option>
+                    <option value="cover">Cover Page Only</option>
+                    <option value="toc">Table of Contents Only</option>
+                    <option value="content">Main Content Only</option>
+                  </select>
+                </div>
+                <div className="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
                 <button 
                   onClick={() => {
                     exportDoc('html')
@@ -4655,12 +4972,12 @@ export default function Editor() {
                   Plain Text (.txt)
                 </button>
                 <div className="border-t border-zinc-100 dark:border-zinc-800 my-1"></div>
-                <div className="px-4 py-1.5 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                  Phase 3 Exports
+                <div className="px-4 py-1.5 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                  Document Exports
                 </div>
                 <button 
                   onClick={() => {
-                    exportToDocx()
+                    exportToDocx(exportScope)
                     setShowExportMenu(false)
                   }}
                   className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
@@ -4669,12 +4986,12 @@ export default function Editor() {
                 </button>
                 <button 
                   onClick={() => {
-                    exportToPdfPrint()
+                    exportToPdfPrint(exportScope)
                     setShowExportMenu(false)
                   }}
                   className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
                 >
-                  PDF Document (Fast / Searchable)
+                  PDF Document (Vector)
                 </button>
                 <button 
                   onClick={() => {
@@ -6247,6 +6564,93 @@ export default function Editor() {
         </div>
       )}
 
+      {showTocModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs select-none p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-150 text-left">
+            <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3 mb-4">
+              <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-200 uppercase tracking-wider flex items-center gap-2">
+                <OrderedListIcon className="w-4 h-4 text-teal-500" />
+                <span>Table of Contents Customization</span>
+              </h3>
+              <button 
+                onClick={() => setShowTocModal(false)}
+                className="p-1 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded cursor-pointer"
+              >
+                <Minimize2 className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-xs text-zinc-550 dark:text-zinc-400">
+                Choose how you would like to create your document's Table of Contents page:
+              </p>
+              
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={() => {
+                    generateTableOfContents()
+                    setShowTocModal(false)
+                  }}
+                  className="flex items-start gap-3 p-3 border border-zinc-200 dark:border-zinc-800 hover:border-teal-500 dark:hover:border-teal-500 hover:bg-teal-50/10 rounded-lg text-left transition-all cursor-pointer group"
+                >
+                  <div className="p-2 bg-teal-50 dark:bg-teal-950/20 text-teal-600 rounded-md group-hover:bg-teal-100/40">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-850 dark:text-zinc-250">Auto-Generate (Recommended)</h4>
+                    <p className="text-[10px] text-zinc-450 mt-0.5">Automatically scan all document headings and page numbers to compile a formatted ToC.</p>
+                  </div>
+                </button>
+                
+                <button
+                  onClick={generateCustomTocTemplate}
+                  className="flex items-start gap-3 p-3 border border-zinc-200 dark:border-zinc-800 hover:border-amber-500 dark:hover:border-amber-500 hover:bg-amber-50/10 rounded-lg text-left transition-all cursor-pointer group"
+                >
+                  <div className="p-2 bg-amber-50 dark:bg-amber-950/20 text-amber-600 rounded-md group-hover:bg-amber-100/40">
+                    <Edit3 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-850 dark:text-zinc-250">Insert Custom Template</h4>
+                    <p className="text-[10px] text-zinc-450 mt-0.5">Create a blank, fully editable academic ToC structure that you can edit and fill in manually.</p>
+                  </div>
+                </button>
+                
+                <div className="relative">
+                  <input 
+                    type="file" 
+                    accept=".txt" 
+                    id="toc-file-upload"
+                    onChange={handleTocFileUpload}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="toc-file-upload"
+                    className="flex items-start gap-3 p-3 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-indigo-50/10 rounded-lg text-left transition-all cursor-pointer group block"
+                  >
+                    <div className="p-2 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 rounded-md group-hover:bg-indigo-100/40">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-zinc-850 dark:text-zinc-250">Upload Custom ToC File</h4>
+                      <p className="text-[10px] text-zinc-450 mt-0.5">Upload a plain text (.txt) file with your own pre-formatted Table of Contents content.</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-end border-t border-zinc-200 dark:border-zinc-800 pt-3 mt-4">
+              <button 
+                onClick={() => setShowTocModal(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-zinc-650 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCoverPageModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs select-none p-4">
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl w-full max-w-lg p-6 animate-in fade-in zoom-in-95 duration-150 text-left">
@@ -6330,6 +6734,43 @@ export default function Editor() {
                   placeholder="e.g. YABA COLLEGE OF TECHNOLOGY, YABA"
                   className="w-full px-3 py-1.5 text-xs bg-zinc-50 border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-800 dark:text-zinc-150 rounded outline-none focus:ring-1.5 focus:ring-amber-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Institution Logo (Optional)</label>
+                <div className="flex items-center gap-3 mt-1">
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    id="cover-logo-upload"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                  <label 
+                    htmlFor="cover-logo-upload"
+                    className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded border border-zinc-200 dark:border-zinc-700 cursor-pointer transition-colors"
+                  >
+                    Choose Logo Image
+                  </label>
+                  {customLogoSrc !== '/yabatech_logo.png' ? (
+                    <div className="flex items-center gap-2">
+                      <img src={customLogoSrc} alt="Custom Logo" className="w-8 h-8 object-contain rounded border border-zinc-200 dark:border-zinc-800 bg-white" />
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setCustomLogoSrc('/yabatech_logo.png')
+                          localStorage.removeItem('custom_school_logo')
+                          updateDocumentLogos('/yabatech_logo.png')
+                        }}
+                        className="text-[10px] text-red-500 hover:text-red-700 font-bold cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-zinc-400">Default (Yabatech Logo)</span>
+                  )}
+                </div>
               </div>
 
               <div>

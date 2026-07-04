@@ -311,8 +311,7 @@ body {
   .print-hidden,
   .delete-page-btn,
   .add-page-btn,
-  div[data-type="yabatech-logo"],
-  [data-type="yabatech-logo"] {
+  .print-hidden-override {
     display: none !important;
   }
 
