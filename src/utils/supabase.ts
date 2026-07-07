@@ -12,8 +12,20 @@ export const getSupabaseClient = () => {
   if (!supabaseUrl || !supabaseAnonKey) {
     return null
   }
+  // Sanitize the URL to remove any trailing slashes or /rest/v1 suffixes
+  let cleanUrl = supabaseUrl.trim()
+  if (cleanUrl.endsWith('/')) {
+    cleanUrl = cleanUrl.slice(0, -1)
+  }
+  if (cleanUrl.endsWith('/rest/v1')) {
+    cleanUrl = cleanUrl.slice(0, -8)
+  }
+  if (cleanUrl.endsWith('/')) {
+    cleanUrl = cleanUrl.slice(0, -1)
+  }
+
   try {
-    return createClient(supabaseUrl, supabaseAnonKey, {
+    return createClient(cleanUrl, supabaseAnonKey, {
       auth: {
         persistSession: false // Disable session persistence for server-side operations
       }

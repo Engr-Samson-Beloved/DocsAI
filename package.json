@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.110.1",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-font-family": "^3.27.1",
     "@tiptap/extension-text-align": "^3.27.1",
