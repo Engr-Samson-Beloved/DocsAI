@@ -1,0 +1,208 @@
+
+
+ENHANCING LARGE LANGUAGE MODEL RESPONSES THROUGH RETRIEVAL-AUGMENTED GENERATION: A SYSTEMATIC REVIEW
+
+A SEMINAR REPORT
+
+PRESENTED TO
+
+THE DEPARTMENT OF COMPUTER ENGINEERING
+
+SCHOOL OF ENGINEERING
+
+YABA COLLEGE OF TECHNOLOGY, YABA.
+
+BY
+
+ADEDAYO ADEYINKA DANIEL
+
+F/HD/24/3410001
+
+A SEMINAR REPORT SUBMITTED IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE HIGHER NATIONAL DIPLOMA (HND) IN COMPUTER ENGINEERING
+
+SUPERVISED BY
+
+DR. OLALEKAN BELLO
+
+2025/2026
+
+
+
+TABLE OF CONTENTS
+
+1. INTRODUCTION	1
+
+2. REVIEW OF RETRIEVAL-AUGMENTED GENERATION TECHNIQUES AND APPLICATIONS	3
+
+2.1 Existing Works on RAG	3
+
+2.2 The Naive, Advanced, and Modular Paradigms	4
+
+2.3 How RAG Works	5
+
+2.4 Where RAG Is Used	6
+
+2.5 Comparative Advantages of RAG	7
+
+2.6 Comparative Disadvantages of RAG	7
+
+3. SUMMARY AND CONCLUSION	9
+
+4. REFERENCES	11
+
+
+
+
+
+1. INTRODUCTION
+
+Large Language Models (LLMs) are deep neural networks that have been trained on huge amounts of text. Because of this training, they can read and write natural language well. Models like the GPT family and LLaMA have done well on many tasks. They can answer questions, summarise documents, write code, and hold conversations. What makes this possible is that, during training, they store a lot of language patterns and a great deal of factual knowledge inside their parameters (Lewis et al., 2020).
+
+These models also have real limits. Their knowledge is frozen at the time they are trained. This means they cannot easily reach information that came out later, and they have no proper way to look up facts they never learned. They also tend to hallucinate. This is when a model gives an answer that sounds confident and reads smoothly but is simply wrong. On top of that, the reasoning behind an answer stays hidden inside the network. So a user cannot easily tell where a claim came from or whether to trust it (Gao et al., 2023).
+
+Retrieval-Augmented Generation (RAG) was introduced to handle these problems. The idea behind it is simple. Rather than depend only on what the model memorised during training, the system first pulls relevant documents from an outside source. It then passes those documents to the model as extra context while the answer is being produced. The model is therefore mixing its own internal knowledge, called parametric knowledge, with outside knowledge, called non-parametric knowledge, that sits in a searchable store (Lewis et al., 2020). The first RAG model joined a pre-trained sequence-to-sequence generator with a dense vector index of Wikipedia. It produced language that was more specific, more varied, and more factual than a similar model that used only its parameters (Lewis et al., 2020).
+
+Since that first study, RAG has grown into one of the busiest areas in natural language processing, both in research and in practice. It is now used to build question-answering systems, customer-support assistants, search tools, and assistants for fields like medicine, law, and finance. Recent surveys describe how the field moved from a basic pipeline to more advanced designs, and they sort the work into three paradigms, namely Naive, Advanced, and Modular RAG (Gao et al., 2023; Huang & Huang, 2025).
+
+This seminar report introduces RAG as an advancement over the older approach of using LLMs on their own, and it reviews how RAG works and where it is used. It then compares the advantages and disadvantages of RAG against the existing technology of standalone LLMs, and it ends with a summary and conclusion that draws out what the comparison means for building reliable language-based systems.
+
+
+
+2. REVIEW OF RETRIEVAL-AUGMENTED GENERATION TECHNIQUES AND APPLICATIONS
+
+This section reviews the existing work on Retrieval-Augmented Generation. It first summarises the key studies that shaped the field, then explains the three paradigms that the work is grouped into, describes how a RAG system works in practice, shows where RAG is now used, and finally compares its advantages and disadvantages against the older standalone-LLM technology.
+
+2.1 Existing Works on RAG
+
+The base of RAG was laid by Lewis et al. (2020). They proposed joining a parametric sequence-to-sequence model with a non-parametric memory, which was a dense vector index of Wikipedia. For a given input, the model retrieved relevant passages and conditioned the generator on them. This let the system reach outside knowledge at the time of answering, rather than rely only on what it had memorised during training. They reported state-of-the-art results on several open-domain question-answering tasks and showed that retrieval made the output more specific and more factual.
+
+Earlier and parallel work on dense retrieval pushed this idea forward. Karpukhin et al. (2020) introduced Dense Passage Retrieval (DPR). It learns dense vector forms of questions and passages, so that relevant passages can be found by similarity search instead of plain keyword matching. DPR became a standard part of later RAG systems. Around the same period, other work showed how retrieving several passages and letting the model combine evidence from all of them could improve open-domain question answering.
+
+Researchers then worked on scaling and refining the idea. Borgeaud et al. (2022) presented RETRO, a model that improves language modelling by retrieving from a store of trillions of tokens. It showed that retrieval can match the performance of far larger models while using fewer parameters. Other work made retrieval more dynamic, so that the system retrieves more information during generation when it is needed, instead of retrieving only once at the start.
+
+More recent studies have tried to make RAG more robust and higher in quality. Work on reranking and on keeping only the most useful retrieved content aims to reduce the effect of irrelevant or noisy passages. Methods such as query rewriting try to improve the match between the user question and the documents in the store. A number of broad surveys now bring these developments together. Gao et al. (2023) give a widely cited review that splits RAG into three paradigms, while Huang and Huang (2025) study the field from an information-retrieval angle and divide the process into pre-retrieval, retrieval, post-retrieval, and generation stages. Surveys that focus on how to evaluate RAG have also appeared, which shows a growing concern about measuring quality in a reliable way (Yu et al., 2024).
+
+2.2 The Naive, Advanced, and Modular Paradigms
+
+Taken together, the reviewed work shows a clear line of progress. Research has moved from a single, fixed retrieval step added onto a generator, toward flexible pipelines where retrieval, ranking, and generation are tuned and sometimes repeated. The literature often describes this progress using three paradigms.
+
+The first paradigm is often called Naive RAG. It follows a simple retrieve-then-read pipeline. Documents are split into chunks, embedded, and stored in a vector database. At query time, the most similar chunks are retrieved and placed straight into the prompt, and the model reads them and answers (Gao et al., 2023). This is simple and works for many tasks, but it is weak when retrieval is poor, when passages repeat or conflict, or when the question does not match the stored text well.
+
+The second paradigm is Advanced RAG. It adds steps before and after retrieval to raise quality. Before retrieval, it may rewrite or expand the query so the search works better. After retrieval, it may rerank the passages and compress or filter them, so that only the most relevant content reaches the model (Gao et al., 2023; Huang & Huang, 2025). These extra steps fix many of the weak points of the naive pipeline, but they add complexity.
+
+The third paradigm is Modular RAG. It treats the parts of the system as building blocks that can be rearranged, repeated, or joined with other tools. This allows behaviours such as iterative or adaptive retrieval, where the system retrieves several times as needed, and it allows RAG to be combined with reasoning and tool use (Gao et al., 2023). Newer directions take this further into graph-based RAG, which retrieves from structured knowledge graphs instead of plain text, and agentic RAG, where an autonomous agent controls when and how retrieval happens. Each step in this progression trades extra complexity for better answer quality, which is the central advancement of RAG over the older standalone-LLM approach.
+
+2.3 How RAG Works
+
+A RAG system works by adding a retrieval step in front of the language model, so that generation is guided by outside evidence. The literature usually describes the process in four stages: indexing, retrieval, augmentation, and generation (Gao et al., 2023). These stages describe the existing technology that this report reviews, not a method designed by the author.
+
+In the indexing stage, the outside knowledge source is prepared before any question is answered. The source documents are collected and split into smaller pieces called chunks. Each chunk is passed through an embedding model, which turns the text into a numerical vector that captures its meaning. These vectors are stored in a vector database, which is built so that vectors with similar meaning can be found quickly. This stored collection is the knowledge base that the system will search.
+
+In the retrieval stage, when a user sends a query, the query is turned into a vector using the same embedding model. The system then searches the vector database for the chunks whose vectors are closest to the query vector, usually measured by cosine similarity, and returns the top chunks. This is known as dense retrieval, and it is the approach made popular by Dense Passage Retrieval (Karpukhin et al., 2020). Some systems also mix dense retrieval with traditional keyword search to form a hybrid retriever.
+
+In the augmentation stage, the retrieved chunks are joined with the original user query to form an enriched prompt. In Advanced RAG, this stage may rerank the retrieved chunks so the most relevant come first, and it may filter or compress them so that only useful content is kept and the prompt does not grow too long. The aim of augmentation is to give the model focused, relevant evidence rather than a large amount of loosely related text.
+
+In the generation stage, the enriched prompt is passed to the LLM, which produces an answer based on the retrieved evidence and not only on its internal memory. Because the answer rests on retrieved passages, the system can also point back to the sources it used. This makes the answer easier to check and adds transparency. The overall flow is shown in Figure 1.
+
+User Query
+
+Retrieval (search vector DB)
+
+Augmentation (rerank + combine)
+
+Generation (LLM)
+
+Grounded Answer
+
+Figure 1: The Retrieval-Augmented Generation process flow
+
+2.4 Where RAG Is Used
+
+RAG is now used across many real-world systems, especially where answers must be accurate, current, and traceable. The most common use is in question-answering and search assistants, where a user's question is answered from a trusted collection of documents rather than from the model's memory alone. It is also widely used in customer-support chatbots that must respond from a company's own manuals and policies, and in enterprise assistants that work with private or frequently changing information, since that knowledge can be held in a retrieval database instead of being baked into the model (Huang & Huang, 2025). Dense retrieval methods such as Dense Passage Retrieval (Karpukhin et al., 2020) are commonly used as the search component in these systems.
+
+RAG has also been adopted in specialised, high-stakes domains. In healthcare, RAG systems retrieve evidence from trusted medical sources such as clinical guidelines and research databases, and have been applied to medical question answering, diagnostic support, and the summarisation of electronic health records, where grounding answers in verified sources is essential for safety (Amugongo et al., 2025). In the legal domain, RAG is used for tasks such as legal question answering, case reasoning, and document drafting, where the cost of a wrong or fabricated answer is high; commercial legal-research tools now rely on retrieval to keep answers grounded in authoritative legal texts (Hindi et al., 2025). These examples show that RAG is not just a research idea but a practical technology already deployed in fields where factual reliability matters most.
+
+2.5 Comparative Advantages of RAG
+
+Compared with using a standalone LLM, RAG offers clear advantages. First, it improves factual accuracy and reduces hallucination, because the model answers from retrieved evidence rather than from memory alone (Lewis et al., 2020; Gao et al., 2023). Second, it allows knowledge to be updated cheaply; new facts are added by updating the database instead of retraining the model (Huang & Huang, 2025). Third, it improves transparency, because the system can point back to the sources it used, which makes answers easier to verify. Fourth, it supports private and domain-specific knowledge, since sensitive documents can be stored in the retrieval database and never need to be part of the model's training.
+
+2.6 Comparative Disadvantages of RAG
+
+RAG also has disadvantages compared with a simple LLM setup. First, its quality depends heavily on retrieval; if the system returns passages that are irrelevant, outdated, or contradictory, the final answer suffers (Gao et al., 2023). This is a particular concern in specialised domains, where performance can drop when the system meets data that differs from what it was tuned on (Amugongo et al., 2025). Second, it adds complexity, latency, and cost, because every query now involves an extra search and sometimes reranking before the answer is produced. Third, it is sensitive to design choices such as how documents are split into chunks and how many passages are retrieved, so small changes can noticeably affect results. Fourth, evaluation is difficult and inconsistent, because there is no single agreed way to measure how faithful an answer is to its sources (Yu et al., 2024).
+
+Table 1 summarises the comparison between using a standalone LLM and using RAG.
+
+Aspect
+
+Standalone LLM
+
+RAG
+
+Knowledge source
+
+Fixed in model parameters
+
+External, searchable database
+
+Updating knowledge
+
+Requires costly retraining
+
+Update the database only
+
+Factual accuracy
+
+Prone to hallucination
+
+More accurate, grounded
+
+Transparency
+
+Hard to trace answers
+
+Can cite its sources
+
+Complexity / speed
+
+Simple, faster
+
+More complex, added latency
+
+Table 1: Comparison between standalone LLMs and RAG
+
+
+
+3. SUMMARY AND CONCLUSION
+
+This seminar report has introduced Retrieval-Augmented Generation as an advancement over the older approach of using Large Language Models on their own, and has reviewed how it works, where it is used, and how it compares with that older technology. Several clear points come out of the review.
+
+The most consistent point across the literature is that basing generation on retrieved evidence makes answers more factual and lowers hallucination. Because the model is given relevant outside passages to work from, it depends less on its internal memory, which may be faulty, and its claims can be traced back to a source. This was reported from the first work of Lewis et al. (2020), which found that retrieval gave more specific and factual output, through to recent surveys that confirm better accuracy and credibility on knowledge-heavy tasks (Gao et al., 2023).
+
+A second point is that RAG allows knowledge to be kept up to date at a low cost. To teach a normal LLM new facts, the model usually has to be retrained or fine-tuned, which is slow and expensive. With RAG, the knowledge sits in the outside database, so updating the system can be as simple as adding or replacing documents in that database. This makes RAG a cheap way to keep an assistant current and to add domain-specific or private knowledge (Huang & Huang, 2025).
+
+A third point is that the field has moved in a clear direction, from the simple Naive pipeline, through Advanced RAG with its before- and after-retrieval steps, to Modular RAG with its interchangeable and repeatable parts (Gao et al., 2023). Newer directions such as graph-based RAG and agentic RAG continue this trend toward more flexible and more capable systems. RAG is also already in real use in demanding fields such as healthcare and law (Amugongo et al., 2025; Hindi et al., 2025).
+
+At the same time, important limits remain. Retrieval quality is still a bottleneck, since irrelevant, noisy, or contradictory passages can mislead the model. Adding retrieval and reranking raises the complexity, the delay, and the cost of the system. Evaluation is inconsistent, because studies use different datasets and metrics, and there is no single accepted way to measure faithfulness to sources (Yu et al., 2024). Results are also sensitive to choices that look minor, such as how documents are split and how many passages are retrieved.
+
+In conclusion, this review has shown that Retrieval-Augmented Generation is an effective and practical advancement that makes LLM responses more reliable and easier to trust, especially for knowledge-heavy tasks. By grounding generation in retrieved outside knowledge, RAG raises factual accuracy, lowers hallucination, supports low-cost knowledge updates, and adds transparency. Although challenges around retrieval quality, efficiency, and evaluation remain, the steady progress in this area, together with newer forms such as graph-based and agentic RAG, suggests that RAG will continue to play a central role in building reliable language-based systems.
+
+
+
+4. REFERENCES
+
+Amugongo, L. M., Mascheroni, P., Brooks, S. G., Doering, S., & Seidel, J. (2025). Retrieval-augmented generation for large language models in healthcare: A systematic review. Neural Computing and Applications. https://doi.org/10.1007/s00521-025-11666-9
+
+Borgeaud, S., Mensch, A., Hoffmann, J., Cai, T., Rutherford, E., Millican, K., … Sifre, L. (2022). Improving language models by retrieving from trillions of tokens. Proceedings of the 39th International Conference on Machine Learning, 2206–2240.
+
+Gao, Y., Xiong, Y., Gao, X., Jia, K., Pan, J., Bi, Y., Dai, Y., Sun, J., & Wang, H. (2023). Retrieval-augmented generation for large language models: A survey. arXiv preprint arXiv:2312.10997. https://arxiv.org/abs/2312.10997
+
+Hindi, M., Mohammed, L., Maaz, O., & Alwarafy, A. (2025). Enhancing the precision and interpretability of retrieval-augmented generation (RAG) in legal technology: A survey. IEEE Access, 13. https://doi.org/10.1109/ACCESS.2025.3543400
+
+Huang, Y., & Huang, J. X. (2025). A survey on retrieval-augmented text generation for large language models. ACM Computing Surveys. https://doi.org/10.1145/3805774
+
+Karpukhin, V., Oğuz, B., Min, S., Lewis, P., Wu, L., Edunov, S., Chen, D., & Yih, W. (2020). Dense passage retrieval for open-domain question answering. Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, 6769–6781.
+
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., … Kiela, D. (2020). Retrieval-augmented generation for knowledge-intensive NLP tasks. Advances in Neural Information Processing Systems, 33, 9459–9474.
+
+Yu, H., Gan, A., Zhang, K., Tong, S., Liu, Q., & Liu, Z. (2024). Evaluation of retrieval-augmented generation: A survey. arXiv preprint arXiv:2405.07437. https://arxiv.org/abs/2405.07437
+

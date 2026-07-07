@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
+import { TextSelection } from '@tiptap/pm/state'
 import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TextAlign from '@tiptap/extension-text-align'
@@ -1006,6 +1007,7 @@ export default function Editor() {
   const paginationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const wheelAccumulatorRef = useRef(0)
 
   // WordPI Setup Wizard & Context Window States
   const [showWizard, setShowWizard] = useState(false)
@@ -1733,6 +1735,62 @@ export default function Editor() {
     }
   }
 
+  const moveCursorUpDown = (direction: 'up' | 'down') => {
+    if (!editor) return
+
+    // Ensure the editor has focus
+    if (!editor.isFocused) {
+      editor.commands.focus()
+    }
+
+    const { state, view } = editor
+    const { selection } = state
+    const { from } = selection
+
+    try {
+      const coords = view.coordsAtPos(from)
+      if (!coords) return
+
+      const lineRectHeight = coords.bottom - coords.top
+      const step = lineRectHeight > 5 ? lineRectHeight : (24 * zoomScale)
+      
+      // Target the middle of the next/prev line
+      const targetTop = direction === 'down' ? coords.bottom + (step / 2) : coords.top - (step / 2)
+      const targetLeft = coords.left
+
+      const targetPosObj = view.posAtCoords({ left: targetLeft, top: targetTop })
+      let moved = false
+
+      if (targetPosObj && typeof targetPosObj.pos === 'number') {
+        const targetPos = targetPosObj.pos
+        if (targetPos !== from) {
+          const resolvedPos = state.doc.resolve(targetPos)
+          const newSelection = TextSelection.create(state.doc, resolvedPos.pos)
+          const tr = state.tr.setSelection(newSelection).scrollIntoView()
+          view.dispatch(tr)
+          moved = true
+        }
+      }
+
+      // If selection did not change or target is out of bounds, scroll container as fallback
+      if (!moved) {
+        const container = scrollContainerRef.current
+        if (container) {
+          const dy = direction === 'down' ? 40 : -40
+          container.scrollTop += dy
+        }
+      }
+    } catch (error) {
+      console.error('Error programmatically moving cursor:', error)
+      // Fallback scroll
+      const container = scrollContainerRef.current
+      if (container) {
+        const dy = direction === 'down' ? 40 : -40
+        container.scrollTop += dy
+      }
+    }
+  }
+
   // Track latest handleScroll closure to avoid stale states in the event listener
   const handleScrollRef = useRef(handleScroll)
   useEffect(() => {
@@ -2276,9 +2334,28 @@ export default function Editor() {
 
       if (dy !== 0 || dx !== 0) {
         e.preventDefault()
-        // Directly adjust scroll coordinates to allow fluid trackpad momentum and precision
-        container.scrollTop += dy
-        container.scrollLeft += dx
+
+        if (dy !== 0 && editor) {
+          // Accumulate vertical scroll delta
+          wheelAccumulatorRef.current += dy
+
+          const threshold = 40
+          if (Math.abs(wheelAccumulatorRef.current) >= threshold) {
+            const direction = wheelAccumulatorRef.current > 0 ? 'down' : 'up'
+            const steps = Math.floor(Math.abs(wheelAccumulatorRef.current) / threshold)
+            
+            wheelAccumulatorRef.current = wheelAccumulatorRef.current % threshold
+
+            for (let i = 0; i < steps; i++) {
+              moveCursorUpDown(direction)
+            }
+          }
+        }
+
+        // Allow horizontal scroll normally
+        if (dx !== 0) {
+          container.scrollLeft += dx
+        }
       }
     }
 
@@ -2287,7 +2364,7 @@ export default function Editor() {
     return () => {
       window.removeEventListener('wheel', handleWheel)
     }
-  }, [])
+  }, [editor, zoomScale])
 
   // Touch scroll handler for touchscreen drag scrolling over pages
   useEffect(() => {
