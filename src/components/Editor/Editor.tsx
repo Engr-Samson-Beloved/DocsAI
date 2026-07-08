@@ -11,6 +11,7 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
+import AuthModal from '../Auth/AuthModal'
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -19,7 +20,8 @@ import {
   saveProject,
   getAllProjects,
   deleteProject as dbDeleteProject,
-  saveProjectsBatch
+  saveProjectsBatch,
+  clearAllLocalData
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import {
@@ -968,6 +970,132 @@ export default function Editor() {
   const [isSimulatingAI, setIsSimulatingAI] = useState(false)
   const [simulatedAiResult, setSimulatedAiResult] = useState('')
   const [isExporting, setIsExporting] = useState(false)
+
+  // Authentication & Cloud Sync states
+  const [userEmail, setUserEmail] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('wordpi-user-email')
+    }
+    return null
+  })
+  const [showAuthModal, setShowAuthModal] = useState(false)
+
+  const handleAuthSuccess = async (email: string) => {
+    setUserEmail(email)
+    try {
+      setLoadingMessage('Syncing cloud documents...')
+      setIsExporting(true)
+      
+      // Clear previous user's local database
+      await clearAllLocalData()
+      
+      // Fetch cloud projects from server (uses the newly set token in localStorage)
+      const res = await getAllProjects()
+      setProjects(res)
+      
+      if (res.length > 0) {
+        // Load first project
+        const firstProject = res[0]
+        setActiveProjectId(firstProject.id)
+        setDocumentTitle(firstProject.title)
+        setDocHeader(firstProject.docHeader || '')
+        setDocFooter(firstProject.docFooter || '')
+        if (editor) {
+          editor.commands.setContent(JSON.parse(firstProject.content))
+        }
+      } else {
+        // Create a new blank project if cloud database is empty
+        const newId = Math.random().toString(36).substring(2, 15)
+        const emptyDoc = ensurePaginatedHtml('')
+        const newProj: Project = {
+          id: newId,
+          title: 'Untitled Document',
+          content: JSON.stringify(emptyDoc),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          wordCount: 0,
+          charCount: 0,
+          documentType: 'Project',
+          academicLevel: 'Undergraduate',
+          academicTone: 'Analytical',
+          docHeader: '',
+          docFooter: ''
+        }
+        await saveProject(newProj)
+        setProjects([newProj])
+        setActiveProjectId(newId)
+        setDocumentTitle('Untitled Document')
+        setDocHeader('')
+        setDocFooter('')
+        if (editor) {
+          editor.commands.setContent(emptyDoc)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync projects on auth success:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    localStorage.removeItem('wordpi-session-token')
+    localStorage.removeItem('wordpi-user-email')
+    setUserEmail(null)
+    try {
+      setLoadingMessage('Logging out and clearing local cache...')
+      setIsExporting(true)
+      
+      // Clear IndexedDB local cache on sign out for security/privacy
+      await clearAllLocalData()
+      
+      // Fetch remaining public local documents (or empty list)
+      const res = await getAllProjects()
+      setProjects(res)
+      
+      if (res.length > 0) {
+        const firstProject = res[0]
+        setActiveProjectId(firstProject.id)
+        setDocumentTitle(firstProject.title)
+        setDocHeader(firstProject.docHeader || '')
+        setDocFooter(firstProject.docFooter || '')
+        if (editor) {
+          editor.commands.setContent(JSON.parse(firstProject.content))
+        }
+      } else {
+        // If empty, clean the editor canvas and create a new project ID
+        const newId = Math.random().toString(36).substring(2, 15)
+        const emptyDoc = ensurePaginatedHtml('')
+        const newProj: Project = {
+          id: newId,
+          title: 'Untitled Document',
+          content: JSON.stringify(emptyDoc),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          wordCount: 0,
+          charCount: 0,
+          documentType: 'Project',
+          academicLevel: 'Undergraduate',
+          academicTone: 'Analytical',
+          docHeader: '',
+          docFooter: ''
+        }
+        await saveProject(newProj)
+        setProjects([newProj])
+        setActiveProjectId(newId)
+        setDocumentTitle('Untitled Document')
+        setDocHeader('')
+        setDocFooter('')
+        if (editor) {
+          editor.commands.setContent(emptyDoc)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to reset project list on logout:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
   const [docHeader, setDocHeader] = useState('')
   const [docFooter, setDocFooter] = useState('')
   const [loadingMessage, setLoadingMessage] = useState('Processing Document...')
@@ -4890,6 +5018,9 @@ export default function Editor() {
           onDeleteProject={deleteProject}
           onRenameProject={renameProjectPrompt}
           onLoadProject={loadProject}
+          userEmail={userEmail}
+          onSignOut={handleSignOut}
+          onOpenAuth={() => setShowAuthModal(true)}
         />
       ) : (
         <>
@@ -7061,6 +7192,11 @@ export default function Editor() {
         </div>
       )}
 
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
+      />
     </div>
   )
 }

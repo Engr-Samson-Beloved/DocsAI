@@ -44,4 +44,4 @@ Here is exactly what you should expect when using this stack:
 * [x] **API Key Exposure:** If you put your Gemini API key directly in your Next.js frontend code (`NEXT_PUBLIC_GEMINI_KEY`), anyone can inspect your site, steal your key, and use up your free quota. **Fix:** Create a Next.js API Route (`/api/generate`). Your frontend talks to your Next.js route, and your Next.js route securely talks to Google. (Next.js API routes run on Vercel's free serverless edge, keeping costs at $0 while hiding your key).
 * [x] **Data Loss:** Since there is no cloud database, the user cannot start a document on their laptop and finish it on their phone. It is tied to the specific browser they are using.
 
-If you implement the **Outline Generator Loop** and secure your API key with a Next.js API route, this will be a highly successful, incredibly cheap, and very impressive application.
+If you implement the **Outline Generator Loop** and secure your API key with a Next.js API route, this will be a highly successful, incredibly cheap, and very impressive application. 

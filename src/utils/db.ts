@@ -2,6 +2,20 @@
 
 import { Project } from '../components/Dashboard/Dashboard'
 
+function getRequestHeaders(contentType = false): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (contentType) {
+    headers['Content-Type'] = 'application/json'
+  }
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('wordpi-session-token')
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+  }
+  return headers
+}
+
 export interface IngestedSource {
   id?: number
   projectId: string
@@ -68,7 +82,7 @@ export async function saveProject(project: Project): Promise<void> {
       // Sync to local filesystem server in background
       fetch('/api/projects', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getRequestHeaders(true),
         body: JSON.stringify(project)
       }).catch(e => console.warn('Background project sync failed:', e))
       
@@ -101,7 +115,9 @@ export async function getAllProjects(): Promise<Project[]> {
     // If IndexedDB is empty, check server filesystem backup to restore it!
     if (idbProjects.length === 0) {
       console.log('IndexedDB is empty, checking local filesystem storage backup...')
-      const res = await fetch('/api/projects')
+      const res = await fetch('/api/projects', {
+        headers: getRequestHeaders()
+      })
       if (res.ok) {
         const serverProjects = await res.json() as Project[]
         if (serverProjects && serverProjects.length > 0) {
@@ -118,7 +134,9 @@ export async function getAllProjects(): Promise<Project[]> {
     
     // Fallback to fetch from server directly if IndexedDB fails entirely
     try {
-      const res = await fetch('/api/projects')
+      const res = await fetch('/api/projects', {
+        headers: getRequestHeaders()
+      })
       if (res.ok) return await res.json()
     } catch (apiErr) {
       console.error("Server fallback fetch failed:", apiErr)
@@ -141,7 +159,8 @@ export async function deleteProject(projectId: string): Promise<void> {
     request.onsuccess = () => {
       // Sync delete to local filesystem server in background
       fetch(`/api/projects?id=${projectId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getRequestHeaders()
       }).catch(e => console.warn('Background project delete sync failed:', e))
 
       resolve()
@@ -164,7 +183,7 @@ export async function saveProjectsBatch(projects: Project[]): Promise<void> {
       projects.forEach(project => {
         fetch('/api/projects', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getRequestHeaders(true),
           body: JSON.stringify(project)
         }).catch(e => console.warn('Background project batch sync failed:', e))
       })
@@ -203,7 +222,7 @@ export async function saveSource(projectId: string, name: string, content: strin
       // Sync source to local server filesystem in background
       fetch('/api/projects/sources', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getRequestHeaders(true),
         body: JSON.stringify(source)
       }).catch(e => console.warn('Background source save sync failed:', e))
 
@@ -237,7 +256,9 @@ export async function getSourcesForProject(projectId: string): Promise<IngestedS
     // If IndexedDB sources are empty, check server filesystem backup to restore it!
     if (idbSources.length === 0) {
       console.log(`IndexedDB sources empty for ${projectId}, checking local filesystem storage backup...`)
-      const res = await fetch(`/api/projects/sources?projectId=${projectId}`)
+      const res = await fetch(`/api/projects/sources?projectId=${projectId}`, {
+        headers: getRequestHeaders()
+      })
       if (res.ok) {
         const serverSources = await res.json() as IngestedSource[]
         if (serverSources && serverSources.length > 0) {
@@ -257,7 +278,9 @@ export async function getSourcesForProject(projectId: string): Promise<IngestedS
     console.error("getSourcesForProject error:", e)
     // Fallback to fetch from server directly
     try {
-      const res = await fetch(`/api/projects/sources?projectId=${projectId}`)
+      const res = await fetch(`/api/projects/sources?projectId=${projectId}`, {
+        headers: getRequestHeaders()
+      })
       if (res.ok) return await res.json()
     } catch (apiErr) {
       console.error("Server fallback fetch failed for sources:", apiErr)
@@ -276,7 +299,8 @@ export async function deleteSource(id: number): Promise<void> {
     request.onsuccess = () => {
       // Sync delete to local filesystem server in background
       fetch(`/api/projects/sources?id=${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getRequestHeaders()
       }).catch(e => console.warn('Background source delete sync failed:', e))
 
       resolve()
@@ -312,4 +336,24 @@ export async function deleteSourcesForProject(projectId: string): Promise<void> 
   } catch (e) {
     console.error("IndexedDB deleteSourcesForProject initialization error:", e)
   }
+}
+
+export async function clearAllLocalData(): Promise<void> {
+  const db = await initDB()
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_PROJECTS, STORE_SOURCES], 'readwrite')
+    const projectsStore = transaction.objectStore(STORE_PROJECTS)
+    const sourcesStore = transaction.objectStore(STORE_SOURCES)
+    
+    projectsStore.clear()
+    sourcesStore.clear()
+    
+    transaction.oncomplete = () => {
+      resolve()
+    }
+    
+    transaction.onerror = () => {
+      reject(new Error('Failed to clear local database stores'))
+    }
+  })
 }

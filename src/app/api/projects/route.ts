@@ -7,6 +7,17 @@ const DATA_DIR = path.join(process.cwd(), 'data')
 const PROJECTS_DIR = path.join(DATA_DIR, 'projects')
 const SOURCES_DIR = path.join(DATA_DIR, 'sources')
 
+// Helper to extract bearer token from headers
+function getBearerToken(req: NextRequest): string | undefined {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) return undefined
+  const parts = authHeader.split(' ')
+  if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+    return parts[1]
+  }
+  return undefined
+}
+
 // Ensure storage directories exist
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -21,16 +32,24 @@ function ensureDirs() {
 }
 
 // GET: Retrieve all projects
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    
+    if (supabase && token) {
       const { data, error } = await supabase
         .from('projects')
         .select('*')
         .order('updated_at', { ascending: false })
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase get projects error:', error)
+        if (error.code === 'PGRST301' || error.message.includes('JWT')) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+        throw error
+      }
 
       // Map snake_case database columns to camelCase for client compatibility
       const projects = (data || []).map(p => ({
@@ -88,9 +107,17 @@ export async function POST(req: NextRequest) {
     const filePath = path.join(PROJECTS_DIR, `${project.id}.json`)
     fs.writeFileSync(filePath, JSON.stringify(project, null, 2), 'utf-8')
 
-    // Save to Supabase if configured
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    // Save to Supabase if configured and user is signed in
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    if (supabase && token) {
+      // Retrieve and verify the user from the token to inject their user_id
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Failed to authenticate token:', userError)
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
       const mappedProject = {
         id: project.id,
         title: project.title,
@@ -103,7 +130,8 @@ export async function POST(req: NextRequest) {
         academic_level: project.academicLevel,
         academic_tone: project.academicTone,
         doc_header: project.docHeader,
-        doc_footer: project.docFooter
+        doc_footer: project.docFooter,
+        user_id: user.id
       }
 
       const { error } = await supabase
@@ -112,7 +140,6 @@ export async function POST(req: NextRequest) {
 
       if (error) {
         console.error('Failed to sync project to Supabase:', error)
-        // We do not fail the request since local backup was successful
       }
     }
 
@@ -159,15 +186,24 @@ export async function DELETE(req: NextRequest) {
       })
     }
 
-    // Delete from Supabase if configured
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    // Delete from Supabase if configured and user is authenticated
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    if (supabase && token) {
+      // Retrieve and verify the user from the token to confirm ownership
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Failed to authenticate token:', userError)
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
       // Due to CASCADE delete constraint in SQL schema, deleting the project
       // will automatically delete all associated sources in Supabase.
       const { error } = await supabase
         .from('projects')
         .delete()
         .eq('id', id)
+        .eq('user_id', user.id) // Ensure they own the project being deleted
 
       if (error) {
         console.error('Failed to delete project from Supabase:', error)

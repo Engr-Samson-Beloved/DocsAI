@@ -48,6 +48,9 @@ interface DashboardProps {
   onDeleteProject: (id: string) => void
   onRenameProject: (id: string) => void
   onLoadProject: (id: string) => void
+  userEmail: string | null
+  onSignOut: () => void
+  onOpenAuth: () => void
 }
 
 // Subcomponent to render a miniature version of the document content
@@ -111,7 +114,10 @@ export default function Dashboard({
   onCreateProjectWithTemplate,
   onDeleteProject,
   onRenameProject,
-  onLoadProject
+  onLoadProject,
+  userEmail,
+  onSignOut,
+  onOpenAuth
 }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'title' | 'words'>('updated')
@@ -248,33 +254,47 @@ export default function Dashboard({
             )}
           </div>
 
-          {/* Profile Avatar */}
+          {/* Profile Avatar & Authentication */}
           <div className="relative ml-1">
             <button
               onClick={() => {
                 setShowProfileDropdown(!showProfileDropdown)
                 setShowAppGridDropdown(false)
               }}
-              className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-inner cursor-pointer hover:ring-2 hover:ring-indigo-300 dark:hover:ring-indigo-900 transition-all"
+              className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-inner cursor-pointer hover:ring-2 hover:ring-indigo-300 dark:hover:ring-indigo-900 transition-all uppercase"
             >
-              O
+              {userEmail ? userEmail.charAt(0) : 'G'}
             </button>
             {showProfileDropdown && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setShowProfileDropdown(false)}></div>
                 <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-2xl shadow-xl p-4 z-30 animate-in fade-in duration-150 flex flex-col items-center text-center">
-                  <div className="w-14 h-14 rounded-full bg-indigo-650 text-white font-bold flex items-center justify-center text-xl shadow-md mb-2">
-                    O
+                  <div className="w-14 h-14 rounded-full bg-indigo-650 text-white font-bold flex items-center justify-center text-xl shadow-md mb-2 uppercase">
+                    {userEmail ? userEmail.charAt(0) : 'G'}
                   </div>
-                  <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Owooluwa Olabanji</h4>
-                  <p className="text-[11px] text-zinc-450 dark:text-zinc-500">owooluwa@wordpi.edu</p>
-                  
-                  <button 
-                    onClick={() => { setShowUpgradeModal(true); setShowProfileDropdown(false) }}
-                    className="mt-3 px-4 py-1.5 border border-zinc-250 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-full text-xs font-semibold cursor-pointer w-full transition-colors"
-                  >
-                    Manage Account
-                  </button>
+                  {userEmail ? (
+                    <>
+                      <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Active User</h4>
+                      <p className="text-[11px] text-zinc-450 dark:text-zinc-500 truncate max-w-full px-2">{userEmail}</p>
+                      
+                      <div className="mt-2.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 rounded-full flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                        <span>Cloud Backup Sync Active</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Guest Mode</h4>
+                      <p className="text-[11px] text-zinc-450 dark:text-zinc-500">Offline changes only</p>
+                      
+                      <button 
+                        onClick={() => { onOpenAuth(); setShowProfileDropdown(false) }}
+                        className="mt-3 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-full text-xs font-bold cursor-pointer w-full transition-all shadow-md shadow-indigo-500/10"
+                      >
+                        Sign In / Sign Up
+                      </button>
+                    </>
+                  )}
                   
                   <div className="w-full border-t border-zinc-150 dark:border-zinc-800 my-3"></div>
                   
@@ -287,10 +307,15 @@ export default function Dashboard({
                       <HelpCircle className="w-3.5 h-3.5" />
                       <span>Help & Feedback</span>
                     </button>
-                    <button className="flex items-center gap-2 p-2 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-650 dark:text-red-400 rounded-lg cursor-pointer">
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
+                    {userEmail && (
+                      <button 
+                        onClick={() => { onSignOut(); setShowProfileDropdown(false) }}
+                        className="flex items-center gap-2 p-2 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-650 dark:text-red-400 rounded-lg cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </>

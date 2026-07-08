@@ -6,6 +6,17 @@ import { getSupabaseClient } from '../../../../utils/supabase'
 const DATA_DIR = path.join(process.cwd(), 'data')
 const SOURCES_DIR = path.join(DATA_DIR, 'sources')
 
+// Helper to extract bearer token from headers
+function getBearerToken(req: NextRequest): string | undefined {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) return undefined
+  const parts = authHeader.split(' ')
+  if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+    return parts[1]
+  }
+  return undefined
+}
+
 // Ensure storage directories exist
 function ensureDirs() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -26,14 +37,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 })
     }
 
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    if (supabase && token) {
       const { data, error } = await supabase
         .from('project_sources')
         .select('*')
         .eq('project_id', projectId)
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase get sources error:', error)
+        if (error.code === 'PGRST301' || error.message.includes('JWT')) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+        throw error
+      }
 
       // Map database snake_case fields back to camelCase for client compatibility
       const sources = (data || []).map(s => ({
@@ -85,9 +103,17 @@ export async function POST(req: NextRequest) {
     const filePath = path.join(SOURCES_DIR, `${source.id}.json`)
     fs.writeFileSync(filePath, JSON.stringify(source, null, 2), 'utf-8')
 
-    // Sync to Supabase if active
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    // Sync to Supabase if active and token is provided
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    if (supabase && token) {
+      // Validate user token
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Failed to authenticate token:', userError)
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
       const mappedSource = {
         id: source.id, // Primary key matches local IndexedDB auto-increment id
         project_id: source.projectId,
@@ -131,9 +157,17 @@ export async function DELETE(req: NextRequest) {
       fs.unlinkSync(filePath)
     }
 
-    // Delete from Supabase if active
-    const supabase = getSupabaseClient()
-    if (supabase) {
+    // Delete from Supabase if active and token is provided
+    const token = getBearerToken(req)
+    const supabase = getSupabaseClient(token)
+    if (supabase && token) {
+      // Validate user token
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      if (userError || !user) {
+        console.error('Failed to authenticate token:', userError)
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+
       const { error } = await supabase
         .from('project_sources')
         .delete()

@@ -8,7 +8,7 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
  * Returns null if the Supabase environment variables are not set,
  * allowing the application to fall back gracefully to local filesystem storage.
  */
-export const getSupabaseClient = () => {
+export const getSupabaseClient = (userToken?: string) => {
   if (!supabaseUrl || !supabaseAnonKey) {
     return null
   }
@@ -24,10 +24,18 @@ export const getSupabaseClient = () => {
     cleanUrl = cleanUrl.slice(0, -1)
   }
 
+  const headers: Record<string, string> = {}
+  if (userToken) {
+    headers['Authorization'] = `Bearer ${userToken}`
+  }
+
   try {
     return createClient(cleanUrl, supabaseAnonKey, {
       auth: {
         persistSession: false // Disable session persistence for server-side operations
+      },
+      global: {
+        headers
       }
     })
   } catch (error) {
