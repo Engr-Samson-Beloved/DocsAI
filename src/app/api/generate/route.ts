@@ -154,7 +154,8 @@ export async function POST(req: NextRequest) {
               console.log(`Starting generation attempt with model: ${modelName}`)
               const model = genAI.getGenerativeModel({
                 model: modelName,
-                systemInstruction: systemInstruction
+                systemInstruction: systemInstruction,
+                tools: [{ googleSearchRetrieval: {} }]
               })
 
               responseStream = await model.generateContentStream({

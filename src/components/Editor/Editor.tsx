@@ -12,6 +12,7 @@ import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
 import AuthModal from '../Auth/AuthModal'
+import ReferenceFinder from './ReferenceFinder'
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -963,6 +964,7 @@ export default function Editor() {
   const [isSaved, setIsSaved] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarTab, setSidebarTab] = useState<'assistant' | 'references'>('assistant')
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
   const [readTime, setReadTime] = useState(0)
@@ -1495,6 +1497,19 @@ export default function Editor() {
     }
     const updated = projectSources.filter((_, idx) => idx !== index)
     setProjectSources(updated)
+  }
+
+  // Add reference source to IndexedDB and state
+  const handleAddReferenceSource = async (name: string, content: string, type: string) => {
+    if (!activeProjectId) return
+    try {
+      const savedSource = await saveSource(activeProjectId, name, content, type)
+      setProjectSources(prev => [...prev, savedSource])
+      return savedSource
+    } catch (e) {
+      console.error("Failed to save reference source:", e)
+      throw e
+    }
   }
 
   // Utility to extract text snippet from stringified Tiptap JSON content
@@ -5645,8 +5660,40 @@ export default function Editor() {
                 </button>
               </div>
 
+              {/* Tab Switcher */}
+              <div className="flex border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold select-none bg-zinc-50/50 dark:bg-zinc-950/30 shrink-0">
+                <button
+                  onClick={() => setSidebarTab('assistant')}
+                  className={`flex-1 py-2.5 text-center border-b-2 cursor-pointer transition-all ${
+                    sidebarTab === 'assistant'
+                      ? 'border-indigo-650 text-indigo-600 dark:text-indigo-400 font-bold bg-white dark:bg-zinc-900'
+                      : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-350'
+                  }`}
+                >
+                  AI Writer
+                </button>
+                <button
+                  onClick={() => setSidebarTab('references')}
+                  className={`flex-1 py-2.5 text-center border-b-2 cursor-pointer transition-all ${
+                    sidebarTab === 'references'
+                      ? 'border-indigo-650 text-indigo-600 dark:text-indigo-400 font-bold bg-white dark:bg-zinc-900'
+                      : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-350'
+                  }`}
+                >
+                  References
+                </button>
+              </div>
+
+              {sidebarTab === 'references' && (
+                <ReferenceFinder
+                  onAddSource={handleAddReferenceSource}
+                  existingSourcesCount={projectSources.length}
+                />
+              )}
+
               {/* Chat/Generation Input and Presets */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {sidebarTab === 'assistant' && (
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 
                  {/* AI Instructions Info Alert */}
                 <div className="bg-indigo-50 border border-indigo-100 text-indigo-950 dark:bg-indigo-950/20 dark:border-indigo-900/30 dark:text-indigo-300 rounded-lg p-3 text-xs leading-5">
@@ -6036,7 +6083,8 @@ export default function Editor() {
                     </div>
                   </div>
                 )}
-              </div>
+                </div>
+              )}
 
               {/* Sidebar Footer Information */}
               <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-[10px] text-zinc-400 dark:text-zinc-500 space-y-1">
