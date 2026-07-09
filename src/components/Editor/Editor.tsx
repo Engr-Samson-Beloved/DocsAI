@@ -1900,6 +1900,42 @@ export default function Editor() {
         }
       }
 
+      // If coordinate-based movement failed (e.g. hitting page gaps/margins),
+      // fallback to traversing document nodes to find next/prev text blocks.
+      if (!moved) {
+        if (direction === 'up') {
+          let prevBlockEnd: number | null = null
+          state.doc.nodesBetween(0, from, (node, pos) => {
+            if (node.isTextblock && pos + node.nodeSize <= from) {
+              prevBlockEnd = pos + node.nodeSize - 1
+            }
+            return true
+          })
+          if (prevBlockEnd !== null) {
+            const resolved = state.doc.resolve(prevBlockEnd)
+            const newSelection = TextSelection.create(state.doc, resolved.pos)
+            const tr = state.tr.setSelection(newSelection).scrollIntoView()
+            view.dispatch(tr)
+            moved = true
+          }
+        } else {
+          let nextBlockStart: number | null = null
+          state.doc.nodesBetween(from, state.doc.content.size, (node, pos) => {
+            if (node.isTextblock && pos > from && nextBlockStart === null) {
+              nextBlockStart = pos + 1
+            }
+            return true
+          })
+          if (nextBlockStart !== null) {
+            const resolved = state.doc.resolve(nextBlockStart)
+            const newSelection = TextSelection.create(state.doc, resolved.pos)
+            const tr = state.tr.setSelection(newSelection).scrollIntoView()
+            view.dispatch(tr)
+            moved = true
+          }
+        }
+      }
+
       // If selection did not change or target is out of bounds, scroll container as fallback
       if (!moved) {
         const container = scrollContainerRef.current
