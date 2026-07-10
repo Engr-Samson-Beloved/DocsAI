@@ -1148,6 +1148,7 @@ export default function Editor() {
   const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
   const [aiEngine, setAiEngine] = useState<'gemini' | 'grok' | 'groq'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
+  const [targetPageCount, setTargetPageCount] = useState<'3-5' | '10-12' | '20-25'>('10-12')
   
   const [studentName, setStudentName] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -4970,8 +4971,13 @@ export default function Editor() {
           
           ${outlineStructurePrompt}
           
-          For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 1500 words of rich content.
-          Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
+          For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines.
+          Target document length: ${targetPageCount} pages. Write at least ${
+            targetPageCount === '3-5' ? '1500' : targetPageCount === '10-12' ? '4500' : '8500'
+          } words of rich content.
+          Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use exactly ${
+            targetPageCount === '3-5' ? '4' : targetPageCount === '10-12' ? '11' : '22'
+          } page separators (<div data-type="page">...</div>) to logically divide the generated content across pages.
           Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.`,
           context: contextText,
           academicLevel: wizardAcademicLevel || 'Undergraduate',
@@ -7201,6 +7207,22 @@ export default function Editor() {
                   <option value="Critical">Critical / Evaluative</option>
                   <option value="Objective">Objective / Neutral</option>
                   <option value="Persuasive">Persuasive / Argumentative</option>
+                </select>
+              </div>
+
+              {/* Target Document Length */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
+                  Target Document Length (Page Range)
+                </label>
+                <select
+                  value={targetPageCount}
+                  onChange={(e) => setTargetPageCount(e.target.value as any)}
+                  className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                >
+                  <option value="3-5">3 - 5 Pages (Brief Outline/Summary - ~1,500 words)</option>
+                  <option value="10-12">10 - 12 Pages (Standard Report/Seminar - ~4,500 words)</option>
+                  <option value="20-25">20 - 25 Pages (Detailed Thesis/Project - ~8,500 words)</option>
                 </select>
               </div>
 
