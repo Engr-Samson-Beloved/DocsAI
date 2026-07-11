@@ -1560,6 +1560,54 @@ export default function Editor() {
     }
   }
 
+  // Scan document, remove empty pages and consecutive redundant paragraphs
+  const handleFormatAndCleanDocument = () => {
+    if (!editor) return
+    try {
+      const html = editor.getHTML()
+      
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+      
+      const pages = doc.querySelectorAll('div[data-type="page"]')
+      let clearedPagesCount = 0
+      let clearedParagraphsCount = 0
+      
+      pages.forEach(page => {
+        const text = page.textContent?.trim() || ''
+        const hasGraphicsOrTables = page.querySelector('img, table, iframe, svg, canvas') !== null
+        
+        // Remove empty pages
+        if (text.length === 0 && !hasGraphicsOrTables) {
+          page.remove()
+          clearedPagesCount++
+        } else {
+          // Clean up empty double-paragraphs inside active pages
+          const paragraphs = page.querySelectorAll('p')
+          paragraphs.forEach((p, idx) => {
+            const nextP = paragraphs[idx + 1]
+            if (p.textContent?.trim() === '' && nextP && nextP.textContent?.trim() === '') {
+              p.remove()
+              clearedParagraphsCount++
+            }
+          })
+        }
+      })
+      
+      const cleanedHtml = doc.body.innerHTML.trim()
+      const finalHtml = ensurePaginatedHtml(cleanedHtml)
+      
+      editor.commands.setContent(finalHtml)
+      setIsSaved(false)
+      runPagination(editor)
+      
+      alert(`Document formatted successfully!\n\n• Cleared ${clearedPagesCount} empty pages.\n• Removed ${clearedParagraphsCount} redundant empty paragraphs.`)
+    } catch (e) {
+      console.error("Failed to format and clean document:", e)
+      alert("An error occurred while formatting the document.")
+    }
+  }
+
   // Utility to extract text snippet from stringified Tiptap JSON content
   const getContentSnippet = (contentStr: string): string => {
     try {
@@ -5673,6 +5721,17 @@ export default function Editor() {
                   </div>
                 )}
               </div>
+
+              {/* Format & Clean Action Button */}
+              <button
+                type="button"
+                onClick={handleFormatAndCleanDocument}
+                className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-700 dark:text-zinc-300 flex items-center gap-1 cursor-pointer transition-colors"
+                title="Format & Clean Document spacing and remove blank pages"
+              >
+                <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
+                <span className="text-[11px] font-semibold hidden md:inline">Format & Clean</span>
+              </button>
             </div>
           </div>
         </div>
