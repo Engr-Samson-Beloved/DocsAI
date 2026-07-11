@@ -1560,16 +1560,15 @@ export default function Editor() {
     }
   }
 
-  // Scan document, merge sparse pages and strip trailing empty paragraphs
+  // Scan document, strip empty paragraphs, then flatten all pages into one and re-paginate
   const handleFormatAndCleanDocument = () => {
     if (!editor) return
     try {
       const { state } = editor
       let tr = state.tr
-      let clearedPagesCount = 0
       let clearedParagraphsCount = 0
 
-      // Pass 1: Remove trailing empty paragraphs from each page (work backwards)
+      // Pass 1: Remove trailing and leading empty paragraphs from each page (work backwards)
       const pageNodes: { node: any; pos: number }[] = []
       state.doc.forEach((node: any, offset: number) => {
         if (node.type.name === 'page') {
@@ -1577,13 +1576,12 @@ export default function Editor() {
         }
       })
 
-      // Process pages in reverse to keep positions stable
       for (let i = pageNodes.length - 1; i >= 0; i--) {
         const { node: pageNode, pos: pagePos } = pageNodes[i]
-        
-        // Count trailing empty paragraphs
+
+        // Count trailing empty paragraphs (keep at least 1 child)
         let trailingEmpty = 0
-        for (let c = pageNode.childCount - 1; c >= 1; c--) { // keep at least 1 child
+        for (let c = pageNode.childCount - 1; c >= 1; c--) {
           const child = pageNode.child(c)
           if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
             trailingEmpty++
@@ -1592,9 +1590,9 @@ export default function Editor() {
           }
         }
 
-        // Also count leading empty paragraphs (keep at least 1 content node)
+        // Count leading empty paragraphs
         let leadingEmpty = 0
-        const maxLeading = pageNode.childCount - trailingEmpty - 1 // keep at least 1
+        const maxLeading = pageNode.childCount - trailingEmpty - 1
         for (let c = 0; c < maxLeading; c++) {
           const child = pageNode.child(c)
           if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
@@ -1604,10 +1602,8 @@ export default function Editor() {
           }
         }
 
-        // Remove trailing empty paragraphs
         if (trailingEmpty > 0) {
-          // Calculate position of the first trailing empty paragraph
-          let removeStart = pagePos + 1 // start of page content
+          let removeStart = pagePos + 1
           for (let c = 0; c < pageNode.childCount - trailingEmpty; c++) {
             removeStart += pageNode.child(c).nodeSize
           }
@@ -1619,7 +1615,6 @@ export default function Editor() {
           clearedParagraphsCount += trailingEmpty
         }
 
-        // Remove leading empty paragraphs (recalculate positions after trailing removal)
         if (leadingEmpty > 0) {
           const currentPageNode = tr.doc.nodeAt(pagePos)
           if (currentPageNode && currentPageNode.type.name === 'page') {
@@ -1634,40 +1629,48 @@ export default function Editor() {
         }
       }
 
-      // Pass 2: Remove pages that are now truly empty (only have 1 empty paragraph)
-      // Re-read the doc after paragraph cleanup
-      const cleanedPageNodes: { node: any; pos: number }[] = []
+      // Pass 2: Join ALL pages into a single page so runPagination can re-split correctly.
+      // This fixes scattered single-paragraph pages by reflowing all content.
+      const joinPositions: number[] = []
       tr.doc.forEach((node: any, offset: number) => {
-        if (node.type.name === 'page') {
-          cleanedPageNodes.push({ node, pos: offset })
+        if (offset > 0 && node.type.name === 'page') {
+          joinPositions.push(offset)
         }
       })
 
-      // Only remove if there's more than 1 page total
-      if (cleanedPageNodes.length > 1) {
-        for (let i = cleanedPageNodes.length - 1; i >= 0; i--) {
-          const { node: pageNode, pos: pagePos } = cleanedPageNodes[i]
-          const pageText = pageNode.textContent.trim()
-          const hasOnlyEmptyContent = pageText.length < 5 && pageNode.childCount <= 2
+      const mergedPagesCount = joinPositions.length
 
-          if (hasOnlyEmptyContent && cleanedPageNodes.length - clearedPagesCount > 1) {
-            // Remove the entire page node
-            tr = tr.delete(pagePos, pagePos + pageNode.nodeSize)
-            clearedPagesCount++
-          }
+      // Join from the end backwards so earlier positions remain stable
+      for (let i = joinPositions.length - 1; i >= 0; i--) {
+        try {
+          tr = tr.join(joinPositions[i])
+        } catch (e) {
+          // Skip boundaries that can't be joined
         }
       }
 
-      if (clearedPagesCount > 0 || clearedParagraphsCount > 0) {
+      const hasChanges = clearedParagraphsCount > 0 || mergedPagesCount > 0
+
+      if (hasChanges) {
         editor.view.dispatch(tr)
         setIsSaved(false)
-        // Schedule pagination after DOM settles
-        setTimeout(() => runPagination(editor), 200)
+
+        // Schedule multiple pagination cycles to fully re-split the flattened content
+        const repaginate = (cycle: number) => {
+          if (cycle <= 0) {
+            // Final outline refresh after all pagination settles
+            setTimeout(() => updateOutline(), 100)
+            return
+          }
+          runPagination(editor)
+          setTimeout(() => repaginate(cycle - 1), 200)
+        }
+        setTimeout(() => repaginate(Math.max(5, mergedPagesCount + 2)), 150)
       }
 
       alert(
-        clearedPagesCount > 0 || clearedParagraphsCount > 0
-          ? `Document formatted successfully!\n\n• Merged/removed ${clearedPagesCount} sparse pages.\n• Stripped ${clearedParagraphsCount} empty paragraphs.`
+        hasChanges
+          ? `Document formatted successfully!\n\n• Reflowed content from ${mergedPagesCount + 1} pages into optimal layout.\n• Stripped ${clearedParagraphsCount} empty paragraphs.\n\nPages are being re-calculated...`
           : `Document is already clean — no empty paragraphs or sparse pages found.`
       )
     } catch (e) {
@@ -2469,8 +2472,9 @@ export default function Editor() {
       },
     },
     onUpdate: ({ editor, transaction }) => {
-      // Skip all processing and re-renders if this is a pagination-induced transaction
+      // For pagination-induced transactions, only refresh the outline (so headings stay current)
       if (transaction && transaction.getMeta('paginating')) {
+        setTimeout(() => updateOutline(), 80)
         return
       }
 
@@ -2710,33 +2714,12 @@ export default function Editor() {
       if (dy !== 0 || dx !== 0) {
         e.preventDefault()
 
-        // ALWAYS scroll the container — this keeps the viewport moving smoothly
-        if (dy !== 0) {
-          container.scrollTop += dy
-        }
-
-        // Additionally move the cursor to follow the scroll
-        if (dy !== 0 && editor) {
-          // Accumulate vertical scroll delta
-          wheelAccumulatorRef.current += dy
-
-          const threshold = 60
-          if (Math.abs(wheelAccumulatorRef.current) >= threshold) {
-            const direction = wheelAccumulatorRef.current > 0 ? 'down' : 'up'
-            const steps = Math.floor(Math.abs(wheelAccumulatorRef.current) / threshold)
-            
-            wheelAccumulatorRef.current = wheelAccumulatorRef.current % threshold
-
-            for (let i = 0; i < steps; i++) {
-              moveCursorUpDown(direction)
-            }
-          }
-        }
-
-        // Allow horizontal scroll normally
-        if (dx !== 0) {
-          container.scrollLeft += dx
-        }
+        // Scroll the container directly — standard editor behavior.
+        // The cursor stays where it was; the user clicks to reposition it.
+        // This eliminates the scroll-fighting bug where scrollCursorIntoView
+        // would undo the wheel scroll to keep the cursor visible.
+        if (dy !== 0) container.scrollTop += dy
+        if (dx !== 0) container.scrollLeft += dx
       }
     }
 
