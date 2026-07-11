@@ -60,7 +60,8 @@ import {
   Calendar,
   Edit3,
   Folder,
-  Sparkles
+  Sparkles,
+  BookOpen
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -519,12 +520,37 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
 // Helper to pre-wrap raw HTML in a page block tag if not already paginated.
 // This ensures that all imported or reset content is correctly parsed into a page node.
 const ensurePaginatedHtml = (html: string): string => {
-  const trimmed = html.trim()
-  if (!trimmed) return '<div data-type="page"><p></p></div>'
-  if (trimmed.includes('data-type="page"') || trimmed.includes('class="page-sheet"')) {
-    return html
+  let cleaned = html.trim()
+  if (!cleaned) return '<div data-type="page"><p></p></div>'
+
+  if (cleaned.includes('data-type="page"')) {
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(cleaned, 'text/html')
+      const pages = doc.querySelectorAll('div[data-type="page"]')
+      let removedAny = false
+      pages.forEach(page => {
+        const text = page.textContent?.trim() || ''
+        const hasGraphicsOrTables = page.querySelector('img, table, iframe, svg, canvas') !== null
+        if (text.length === 0 && !hasGraphicsOrTables) {
+          page.remove()
+          removedAny = true
+        }
+      })
+      if (removedAny) {
+        cleaned = doc.body.innerHTML.trim()
+      }
+    } catch (e) {
+      console.warn("DOMParser failed to clean empty pages:", e)
+    }
   }
-  return `<div data-type="page">${html}</div>`
+
+  if (!cleaned) return '<div data-type="page"><p></p></div>'
+
+  if (cleaned.includes('data-type="page"') || cleaned.includes('class="page-sheet"')) {
+    return cleaned
+  }
+  return `<div data-type="page">${cleaned}</div>`
 }
 
 // Helper to pre-process loaded JSON content to wrap flat block nodes into a page node.
@@ -569,10 +595,9 @@ class PageNodeView {
 
     // Header container
     const headerEl = document.createElement('div')
-    headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-100 dark:border-zinc-800 pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-transparent pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     headerEl.innerHTML = `
       <span class="header-text truncate max-w-[400px]"></span>
-      <span class="text-[10px] tracking-wider uppercase font-semibold text-zinc-300 dark:text-zinc-700">WordPI</span>
     `
     this.dom.appendChild(headerEl)
 
@@ -583,11 +608,11 @@ class PageNodeView {
 
     // Footer container
     const footerEl = document.createElement('div')
-    footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-100 dark:border-zinc-800 pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-transparent pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     footerEl.innerHTML = `
       <span class="footer-text truncate max-w-[450px]"></span>
       <div class="flex items-center gap-3">
-        <button class="delete-page-btn pointer-events-auto cursor-pointer opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 flex items-center gap-1 text-[10px] font-bold transition-all duration-150 print:hidden" title="Delete this page and all its contents">
+        <button class="delete-page-btn pointer-events-auto cursor-pointer opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-750 flex items-center gap-1 text-[10px] font-bold transition-all duration-150 print:hidden" title="Delete this page and all its contents">
           Delete Page
         </button>
         <span class="page-number"></span>
@@ -684,6 +709,28 @@ class PageNodeView {
 
     const docHeader = (this.editor.storage as any)?.page?.docHeader || ''
     const docFooter = (this.editor.storage as any)?.page?.docFooter || ''
+
+    const headerEl = this.dom.querySelector('.absolute.top-0')
+    if (headerEl) {
+      if (docHeader) {
+        headerEl.classList.remove('border-transparent')
+        headerEl.classList.add('border-zinc-150', 'dark:border-zinc-800')
+      } else {
+        headerEl.classList.remove('border-zinc-150', 'dark:border-zinc-800')
+        headerEl.classList.add('border-transparent')
+      }
+    }
+
+    const footerEl = this.dom.querySelector('.absolute.bottom-0')
+    if (footerEl) {
+      if (docFooter) {
+        footerEl.classList.remove('border-transparent')
+        footerEl.classList.add('border-zinc-150', 'dark:border-zinc-800')
+      } else {
+        footerEl.classList.remove('border-zinc-150', 'dark:border-zinc-800')
+        footerEl.classList.add('border-transparent')
+      }
+    }
 
     const headerTextEl = this.dom.querySelector('.header-text')
     if (headerTextEl) headerTextEl.textContent = docHeader
@@ -1879,6 +1926,26 @@ export default function Editor() {
     }
   }
 
+  const scrollCursorIntoView = (editorView: any) => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    try {
+      const { selection } = editorView.state
+      const coords = editorView.coordsAtPos(selection.from)
+      if (coords) {
+        const containerRect = container.getBoundingClientRect()
+        const cursorY = coords.top - containerRect.top + container.scrollTop
+        const targetScrollTop = cursorY - (containerRect.height / 2)
+        container.scrollTo({
+          top: Math.max(0, targetScrollTop),
+          behavior: 'auto' // Instant adjustment is essential for fluid wheel response
+        })
+      }
+    } catch (e) {
+      console.warn("Failed programmatically scrolling cursor into view:", e)
+    }
+  }
+
   const moveCursorUpDown = (direction: 'up' | 'down') => {
     if (!editor) return
 
@@ -1910,8 +1977,9 @@ export default function Editor() {
         if (targetPos !== from) {
           const resolvedPos = state.doc.resolve(targetPos)
           const newSelection = TextSelection.create(state.doc, resolvedPos.pos)
-          const tr = state.tr.setSelection(newSelection).scrollIntoView()
+          const tr = state.tr.setSelection(newSelection)
           view.dispatch(tr)
+          scrollCursorIntoView(view)
           moved = true
         }
       }
@@ -1930,8 +1998,9 @@ export default function Editor() {
           if (prevBlockEnd !== null) {
             const resolved = state.doc.resolve(prevBlockEnd)
             const newSelection = TextSelection.create(state.doc, resolved.pos)
-            const tr = state.tr.setSelection(newSelection).scrollIntoView()
+            const tr = state.tr.setSelection(newSelection)
             view.dispatch(tr)
+            scrollCursorIntoView(view)
             moved = true
           }
         } else {
@@ -1945,8 +2014,9 @@ export default function Editor() {
           if (nextBlockStart !== null) {
             const resolved = state.doc.resolve(nextBlockStart)
             const newSelection = TextSelection.create(state.doc, resolved.pos)
-            const tr = state.tr.setSelection(newSelection).scrollIntoView()
+            const tr = state.tr.setSelection(newSelection)
             view.dispatch(tr)
+            scrollCursorIntoView(view)
             moved = true
           }
         }
@@ -3432,7 +3502,7 @@ export default function Editor() {
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docHeader || "WordPI Document Draft",
+                        text: docHeader || "",
                         size: 18, // 9pt (half-points in docx)
                         color: "71717a", // Zinc 500
                         font: "Times New Roman"
@@ -3450,7 +3520,7 @@ export default function Editor() {
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docFooter ? `${docFooter} | ` : "Page ",
+                        text: docFooter ? `${docFooter} | Page ` : "Page ",
                         size: 18,
                         color: "71717a",
                         font: "Times New Roman"
@@ -7272,6 +7342,25 @@ export default function Editor() {
                     className="hidden"
                   />
                 </label>
+
+                {/* Online Reference Search */}
+                <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-zinc-50/50 dark:bg-zinc-900/30">
+                  <details className="group">
+                    <summary className="flex items-center justify-between p-3 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-850 select-none">
+                      <div className="flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Search & Ingest Academic Journals Online</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-zinc-400" />
+                    </summary>
+                    <div className="border-t border-zinc-150 dark:border-zinc-850 max-h-64 flex flex-col overflow-hidden bg-white dark:bg-zinc-900/50">
+                      <ReferenceFinder
+                        onAddSource={handleAddReferenceSource}
+                        existingSourcesCount={projectSources.length}
+                      />
+                    </div>
+                  </details>
+                </div>
               </div>
             </div>
 
