@@ -301,7 +301,12 @@ body {
   color: #6366f1;
 }
 
-/* Printing styles to hide the visual page-break divider in final compile */
+/* Printing styles — consistent A4 output matching the editor canvas */
+@page {
+  size: A4 portrait;   /* 210mm × 297mm */
+  margin: 0;           /* Zero browser margins — our page-sheet handles its own padding */
+}
+
 @media print {
   /* Hide headers, sidebars, outline, wizard, print-action controls, and legacy logo */
   header,
@@ -352,12 +357,13 @@ body {
     line-height: 0 !important;
   }
 
-  /* Ensure pages break natively and span the full print width */
+  /* Each page-sheet = one A4 printed page. Use static positioning with padding for margins. */
   .page-sheet {
-    width: 100% !important;
-    height: 297mm !important; /* Standard A4 height */
+    position: relative !important;
+    width: 210mm !important;
+    height: 297mm !important;
     margin: 0 !important;
-    padding: 20mm 20mm 20mm 20mm !important; /* Printable margins */
+    padding: 0 !important;
     page-break-after: always !important;
     break-after: page !important;
     box-shadow: none !important;
@@ -367,7 +373,11 @@ body {
     color: black !important;
     font-family: 'Times New Roman', Times, serif !important;
     line-height: 1.5 !important;
+    overflow: hidden !important;
   }
+
+  /* Keep header/footer/content absolute positioning intact — it maps 1:1 with the editor canvas.
+     The page-sheet is 210mm × 297mm = 794px × 1123px at 96 DPI, same as the editor. */
 
   .page-sheet * {
     font-family: 'Times New Roman', Times, serif !important;

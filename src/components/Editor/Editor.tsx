@@ -3626,7 +3626,21 @@ export default function Editor() {
       const doc = new Document({
         sections: [
           {
-            properties: {},
+            properties: {
+              page: {
+                size: {
+                  width: 11906,   // A4 width in twips: 210mm = 8.27in × 1440
+                  height: 16838,  // A4 height in twips: 297mm = 11.69in × 1440
+                  orientation: docx.PageOrientation.PORTRAIT,
+                },
+                margin: {
+                  top: 1440,    // 1 inch = 1440 twips (matches editor 96px header zone)
+                  right: 1080,  // 0.75 inch (matches editor 72px px-[72px] side padding)
+                  bottom: 1440, // 1 inch
+                  left: 1080,   // 0.75 inch
+                },
+              },
+            },
             headers: {
               default: new docx.Header({
                 children: [
