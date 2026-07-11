@@ -1560,48 +1560,116 @@ export default function Editor() {
     }
   }
 
-  // Scan document, remove empty pages and consecutive redundant paragraphs
+  // Scan document, merge sparse pages and strip trailing empty paragraphs
   const handleFormatAndCleanDocument = () => {
     if (!editor) return
     try {
-      const html = editor.getHTML()
-      
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(html, 'text/html')
-      
-      const pages = doc.querySelectorAll('div[data-type="page"]')
+      const { state } = editor
+      let tr = state.tr
       let clearedPagesCount = 0
       let clearedParagraphsCount = 0
-      
-      pages.forEach(page => {
-        const text = page.textContent?.trim() || ''
-        const hasGraphicsOrTables = page.querySelector('img, table, iframe, svg, canvas') !== null
-        
-        // Remove empty pages
-        if (text.length === 0 && !hasGraphicsOrTables) {
-          page.remove()
-          clearedPagesCount++
-        } else {
-          // Clean up empty double-paragraphs inside active pages
-          const paragraphs = page.querySelectorAll('p')
-          paragraphs.forEach((p, idx) => {
-            const nextP = paragraphs[idx + 1]
-            if (p.textContent?.trim() === '' && nextP && nextP.textContent?.trim() === '') {
-              p.remove()
-              clearedParagraphsCount++
-            }
-          })
+
+      // Pass 1: Remove trailing empty paragraphs from each page (work backwards)
+      const pageNodes: { node: any; pos: number }[] = []
+      state.doc.forEach((node: any, offset: number) => {
+        if (node.type.name === 'page') {
+          pageNodes.push({ node, pos: offset })
         }
       })
-      
-      const cleanedHtml = doc.body.innerHTML.trim()
-      const finalHtml = ensurePaginatedHtml(cleanedHtml)
-      
-      editor.commands.setContent(finalHtml)
-      setIsSaved(false)
-      runPagination(editor)
-      
-      alert(`Document formatted successfully!\n\n• Cleared ${clearedPagesCount} empty pages.\n• Removed ${clearedParagraphsCount} redundant empty paragraphs.`)
+
+      // Process pages in reverse to keep positions stable
+      for (let i = pageNodes.length - 1; i >= 0; i--) {
+        const { node: pageNode, pos: pagePos } = pageNodes[i]
+        
+        // Count trailing empty paragraphs
+        let trailingEmpty = 0
+        for (let c = pageNode.childCount - 1; c >= 1; c--) { // keep at least 1 child
+          const child = pageNode.child(c)
+          if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
+            trailingEmpty++
+          } else {
+            break
+          }
+        }
+
+        // Also count leading empty paragraphs (keep at least 1 content node)
+        let leadingEmpty = 0
+        const maxLeading = pageNode.childCount - trailingEmpty - 1 // keep at least 1
+        for (let c = 0; c < maxLeading; c++) {
+          const child = pageNode.child(c)
+          if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
+            leadingEmpty++
+          } else {
+            break
+          }
+        }
+
+        // Remove trailing empty paragraphs
+        if (trailingEmpty > 0) {
+          // Calculate position of the first trailing empty paragraph
+          let removeStart = pagePos + 1 // start of page content
+          for (let c = 0; c < pageNode.childCount - trailingEmpty; c++) {
+            removeStart += pageNode.child(c).nodeSize
+          }
+          let removeEnd = pagePos + 1
+          for (let c = 0; c < pageNode.childCount; c++) {
+            removeEnd += pageNode.child(c).nodeSize
+          }
+          tr = tr.delete(removeStart, removeEnd)
+          clearedParagraphsCount += trailingEmpty
+        }
+
+        // Remove leading empty paragraphs (recalculate positions after trailing removal)
+        if (leadingEmpty > 0) {
+          const currentPageNode = tr.doc.nodeAt(pagePos)
+          if (currentPageNode && currentPageNode.type.name === 'page') {
+            const contentStart = pagePos + 1
+            let leadingEnd = contentStart
+            for (let c = 0; c < leadingEmpty; c++) {
+              leadingEnd += currentPageNode.child(c).nodeSize
+            }
+            tr = tr.delete(contentStart, leadingEnd)
+            clearedParagraphsCount += leadingEmpty
+          }
+        }
+      }
+
+      // Pass 2: Remove pages that are now truly empty (only have 1 empty paragraph)
+      // Re-read the doc after paragraph cleanup
+      const cleanedPageNodes: { node: any; pos: number }[] = []
+      tr.doc.forEach((node: any, offset: number) => {
+        if (node.type.name === 'page') {
+          cleanedPageNodes.push({ node, pos: offset })
+        }
+      })
+
+      // Only remove if there's more than 1 page total
+      if (cleanedPageNodes.length > 1) {
+        for (let i = cleanedPageNodes.length - 1; i >= 0; i--) {
+          const { node: pageNode, pos: pagePos } = cleanedPageNodes[i]
+          const pageText = pageNode.textContent.trim()
+          const hasOnlyEmptyContent = pageText.length < 5 && pageNode.childCount <= 2
+
+          if (hasOnlyEmptyContent && cleanedPageNodes.length - clearedPagesCount > 1) {
+            // Remove the entire page node
+            tr = tr.delete(pagePos, pagePos + pageNode.nodeSize)
+            clearedPagesCount++
+          }
+        }
+      }
+
+      if (clearedPagesCount > 0 || clearedParagraphsCount > 0) {
+        editor.view.dispatch(tr)
+        setIsSaved(false)
+        // Schedule pagination after DOM settles
+        setTimeout(() => runPagination(editor), 200)
+      }
+
+      alert(
+        clearedPagesCount > 0 || clearedParagraphsCount > 0
+          ? `Document formatted successfully!\n\n• Merged/removed ${clearedPagesCount} sparse pages.\n• Stripped ${clearedParagraphsCount} empty paragraphs.`
+          : `Document is already clean — no empty paragraphs or sparse pages found.`
+      )
     } catch (e) {
       console.error("Failed to format and clean document:", e)
       alert("An error occurred while formatting the document.")
@@ -1980,17 +2048,26 @@ export default function Editor() {
     try {
       const { selection } = editorView.state
       const coords = editorView.coordsAtPos(selection.from)
-      if (coords) {
-        const containerRect = container.getBoundingClientRect()
-        const cursorY = coords.top - containerRect.top + container.scrollTop
-        const targetScrollTop = cursorY - (containerRect.height / 2)
-        container.scrollTo({
-          top: Math.max(0, targetScrollTop),
-          behavior: 'auto' // Instant adjustment is essential for fluid wheel response
-        })
+      if (!coords) return
+
+      const containerRect = container.getBoundingClientRect()
+      const cursorTop = coords.top
+      const cursorBottom = coords.bottom
+
+      // Only scroll if the cursor is actually outside the visible area
+      const margin = 60 // px buffer from edges
+      if (cursorTop < containerRect.top + margin) {
+        // Cursor is above the visible area — scroll up
+        const offset = containerRect.top + margin - cursorTop
+        container.scrollTop = Math.max(0, container.scrollTop - offset - 40)
+      } else if (cursorBottom > containerRect.bottom - margin) {
+        // Cursor is below the visible area — scroll down
+        const offset = cursorBottom - (containerRect.bottom - margin)
+        container.scrollTop += offset + 40
       }
+      // If cursor is already visible, do nothing — let native scroll work
     } catch (e) {
-      console.warn("Failed programmatically scrolling cursor into view:", e)
+      // Silently ignore coordinate failures at document boundaries
     }
   }
 
@@ -2633,11 +2710,17 @@ export default function Editor() {
       if (dy !== 0 || dx !== 0) {
         e.preventDefault()
 
+        // ALWAYS scroll the container — this keeps the viewport moving smoothly
+        if (dy !== 0) {
+          container.scrollTop += dy
+        }
+
+        // Additionally move the cursor to follow the scroll
         if (dy !== 0 && editor) {
           // Accumulate vertical scroll delta
           wheelAccumulatorRef.current += dy
 
-          const threshold = 40
+          const threshold = 60
           if (Math.abs(wheelAccumulatorRef.current) >= threshold) {
             const direction = wheelAccumulatorRef.current > 0 ? 'down' : 'up'
             const steps = Math.floor(Math.abs(wheelAccumulatorRef.current) / threshold)
