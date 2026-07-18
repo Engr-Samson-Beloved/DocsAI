@@ -534,3 +534,85 @@ body {
   top: -4px !important;
 }
 
+/* ━━━ Mobile Responsive Chatbot & Preview Styles ━━━ */
+@media (max-width: 768px) {
+  /* Safe areas for mobile devices with notches */
+  .safe-area-top {
+    padding-top: max(10px, env(safe-area-inset-top, 10px)) !important;
+  }
+  
+  .safe-area-bottom {
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)) !important;
+  }
+  
+  .mobile-input-bar {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 12px)) !important;
+  }
+
+  /* Chat bubble entering slide-up animation */
+  .chat-bubble-enter {
+    animation: mobileSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  /* Hide desktop canvas & sidebars completely on small screens */
+  .page-sheet {
+    display: none !important;
+  }
+  
+  .scroll-container {
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  /* Prose typography styling for AI chat responses */
+  .prose-mobile {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  
+  .prose-mobile h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 12px 0 6px 0;
+  }
+  
+  .prose-mobile h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 10px 0 5px 0;
+  }
+  
+  .prose-mobile h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 8px 0 4px 0;
+  }
+
+  /* custom scrollbar for mobile drawers/preview modals */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: rgba(156, 163, 175, 0.3);
+    border-radius: 9999px;
+  }
+}
+
+@keyframes mobileSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+

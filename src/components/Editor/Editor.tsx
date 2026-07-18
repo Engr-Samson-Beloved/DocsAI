@@ -13,6 +13,10 @@ import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
 import AuthModal from '../Auth/AuthModal'
 import ReferenceFinder from './ReferenceFinder'
+import { useIsMobile } from '../../utils/useIsMobile'
+import MobileChatView from '../Mobile/MobileChatView'
+import MobileDashboard from '../Mobile/MobileDashboard'
+
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -999,6 +1003,7 @@ const STORAGE_KEY_PROJECTS = 'wordpi-writings';
 const STORAGE_KEY_ACTIVE_ID = 'wordpi-active-id';
 
 export default function Editor() {
+  const isMobile = useIsMobile()
   // Dashboard & Multi-Project Storage States
   const [showDashboard, setShowDashboard] = useState(true)
   const [projects, setProjects] = useState<Project[]>([])
@@ -5263,7 +5268,66 @@ export default function Editor() {
         </div>
       )}
       
-      {showDashboard ? (
+      {isMobile ? (
+        showDashboard ? (
+          <MobileDashboard
+            theme={theme}
+            toggleTheme={toggleTheme}
+            projects={projects}
+            onCreateProject={createNewProject}
+            onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onDeleteProject={deleteProject}
+            onRenameProject={renameProjectPrompt}
+            onLoadProject={loadProject}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
+        ) : (
+          <MobileChatView
+            theme={theme}
+            toggleTheme={toggleTheme}
+            documentTitle={documentTitle}
+            setDocumentTitle={setDocumentTitle}
+            activeProjectId={activeProjectId}
+            wordCount={wordCount}
+            charCount={charCount}
+            totalPages={totalPages}
+            isSimulatingAI={isSimulatingAI}
+            simulatedAiResult={simulatedAiResult}
+            activeAiModel={activeAiModel}
+            aiEngine={aiEngine}
+            setAiEngine={setAiEngine}
+            handleAiAction={handleAiAction}
+            setAiPrompt={setAiPrompt}
+            aiPrompt={aiPrompt}
+            insertAiContent={insertAiContent}
+            discardAiContent={discardAiContent}
+            exportToDocx={exportToDocx}
+            exportToPdfPrint={exportToPdfPrint}
+            exportToPptx={exportToPptx}
+            onBackToDashboard={() => {
+              window.history.pushState({}, '', '/')
+              setShowDashboard(true)
+              setActiveProjectId('')
+            }}
+            projectSources={projectSources}
+            handleWizardFileUpload={handleWizardFileUpload}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => setShowAuthModal(true)}
+            editorHtml={editor ? editor.getHTML() : ''}
+            wizardDocType={wizardDocType}
+            wizardAcademicLevel={wizardAcademicLevel}
+            onOpenWizard={() => {
+              setWizardTopic('')
+              setWizardStep(1)
+              setShowWizard(true)
+            }}
+            onGenerateBlueprint={generateFullDocumentBlueprint}
+          />
+        )
+      ) : showDashboard ? (
         <Dashboard
           theme={theme}
           toggleTheme={toggleTheme}
@@ -5278,6 +5342,7 @@ export default function Editor() {
           onOpenAuth={() => setShowAuthModal(true)}
         />
       ) : (
+
         <>
           {/* Top Application Bar */}
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
