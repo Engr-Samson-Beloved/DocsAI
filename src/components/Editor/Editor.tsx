@@ -1766,6 +1766,37 @@ export default function Editor() {
     return () => clearTimeout(timer)
   }, [documentTitle, docHeader, docFooter, activeProjectId, projects.length])
 
+  const forceSaveActiveProject = async () => {
+    if (!activeProjectId || !editor) return
+    const project = projects.find(p => p.id === activeProjectId)
+    if (project) {
+      const updatedProj = {
+        ...project,
+        title: documentTitle,
+        content: JSON.stringify(editor.getJSON()),
+        docHeader,
+        docFooter,
+        wordCount,
+        charCount,
+        updatedAt: Date.now()
+      }
+      setLoadingMessage('Saving project changes...')
+      setIsExporting(true)
+      try {
+        await saveProject(updatedProj)
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+        setIsSaved(true)
+        alert('Document saved successfully!')
+      } catch (e) {
+        console.error("Failed to save project manually:", e)
+        alert('Failed to save document.')
+      } finally {
+        setIsExporting(false)
+      }
+    }
+  }
+
+
   // Load/initialize projects list and active project on mount (with IndexedDB migration support)
   useEffect(() => {
     const initializeStorage = async () => {
@@ -5293,6 +5324,10 @@ export default function Editor() {
             wordCount={wordCount}
             charCount={charCount}
             totalPages={totalPages}
+            isSaved={isSaved}
+            onForceSave={forceSaveActiveProject}
+            docHeader={docHeader}
+            docFooter={docFooter}
             isSimulatingAI={isSimulatingAI}
             simulatedAiResult={simulatedAiResult}
             activeAiModel={activeAiModel}

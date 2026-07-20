@@ -49,6 +49,10 @@ export interface MobileChatViewProps {
   wordCount: number
   charCount: number
   totalPages: number
+  isSaved: boolean
+  onForceSave: () => void
+  docHeader: string
+  docFooter: string
   
   // AI state
   isSimulatingAI: boolean
@@ -105,6 +109,34 @@ const QUICK_ACTIONS = [
   { id: 'export', label: 'Export Document', icon: '📤', color: 'amber', action: 'export' },
 ]
 
+// ─── Helper to parse pages from stringified HTML ───────────────────
+const parsePagesFromHtml = (htmlStr: string): string[] => {
+  if (!htmlStr) return []
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(htmlStr, 'text/html')
+    const pages = doc.querySelectorAll('div[data-type="page"]')
+    if (pages.length > 0) {
+      return Array.from(pages).map(p => p.innerHTML)
+    }
+  } catch (e) {
+    console.warn("DOMParser failed to parse preview pages:", e)
+  }
+
+  // Regex fallback: split by data-type="page" div tags
+  const pageRegex = /<div[^>]*data-type="page"[^>]*>([\s\S]*?)<\/div>/gi
+  const pages: string[] = []
+  let match
+  while ((match = pageRegex.exec(htmlStr)) !== null) {
+    pages.push(match[1])
+  }
+
+  if (pages.length === 0) {
+    return [htmlStr]
+  }
+  return pages
+}
+
 // ─── Helper to generate unique IDs ────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 
@@ -118,6 +150,10 @@ export default function MobileChatView({
   wordCount,
   charCount,
   totalPages,
+  isSaved,
+  onForceSave,
+  docHeader,
+  docFooter,
   isSimulatingAI,
   simulatedAiResult,
   activeAiModel,
@@ -148,8 +184,20 @@ export default function MobileChatView({
   const [showDrawer, setShowDrawer] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showExportSheet, setShowExportSheet] = useState(false)
+  const [previewZoom, setPreviewZoom] = useState(0.4)
+  const previewContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    if (showPreview && previewContainerRef.current) {
+      const containerWidth = previewContainerRef.current.clientWidth
+      const targetWidth = containerWidth - 32
+      const scale = targetWidth / 794
+      setPreviewZoom(Math.max(0.2, Math.min(1.2, scale)))
+    }
+  }, [showPreview])
+
 
   // ─── Auto-scroll chat to bottom ──────────────────────────────
   useEffect(() => {
@@ -386,8 +434,17 @@ export default function MobileChatView({
 
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setShowPreview(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all mr-1.5 active:scale-95 cursor-pointer"
+            title="Preview your document pages"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Preview</span>
+          </button>
+          
+          <button
             onClick={toggleTheme}
-            className="p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
           >
             {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           </button>
@@ -724,38 +781,112 @@ export default function MobileChatView({
       {showPreview && (
         <>
           <div
-            className="fixed inset-0 bg-black/50 dark:bg-black/70 z-40 animate-in fade-in duration-200"
+            className="fixed inset-0 bg-black/60 dark:bg-black/80 z-40 animate-in fade-in duration-200"
             onClick={() => setShowPreview(false)}
           />
-          <div className="fixed inset-x-0 bottom-0 top-12 bg-white dark:bg-zinc-900 rounded-t-3xl shadow-2xl z-50 flex flex-col animate-in slide-in-from-bottom duration-300 safe-area-bottom">
-            <div className="flex items-center justify-between p-4 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+          <div className="fixed inset-x-0 bottom-0 top-12 bg-zinc-100 dark:bg-zinc-950 rounded-t-3xl shadow-2xl z-50 flex flex-col animate-in slide-in-from-bottom duration-300 safe-area-bottom">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 rounded-t-3xl flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-indigo-500" />
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Document Preview</h3>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Print Preview</h3>
               </div>
               <button
                 onClick={() => setShowPreview(false)}
-                className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
+                className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
               >
                 <X className="w-4.5 h-4.5 text-zinc-500" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              <div
-                className="prose prose-sm dark:prose-invert max-w-none text-zinc-700 dark:text-zinc-300 leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_blockquote]:border-l-3 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-zinc-500"
-                dangerouslySetInnerHTML={{ __html: editorHtml || '<p class="text-zinc-400 italic">No content yet. Use the chat to generate your document.</p>' }}
+
+            {/* Interactive Zoom Control Slider */}
+            <div className="flex items-center gap-3 bg-white dark:bg-zinc-900 px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold select-none flex-shrink-0">
+              <span className="text-zinc-500 dark:text-zinc-400 w-16">Zoom: {Math.round(previewZoom * 100)}%</span>
+              <input
+                type="range"
+                min="0.3"
+                max="1.0"
+                step="0.05"
+                value={previewZoom}
+                onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
+                className="flex-1 accent-indigo-650 h-1 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer"
               />
             </div>
-            <div className="flex gap-2 p-4 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+
+            {/* Scrollable Pages Stack Canvas */}
+            <div 
+              ref={previewContainerRef}
+              className="flex-1 overflow-y-auto p-4 flex flex-col items-center gap-4 bg-zinc-100 dark:bg-zinc-950"
+            >
+              {parsePagesFromHtml(editorHtml).length === 0 || !editorHtml ? (
+                <div className="text-center py-20">
+                  <FileText className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mx-auto mb-2" />
+                  <p className="text-xs text-zinc-550 dark:text-zinc-400 italic">No content yet. Use the chat to generate document pages.</p>
+                </div>
+              ) : (
+                parsePagesFromHtml(editorHtml).map((pageHtml, index, allPages) => (
+                  <div
+                    key={index}
+                    style={{
+                      width: `${794 * previewZoom}px`,
+                      height: `${1123 * previewZoom}px`,
+                      overflow: 'hidden'
+                    }}
+                    className="mb-4 mx-auto relative flex-shrink-0 bg-white dark:bg-zinc-900 shadow-md border border-zinc-200 dark:border-zinc-800 rounded-sm"
+                  >
+                    <div
+                      className="relative bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 overflow-hidden box-border"
+                      style={{
+                        width: '794px',
+                        height: '1123px',
+                        transform: `scale(${previewZoom})`,
+                        transformOrigin: 'top left',
+                      }}
+                    >
+                      {/* Page Header */}
+                      <div className="absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-150 dark:border-zinc-850 pb-2 text-xs text-zinc-400 dark:text-zinc-500 font-sans pointer-events-none select-none">
+                        <span className="truncate max-w-[400px]">{docHeader}</span>
+                      </div>
+
+                      {/* Page Content Area (rendered to look like actual print sheets) */}
+                      <div
+                        className="absolute top-[96px] left-0 right-0 h-[931px] px-[72px] overflow-hidden text-left font-serif prose prose-sm max-w-none text-zinc-850 dark:text-zinc-200 [&_p]:my-1.5 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-3 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-zinc-500 [&_blockquote]:my-2"
+                        dangerouslySetInnerHTML={{ __html: pageHtml }}
+                      />
+
+                      {/* Page Footer */}
+                      <div className="absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-150 dark:border-zinc-850 pt-2 text-xs text-zinc-400 dark:text-zinc-500 font-sans pointer-events-none select-none">
+                        <span className="truncate max-w-[450px]">{docFooter}</span>
+                        <span>Page {index + 1} of {allPages.length}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Modal Bottom Footer Actions */}
+            <div className="flex gap-2 p-4 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+              <button
+                onClick={onForceSave}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-semibold active:scale-[0.97] transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                  isSaved
+                    ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border-transparent'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{isSaved ? 'Draft Saved' : 'Save Changes'}</span>
+              </button>
               <button
                 onClick={() => { exportToDocx('full'); setShowPreview(false) }}
-                className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform cursor-pointer"
               >
                 Export .docx
               </button>
               <button
                 onClick={() => { exportToPdfPrint('full'); setShowPreview(false) }}
-                className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-750 text-white rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform cursor-pointer"
               >
                 Export PDF
               </button>
