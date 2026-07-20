@@ -1207,6 +1207,14 @@ export default function Editor() {
   const [aiEngine, setAiEngine] = useState<'gemini' | 'grok' | 'groq'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
   const [targetPageCount, setTargetPageCount] = useState<'3-5' | '10-12' | '20-25'>('10-12')
+  const [generatedChapterIndices, setGeneratedChapterIndices] = useState<number[]>([])
+  const [totalChapterCount, setTotalChapterCount] = useState(0)
+  const [currentGeneratingChapter, setCurrentGeneratingChapter] = useState(0)
+  const [isHumanizingDoc, setIsHumanizingDoc] = useState(false)
+  const [humanizeProgress, setHumanizeProgress] = useState('')
+  const [isExpandingContent, setIsExpandingContent] = useState(false)
+  const [expandProgress, setExpandProgress] = useState('')
+
   
   const [studentName, setStudentName] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -5109,122 +5117,107 @@ export default function Editor() {
     }
   }
 
-  const generateFullDocumentBlueprint = async () => {
+  const generateFullDocumentBlueprint = async (startChapterIndex = 0) => {
     const finalTitle = documentTitle.trim() || 'Untitled Project'
-    setIsSimulatingAI(true)
-    setSimulatedAiResult('')
-    setActiveAiModel('')
-    
+    const isPro = targetPageCount === '20-25'
+    const isMid = targetPageCount === '10-12'
+
     let contextText = ''
     if (projectSources.length > 0) {
-      contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ": " + s.content.slice(0, 1000)).join('\n\n')
+      contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ': ' + s.content.slice(0, 1200)).join('\n\n')
     }
 
-    // Generate structural guide based on doc type
-    let outlineStructurePrompt = ''
+    // Build chapter list from doc type
+    type Chapter = { title: string; prompt: string }
+    let chapters: Chapter[] = []
+
     if (wizardDocType === 'Seminar') {
-      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and subheadings:
-      Chapter 1.
-      1.1. Introduction 
-      1.2. Problem Definition and Motivation 
-      1.4. Advantages and Limitations
-
-      Chapter 2
-      Literature Review/Related work 
-      2.1. Summary of exit works
-      2.2. Overview of previous research 
-      Research Gaps.
-
-      Chapter 3
-      Methodology/Working Principle 
-      3.1. Core Concepts: Theoretical Background 
-      3.2. Working Principle/Process Flow 
-      3.3. Techniques/Tool Used
-
-      Chapter 4
-      4.1. Summary of key takeaways and main findings 
-      4.2. Future Scope.`
+      chapters = [
+        {
+          title: 'Chapter 1: Introduction',
+          prompt: `Write a deeply detailed Chapter 1 for a Seminar report on "${finalTitle}". Cover: 1.1 Introduction (background, significance, scope), 1.2 Problem Definition and Motivation (the specific problem, why it matters now), 1.4 Advantages and Limitations. Each subsection must be at least 400 words. Use <h2>, <h3>, <p>, <ul>, <li>, <strong> HTML tags. Target 2,200+ words total for this chapter.`
+        },
+        {
+          title: 'Chapter 2: Literature Review',
+          prompt: `Write a comprehensive Chapter 2 Literature Review for a Seminar on "${finalTitle}". Cover: 2.1 Summary of Existing Works (cite at least 5 real researchers, e.g. Author (Year)), 2.2 Overview of Previous Research, and identify clear Research Gaps. Each subsection must be 400+ words. Use <h2>, <h3>, <p>, <ul>, <li> HTML tags. Target 2,200+ words total.`
+        },
+        {
+          title: 'Chapter 3: Methodology',
+          prompt: `Write a thorough Chapter 3 Methodology/Working Principle for a Seminar on "${finalTitle}". Cover: 3.1 Core Concepts & Theoretical Background, 3.2 Working Principle/Process Flow, 3.3 Techniques and Tools Used. Each subsection must be 400+ words with specific technical depth. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
+        },
+        {
+          title: 'Chapter 4: Conclusion',
+          prompt: `Write a detailed Chapter 4 for a Seminar report on "${finalTitle}". Cover: 4.1 Summary of Key Takeaways and Main Findings (comprehensive, detailed analysis), 4.2 Future Scope (specific, actionable future directions). Each subsection must be 350+ words. Use <h2>, <h3>, <p> HTML tags. Target 1,500+ words total.`
+        }
+      ]
     } else if (wizardDocType === 'Proposal') {
-      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Proposal report following these chapters and subheadings:
-      Chapter 1
-      Introduction
-      1.1. Background of Study
-      1.2. Problem Statement
-      1.3. Aim and Objectives
-      1.4. Significance of Study
-      1.5. Scope and Limitation
-
-      Chapter 2
-      Literature Review
-      2.1. Conceptual Review
-      2.2. Theoretical Review
-      2.3. Empirical Review
-
-      Chapter 3
-      Research Methodology
-      3.1. Research Design
-      3.2. Population of the Study
-      3.3. Method of Data Collection
-      3.4. Method of Data Analysis`
+      chapters = [
+        {
+          title: 'Chapter 1: Introduction',
+          prompt: `Write a comprehensive Chapter 1 for a Research Proposal on "${finalTitle}". Cover: 1.1 Background of Study, 1.2 Problem Statement, 1.3 Aim and Objectives, 1.4 Significance of Study, 1.5 Scope and Limitation. Each subsection 350+ words with academic depth. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
+        },
+        {
+          title: 'Chapter 2: Literature Review',
+          prompt: `Write a detailed Chapter 2 Literature Review for a Research Proposal on "${finalTitle}". Cover: 2.1 Conceptual Review (definitions, frameworks), 2.2 Theoretical Review (underpinning theories with scholars cited as Author (Year)), 2.3 Empirical Review (real studies and their findings). Each subsection 400+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,400+ words.`
+        },
+        {
+          title: 'Chapter 3: Research Methodology',
+          prompt: `Write a rigorous Chapter 3 Research Methodology for a Proposal on "${finalTitle}". Cover: 3.1 Research Design, 3.2 Population of the Study, 3.3 Method of Data Collection (instruments, justification), 3.4 Method of Data Analysis. Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,000+ words total.`
+        }
+      ]
     } else if (wizardDocType === 'Project') {
-      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Project report following these chapters and subheadings:
-      Chapter 1
-      Introduction
-      1.1. Background of the Study
-      1.2. Statement of the Problem
-      1.3. Objectives of the Study
-      1.4. Research Questions
-      1.5. Significance of the Study
-
-      Chapter 2
-      Literature Review
-      2.1. Conceptual Framework
-      2.2. Theoretical Framework
-      2.3. Empirical Framework
-
-      Chapter 3
-      System Analysis and Design / Methodology
-      3.1. Description of the Existing System
-      3.2. Method of Data Gathering
-      3.3. Analysis of the Proposed System
-      3.4. Design of the Proposed System
-
-      Chapter 4
-      Implementation and Results
-      4.1. System Requirements
-      4.2. Installation and Configurations
-      4.3. Interface Mockups and Explanations
-      4.4. Test Results and Evaluation
-
-      Chapter 5
-      Conclusion and Recommendations
-      5.1. Summary of Findings
-      5.2. Practical Recommendations
-      5.3. Recommendations for Future Research`
-    } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
-      outlineStructurePrompt = `The document MUST follow this custom chapter outline exactly:\n${customChapterOutline}`
+      chapters = [
+        {
+          title: 'Chapter 1: Introduction',
+          prompt: `Write a comprehensive Chapter 1 Introduction for a Graduation Thesis on "${finalTitle}". Cover: 1.1 Background of the Study, 1.2 Statement of the Problem, 1.3 Objectives of the Study, 1.4 Research Questions, 1.5 Significance of the Study. Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
+        },
+        {
+          title: 'Chapter 2: Literature Review',
+          prompt: `Write a deeply academic Chapter 2 Literature Review for a thesis on "${finalTitle}". Cover: 2.1 Conceptual Framework, 2.2 Theoretical Framework (cite real theories and scholars as Author (Year)), 2.3 Empirical Framework (synthesise real studies). Each subsection 450+ words. Use <h2>, <h3>, <p>, <blockquote> HTML. Target 2,600+ words.`
+        },
+        {
+          title: 'Chapter 3: System Analysis & Methodology',
+          prompt: `Write a detailed Chapter 3 System Analysis and Design/Methodology for a thesis on "${finalTitle}". Cover: 3.1 Description of Existing System (flaws, gaps), 3.2 Method of Data Gathering (surveys, interviews, observation — justified), 3.3 Analysis of Proposed System, 3.4 Design of Proposed System (architecture, diagrams described in text). Each 350+ words. Target 2,200+ words.`
+        },
+        {
+          title: 'Chapter 4: Implementation & Results',
+          prompt: `Write a thorough Chapter 4 Implementation and Results for a thesis on "${finalTitle}". Cover: 4.1 System Requirements (hardware, software), 4.2 Installation and Configuration, 4.3 Interface Mockups and Explanations (describe each interface in detail), 4.4 Test Results and Evaluation (test cases, outcomes, performance). Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,200+ words.`
+        },
+        {
+          title: 'Chapter 5: Conclusion & Recommendations',
+          prompt: `Write a complete Chapter 5 Conclusion and Recommendations for a thesis on "${finalTitle}". Cover: 5.1 Summary of Findings (comprehensive, tied back to objectives), 5.2 Practical Recommendations (actionable, specific), 5.3 Recommendations for Future Research (3-5 specific directions). Each 300+ words. Use <h2>, <h3>, <p> HTML. Target 1,800+ words.`
+        }
+      ]
+    } else {
+      // Custom outline — single shot but with strong length directive
+      chapters = [{
+        title: 'Full Document',
+        prompt: `Generate a complete, fully realized academic document on "${finalTitle}" following this custom outline:\n${customChapterOutline}\n\nFor EVERY section, write minimum 400 words of rich, analytical content. Do NOT use placeholders. Target ${isPro ? '8,000+' : isMid ? '4,500+' : '1,800+'} words total. Use <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong> HTML.`
+      }]
     }
 
-    try {
-      setLoadingMessage('Generating Full Document Blueprint...')
-      setIsExporting(true)
+    // Determine which chapters to generate this run
+    const chaptersToGenerate = isPro
+      ? chapters.slice(startChapterIndex)           // Pro: all remaining chapters
+      : isMid
+        ? chapters.slice(startChapterIndex, startChapterIndex + 2) // Mid: 2 chapters at a time
+        : chapters.slice(startChapterIndex, startChapterIndex + 1) // Brief: 1 chapter
+
+    const isFirstRun = startChapterIndex === 0
+
+    setTotalChapterCount(chapters.length)
+    setIsSimulatingAI(true)
+    setIsExporting(true)
+
+    // Shared streaming helper: fetch one chapter and return its HTML text
+    const fetchChapterHtml = async (chapterPrompt: string): Promise<string> => {
+      const fullPrompt = `${chapterPrompt}\n\nKeep tone highly ${wizardAcademicTone || 'scholarly'}, suitable for a ${wizardAcademicLevel || 'Undergraduate'} level ${wizardDocType || 'Custom'} document. Output ONLY HTML content — no markdown, no backticks, no code blocks.`
 
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
-          
-          ${outlineStructurePrompt}
-          
-          For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines.
-          Target document length: ${targetPageCount} pages. Write at least ${
-            targetPageCount === '3-5' ? '1500' : targetPageCount === '10-12' ? '4500' : '8500'
-          } words of rich content.
-          Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use exactly ${
-            targetPageCount === '3-5' ? '4' : targetPageCount === '10-12' ? '11' : '22'
-          } page separators (<div data-type="page">...</div>) to logically divide the generated content across pages.
-          Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.`,
+          prompt: fullPrompt,
           context: contextText,
           academicLevel: wizardAcademicLevel || 'Undergraduate',
           academicTone: wizardAcademicTone || 'Analytical',
@@ -5232,71 +5225,344 @@ export default function Editor() {
           modelTarget: aiEngine
         })
       })
-
-      if (!response.ok) throw new Error('API request failed')
+      if (!response.ok) throw new Error(`API error: ${response.status}`)
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
-      let accumulatedText = ''
-
+      let accum = ''
       if (reader) {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
           const chunk = decoder.decode(value, { stream: true })
-          const lines = chunk.split('\n')
-          for (const line of lines) {
+          for (const line of chunk.split('\n')) {
             if (line.startsWith('data: ')) {
               const content = line.slice(6).trim()
               if (content === '[DONE]') break
               try {
                 const parsed = JSON.parse(content)
-                if (parsed.text) {
-                  accumulatedText += parsed.text
-                }
-              } catch (e) {
-                // Ignore meta
-              }
+                if (parsed.text) accum += parsed.text
+              } catch (_) {}
             }
           }
         }
       }
+      return accum
+    }
 
-      if (editor && accumulatedText.trim()) {
-        const formattedHtml = ensurePaginatedHtml(accumulatedText)
-        editor.commands.setContent(formattedHtml)
-        setIsSaved(false)
-        applyOnboardingStyles(editor)
-        
-        // Save snapshot immediately
-        if (activeProjectId) {
-          const contentJSON = editor.getJSON()
-          const project = projects.find(p => p.id === activeProjectId)
-          if (project) {
-            const updatedProj = {
-              ...project,
-              content: JSON.stringify(contentJSON),
-              updatedAt: Date.now(),
-              wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
-              charCount: editor.getText().length
-            }
-            setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
-            saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
-            setIsSaved(true)
+    try {
+      // If first run, clear editor and start fresh
+      if (isFirstRun && editor) {
+        editor.commands.setContent(ensurePaginatedHtml(''))
+      }
+
+      const newGeneratedIndices: number[] = [...generatedChapterIndices]
+
+      for (let i = 0; i < chaptersToGenerate.length; i++) {
+        const chapterIdx = startChapterIndex + i
+        const chapter = chaptersToGenerate[i]
+        setCurrentGeneratingChapter(chapterIdx + 1)
+        setLoadingMessage(`Generating ${chapter.title} (${chapterIdx + 1} of ${chapters.length})...`)
+
+        const chapterHtml = await fetchChapterHtml(chapter.prompt)
+
+        if (editor && chapterHtml.trim()) {
+          // Append chapter as new page content
+          const wrappedHtml = `<div data-type="page"><h1>${chapter.title}</h1>${chapterHtml}</div>`
+          if (isFirstRun && i === 0) {
+            editor.commands.setContent(ensurePaginatedHtml(chapterHtml))
+          } else {
+            // Append after existing content
+            editor.commands.focus('end')
+            editor.commands.insertContent(wrappedHtml)
           }
+          newGeneratedIndices.push(chapterIdx)
+          setGeneratedChapterIndices([...newGeneratedIndices])
+        }
+      }
+
+      setGeneratedChapterIndices(newGeneratedIndices)
+
+      // Auto-save snapshot
+      if (activeProjectId && editor) {
+        const contentJSON = editor.getJSON()
+        const project = projects.find(p => p.id === activeProjectId)
+        if (project) {
+          const updatedProj = {
+            ...project,
+            content: JSON.stringify(contentJSON),
+            updatedAt: Date.now(),
+            wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
+            charCount: editor.getText().length
+          }
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+          saveProject(updatedProj).catch(e => console.error('Save failed', e))
+          setIsSaved(true)
         }
       }
     } catch (err) {
       console.error(err)
-      alert("Failed to generate document blueprint: " + (err as any).message)
+      alert('Chapter generation failed: ' + (err as any).message)
     } finally {
       setIsSimulatingAI(false)
       setIsExporting(false)
+      setCurrentGeneratingChapter(0)
+      setLoadingMessage('Processing Document...')
     }
   }
 
-  const activeProject = projects.find(p => p.id === activeProjectId)
+  // Humanize the entire document page-by-page AND chapter-by-chapter
+  const handleHumanizeDocument = async () => {
+    if (!editor) return
+    if (!window.confirm('This will rewrite your entire document to sound 100% human-written and bypass AI detectors. Continue?')) return
 
+    setIsHumanizingDoc(true)
+    setIsExporting(true)
+
+    const pages: { index: number; html: string }[] = []
+    editor.state.doc.forEach((node, _offset, index) => {
+      if (node.type.name === 'page') {
+        const html = node.textContent
+        if (html.trim().length > 50) pages.push({ index, html })
+      }
+    })
+
+    const total = pages.length
+    let processedCount = 0
+
+    try {
+      for (const page of pages) {
+        processedCount++
+        setHumanizeProgress(`Humanizing page ${processedCount} of ${total}...`)
+        setLoadingMessage(`Humanizing page ${processedCount} of ${total}...`)
+
+        const prompt =
+          `You are a professional academic copyeditor. Rewrite the text below to be 100% human-written and undetectable by Turnitin AI, GPTZero, and similar tools.\n\n` +
+          `Rules:\n` +
+          `- Aggressively mix short (5-8 word) and long (30-40 word) sentences\n` +
+          `- Eliminate AI clichés: "furthermore", "moreover", "consequently", "delve", "tapestry", "testament to"\n` +
+          `- Never start consecutive sentences with the same grammatical structure\n` +
+          `- Preserve all citations (APA style), factual claims, and headings\n` +
+          `- Return ONLY rewritten HTML using <h2>, <h3>, <p>, <ul>, <li>, <strong> tags\n\n` +
+          `Text to humanize:\n${page.html}`
+
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            context: '',
+            academicLevel: wizardAcademicLevel || 'Undergraduate',
+            academicTone: wizardAcademicTone || 'Analytical',
+            documentType: wizardDocType || 'Custom',
+            modelTarget: aiEngine
+          })
+        })
+        if (!response.ok) continue
+
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+        let rewritten = ''
+        if (reader) {
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+              if (line.startsWith('data: ')) {
+                const d = line.slice(6).trim()
+                if (d === '[DONE]') break
+                try { const p = JSON.parse(d); if (p.text) rewritten += p.text } catch (_) {}
+              }
+            }
+          }
+        }
+
+        if (rewritten.trim()) {
+          // Replace the specific page node content
+          let pagePos = 0
+          let pageCount = 0
+          editor.state.doc.forEach((node, offset) => {
+            if (node.type.name === 'page') {
+              if (pageCount === page.index) pagePos = offset
+              pageCount++
+            }
+          })
+          if (pagePos >= 0) {
+            const pageNode = editor.state.doc.nodeAt(pagePos)
+            if (pageNode) {
+              editor.chain()
+                .setNodeSelection(pagePos)
+                .insertContent(`<div data-type="page">${rewritten}</div>`)
+                .run()
+            }
+          }
+        }
+      }
+
+      // Auto-save
+      if (activeProjectId && editor) {
+        const project = projects.find(p => p.id === activeProjectId)
+        if (project) {
+          const updatedProj = {
+            ...project,
+            content: JSON.stringify(editor.getJSON()),
+            updatedAt: Date.now(),
+            wordCount: editor.getText().trim().split(/\s+/).length,
+            charCount: editor.getText().length
+          }
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+          saveProject(updatedProj).catch(console.error)
+          setIsSaved(true)
+        }
+      }
+
+      alert(`Humanization complete! All ${total} pages have been rewritten to bypass AI detectors.`)
+    } catch (err) {
+      console.error(err)
+      alert('Humanization failed: ' + (err as any).message)
+    } finally {
+      setIsHumanizingDoc(false)
+      setIsExporting(false)
+      setHumanizeProgress('')
+      setLoadingMessage('Processing Document...')
+    }
+  }
+
+  // Expand thin sections (under ~200 words) in the document
+  const handleExpandContent = async () => {
+    if (!editor) return
+
+    type ThinSection = { heading: string; content: string; pos: number; wordCount: number }
+    const thinSections: ThinSection[] = []
+
+    // Walk document and collect headings + their following paragraphs
+    let currentHeading = ''
+    let currentContent = ''
+    let currentPos = 0
+    let currentWords = 0
+
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'heading') {
+        // Flush previous section if it's thin
+        if (currentHeading && currentWords < 200 && currentWords > 10) {
+          thinSections.push({ heading: currentHeading, content: currentContent, pos: currentPos, wordCount: currentWords })
+        }
+        currentHeading = node.textContent
+        currentContent = ''
+        currentPos = pos
+        currentWords = 0
+      } else if (node.isTextblock && currentHeading) {
+        const text = node.textContent.trim()
+        if (text) {
+          currentContent += ' ' + text
+          currentWords += text.split(/\s+/).length
+        }
+      }
+    })
+    // Flush last section
+    if (currentHeading && currentWords < 200 && currentWords > 10) {
+      thinSections.push({ heading: currentHeading, content: currentContent, pos: currentPos, wordCount: currentWords })
+    }
+
+    if (thinSections.length === 0) {
+      alert('No thin sections detected! Your document sections all appear well-developed (200+ words each).')
+      return
+    }
+
+    if (!window.confirm(`Found ${thinSections.length} short sections to expand. This will add richer content to each one. Continue?`)) return
+
+    setIsExpandingContent(true)
+    setIsExporting(true)
+    let processed = 0
+
+    try {
+      for (const section of thinSections) {
+        processed++
+        setExpandProgress(`Expanding "${section.heading}" (${processed} of ${thinSections.length})...`)
+        setLoadingMessage(`Expanding "${section.heading}" (${processed} of ${thinSections.length})...`)
+
+        const prompt =
+          `The following academic section titled "${section.heading}" is too short (only ${section.wordCount} words). ` +
+          `Expand it significantly with deeper analysis, more specific examples, relevant real-world applications, and academic citations where appropriate. ` +
+          `Target at least 500 words for this section. Keep the same heading and topic focus.\n\n` +
+          `Current content:\n${section.content}\n\n` +
+          `Return the FULL expanded section as HTML using <h3>, <p>, <ul>, <li>, <strong> tags only. Do not repeat the main heading.`
+
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            context: `Document topic: ${documentTitle}`,
+            academicLevel: wizardAcademicLevel || 'Undergraduate',
+            academicTone: wizardAcademicTone || 'Analytical',
+            documentType: wizardDocType || 'Custom',
+            modelTarget: aiEngine
+          })
+        })
+        if (!response.ok) continue
+
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+        let expanded = ''
+        if (reader) {
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            for (const line of decoder.decode(value, { stream: true }).split('\n')) {
+              if (line.startsWith('data: ')) {
+                const d = line.slice(6).trim()
+                if (d === '[DONE]') break
+                try { const p = JSON.parse(d); if (p.text) expanded += p.text } catch (_) {}
+              }
+            }
+          }
+        }
+
+        if (expanded.trim()) {
+          // Find and replace the section content using text search
+          const range = findTextRange(editor, section.heading)
+          if (range) {
+            // Insert expanded content after the heading
+            editor.chain()
+              .setTextSelection({ from: range.to, to: range.to })
+              .insertContent(expanded)
+              .run()
+          }
+        }
+      }
+
+      // Auto-save
+      if (activeProjectId && editor) {
+        const project = projects.find(p => p.id === activeProjectId)
+        if (project) {
+          const updatedProj = {
+            ...project,
+            content: JSON.stringify(editor.getJSON()),
+            updatedAt: Date.now(),
+            wordCount: editor.getText().trim().split(/\s+/).length,
+            charCount: editor.getText().length
+          }
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+          saveProject(updatedProj).catch(console.error)
+          setIsSaved(true)
+        }
+      }
+
+      alert(`Expansion complete! ${thinSections.length} sections have been deepened.`)
+    } catch (err) {
+      console.error(err)
+      alert('Content expansion failed: ' + (err as any).message)
+    } finally {
+      setIsExpandingContent(false)
+      setIsExporting(false)
+      setExpandProgress('')
+      setLoadingMessage('Processing Document...')
+    }
+  }
+
+
+  const activeProject = projects.find(p => p.id === activeProjectId)
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
       {isExporting && (
@@ -5310,6 +5576,7 @@ export default function Editor() {
           </div>
         </div>
       )}
+
       
       {isMobile ? (
         showDashboard ? (
@@ -6331,6 +6598,32 @@ export default function Editor() {
                         <span>Humanize Selection (Bypass AI Detectors)</span>
                       </span>
                       <ChevronRight className="w-3 h-3 text-emerald-550 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+
+                    {/* Humanize Entire Document */}
+                    <button
+                      disabled={isHumanizingDoc}
+                      onClick={handleHumanizeDocument}
+                      className="w-full text-left p-2.5 rounded-lg border border-emerald-300 dark:border-emerald-900 bg-emerald-50/30 hover:bg-emerald-100/50 dark:bg-emerald-950/15 dark:hover:bg-emerald-950/30 text-xs font-semibold text-emerald-900 dark:text-emerald-300 transition-all group flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{isHumanizingDoc ? humanizeProgress || 'Humanizing...' : 'Humanize Entire Document'}</span>
+                      </span>
+                      <ChevronRight className="w-3 h-3 text-emerald-600 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+
+                    {/* Expand Short Sections */}
+                    <button
+                      disabled={isExpandingContent}
+                      onClick={handleExpandContent}
+                      className="w-full text-left p-2.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/20 hover:bg-blue-50/40 dark:bg-blue-950/10 dark:hover:bg-blue-950/20 text-xs font-semibold text-blue-800 dark:text-blue-300 transition-all group flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-500" />
+                        <span>{isExpandingContent ? expandProgress || 'Expanding...' : 'Expand Short Sections'}</span>
+                      </span>
+                      <ChevronRight className="w-3 h-3 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
                     </button>
 
                     <button
@@ -7661,15 +7954,29 @@ export default function Editor() {
               >
                 Close
               </button>
+              {targetPageCount !== '20-25' && (
+                <button
+                  onClick={() => {
+                    setShowGeneratorPopup(false)
+                    setGeneratedChapterIndices([])
+                    generateFullDocumentBlueprint(0)
+                  }}
+                  className="px-5 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Generate Preview ({targetPageCount === '3-5' ? '1 Chapter' : '2 Chapters'})</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setShowGeneratorPopup(false)
-                  generateFullDocumentBlueprint()
+                  setGeneratedChapterIndices([])
+                  generateFullDocumentBlueprint(0)
                 }}
                 className="px-5 py-2 bg-indigo-650 hover:bg-indigo-750 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer flex items-center gap-1.5"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                <span>Generate Full Document</span>
+                <span>{targetPageCount === '20-25' ? 'Generate Full Document (All Chapters)' : 'Generate All Chapters (Pro)'}</span>
               </button>
             </div>
           </div>
