@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Map snake_case database columns to camelCase for client compatibility
-      const projects = (data || []).map(p => ({
+      const projects = (data || []).map((p: any) => ({
         id: p.id,
         title: p.title,
         content: p.content,

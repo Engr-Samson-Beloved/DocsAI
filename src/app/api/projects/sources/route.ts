@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Map database snake_case fields back to camelCase for client compatibility
-      const sources = (data || []).map(s => ({
+      const sources = (data || []).map((s: any) => ({
         id: Number(s.id),
         projectId: s.project_id,
         name: s.name,

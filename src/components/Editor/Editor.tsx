@@ -4898,6 +4898,9 @@ export default function Editor() {
           onDeleteProject={deleteProject}
           onRenameProject={renameProjectPrompt}
           onLoadProject={loadProject}
+          userEmail={null}
+          onSignOut={() => {}}
+          onOpenAuth={() => {}}
         />
       ) : (
         <>
