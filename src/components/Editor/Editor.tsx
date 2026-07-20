@@ -5915,6 +5915,28 @@ export default function Editor() {
         </div>
       </header>
 
+      {/* Generate Remaining Chapters Banner — shown when partial generation was done */}
+      {totalChapterCount > 0 && generatedChapterIndices.length < totalChapterCount && !isExporting && (
+        <div className="flex items-center justify-between px-6 py-2.5 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40 text-xs animate-in fade-in slide-in-from-top-1 duration-300">
+          <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            <span className="font-semibold">
+              Chapters {generatedChapterIndices.map(i => i + 1).join(', ')} generated.{' '}
+              {totalChapterCount - generatedChapterIndices.length} chapter{totalChapterCount - generatedChapterIndices.length !== 1 ? 's' : ''} remaining.
+            </span>
+            <span className="text-amber-600 dark:text-amber-400">Upgrade to Pro or continue generating remaining chapters.</span>
+          </div>
+          <button
+            onClick={() => generateFullDocumentBlueprint(generatedChapterIndices.length)}
+            disabled={isSimulatingAI}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            Generate Remaining Chapters
+          </button>
+        </div>
+      )}
+
       {/* Editor Main Canvas & Layout */}
       <div className="flex flex-1 overflow-hidden relative">
         {/* Left Sidebar (Document Outline & Page Navigator) */}
