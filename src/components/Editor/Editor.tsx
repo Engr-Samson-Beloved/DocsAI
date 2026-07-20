@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
-import { TextSelection } from '@tiptap/pm/state'
 import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TextAlign from '@tiptap/extension-text-align'
@@ -11,12 +10,6 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
-import AuthModal from '../Auth/AuthModal'
-import ReferenceFinder from './ReferenceFinder'
-import { useIsMobile } from '../../utils/useIsMobile'
-import MobileChatView from '../Mobile/MobileChatView'
-import MobileDashboard from '../Mobile/MobileDashboard'
-
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -25,8 +18,7 @@ import {
   saveProject,
   getAllProjects,
   deleteProject as dbDeleteProject,
-  saveProjectsBatch,
-  clearAllLocalData
+  saveProjectsBatch
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import {
@@ -51,7 +43,6 @@ import {
   Clock,
   FileText,
   ChevronRight,
-  ChevronDown,
   ChevronLeft,
   Minimize2,
   Maximize2,
@@ -65,8 +56,7 @@ import {
   Calendar,
   Edit3,
   Folder,
-  Sparkles,
-  BookOpen
+  Sparkles
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -154,8 +144,8 @@ const SEMINAR_TEMPLATE = `
 
 
 const PROPOSAL_TEMPLATE = `
-<h1>Research Proposal: [Insert Topic Here]</h1>
 <div data-type="page">
+  <h1>Research Proposal: [Insert Topic Here]</h1>
   <h2>Chapter 1: Introduction</h2>
   <h3>1.1. Background of the Study</h3>
   <p>Provide the foundational background details of your research here...</p>
@@ -191,8 +181,8 @@ const PROPOSAL_TEMPLATE = `
 `
 
 const PROJECT_TEMPLATE = `
-<h1>Thesis Project: [Insert Topic Here]</h1>
 <div data-type="page">
+  <h1>Thesis Project: [Insert Topic Here]</h1>
   <h2>Chapter 1: Introduction</h2>
   <h3>1.1. Study Background</h3>
   <p>Detail the historical and academic background of your thesis topic here...</p>
@@ -524,38 +514,96 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
 
 // Helper to pre-wrap raw HTML in a page block tag if not already paginated.
 // This ensures that all imported or reset content is correctly parsed into a page node.
-const ensurePaginatedHtml = (html: string): string => {
-  let cleaned = html.trim()
-  if (!cleaned) return '<div data-type="page"><p></p></div>'
-
-  if (cleaned.includes('data-type="page"')) {
-    try {
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(cleaned, 'text/html')
-      const pages = doc.querySelectorAll('div[data-type="page"]')
-      let removedAny = false
-      pages.forEach(page => {
-        const text = page.textContent?.trim() || ''
-        const hasGraphicsOrTables = page.querySelector('img, table, iframe, svg, canvas') !== null
-        if (text.length === 0 && !hasGraphicsOrTables) {
-          page.remove()
-          removedAny = true
-        }
-      })
-      if (removedAny) {
-        cleaned = doc.body.innerHTML.trim()
-      }
-    } catch (e) {
-      console.warn("DOMParser failed to clean empty pages:", e)
+// If a title is provided and no h1 is present, a title heading will be added to the first page.
+const ensurePaginatedHtml = (html: string, title?: string): string => {
+  const trimmed = html.trim()
+  if (!trimmed) {
+    if (title) {
+      return `<div data-type="page"><h1>${title}</h1><p></p></div>`
     }
+    return '<div data-type="page"><p></p></div>'
   }
 
-  if (!cleaned) return '<div data-type="page"><p></p></div>'
-
-  if (cleaned.includes('data-type="page"') || cleaned.includes('class="page-sheet"')) {
-    return cleaned
+  if (typeof window === 'undefined') {
+    if (trimmed.includes('data-type="page"') || trimmed.includes('class="page-sheet"')) {
+      return html
+    }
+    return `<div data-type="page">${html}</div>`
   }
-  return `<div data-type="page">${cleaned}</div>`
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(trimmed, 'text/html')
+    const body = doc.body
+
+    // If title is provided, ensure there is a h1 tag in the document
+    if (title) {
+      const hasH1 = body.querySelector('h1')
+      if (!hasH1) {
+        const h1 = doc.createElement('h1')
+        h1.textContent = title
+        body.insertBefore(h1, body.firstChild)
+      }
+    }
+
+    // Check if there are any page nodes
+    const pageNodes = Array.from(body.querySelectorAll('div[data-type="page"], div.page-sheet'))
+
+    if (pageNodes.length === 0) {
+      // No page nodes at all: wrap everything in a single page node
+      return `<div data-type="page">${body.innerHTML}</div>`
+    }
+
+    // There are page nodes. We must ensure there is no sibling content outside them.
+    // Move any sibling content before the first page node inside it
+    const firstPage = pageNodes[0] as HTMLElement
+    const leadingNodes: any[] = []
+    let current = body.firstChild
+    while (current && current !== firstPage) {
+      leadingNodes.push(current)
+      current = current.nextSibling
+    }
+
+    for (let i = leadingNodes.length - 1; i >= 0; i--) {
+      const node = leadingNodes[i]
+      if (node.nodeType === 3 && !node.textContent?.trim()) {
+        continue
+      }
+      firstPage.insertBefore(node as any, firstPage.firstChild)
+    }
+
+    // Move any other sibling content outside page nodes inside the page nodes
+    const remainingChildren = Array.from(body.childNodes)
+    remainingChildren.forEach(node => {
+      if (node === firstPage) return
+      if (pageNodes.includes(node as any)) return
+
+      if (node.nodeType === 3 && !node.textContent?.trim()) {
+        body.removeChild(node)
+      } else {
+        let prevPage: HTMLElement | null = null
+        let sibling = node.previousSibling
+        while (sibling) {
+          if (pageNodes.includes(sibling as any)) {
+            prevPage = sibling as HTMLElement
+            break
+          }
+          sibling = sibling.previousSibling
+        }
+
+        const targetPage = prevPage || firstPage
+        targetPage.appendChild(node)
+      }
+    })
+
+    return body.innerHTML
+  } catch (err) {
+    console.error("Error in ensurePaginatedHtml:", err)
+    if (trimmed.includes('data-type="page"') || trimmed.includes('class="page-sheet"')) {
+      return html
+    }
+    return `<div data-type="page">${html}</div>`
+  }
 }
 
 // Helper to pre-process loaded JSON content to wrap flat block nodes into a page node.
@@ -600,9 +648,10 @@ class PageNodeView {
 
     // Header container
     const headerEl = document.createElement('div')
-    headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-transparent pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-100 dark:border-zinc-800 pb-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     headerEl.innerHTML = `
       <span class="header-text truncate max-w-[400px]"></span>
+      <span class="text-[10px] tracking-wider uppercase font-semibold text-zinc-300 dark:text-zinc-700">WordPI</span>
     `
     this.dom.appendChild(headerEl)
 
@@ -613,11 +662,11 @@ class PageNodeView {
 
     // Footer container
     const footerEl = document.createElement('div')
-    footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-transparent pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
+    footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-100 dark:border-zinc-800 pt-2 select-none pointer-events-none text-xs text-zinc-400 dark:text-zinc-500 font-sans'
     footerEl.innerHTML = `
       <span class="footer-text truncate max-w-[450px]"></span>
       <div class="flex items-center gap-3">
-        <button class="delete-page-btn pointer-events-auto cursor-pointer opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-750 flex items-center gap-1 text-[10px] font-bold transition-all duration-150 print:hidden" title="Delete this page and all its contents">
+        <button class="delete-page-btn pointer-events-auto cursor-pointer opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 flex items-center gap-1 text-[10px] font-bold transition-all duration-150 print:hidden" title="Delete this page and all its contents">
           Delete Page
         </button>
         <span class="page-number"></span>
@@ -714,28 +763,6 @@ class PageNodeView {
 
     const docHeader = (this.editor.storage as any)?.page?.docHeader || ''
     const docFooter = (this.editor.storage as any)?.page?.docFooter || ''
-
-    const headerEl = this.dom.querySelector('.absolute.top-0')
-    if (headerEl) {
-      if (docHeader) {
-        headerEl.classList.remove('border-transparent')
-        headerEl.classList.add('border-zinc-150', 'dark:border-zinc-800')
-      } else {
-        headerEl.classList.remove('border-zinc-150', 'dark:border-zinc-800')
-        headerEl.classList.add('border-transparent')
-      }
-    }
-
-    const footerEl = this.dom.querySelector('.absolute.bottom-0')
-    if (footerEl) {
-      if (docFooter) {
-        footerEl.classList.remove('border-transparent')
-        footerEl.classList.add('border-zinc-150', 'dark:border-zinc-800')
-      } else {
-        footerEl.classList.remove('border-zinc-150', 'dark:border-zinc-800')
-        footerEl.classList.add('border-transparent')
-      }
-    }
 
     const headerTextEl = this.dom.querySelector('.header-text')
     if (headerTextEl) headerTextEl.textContent = docHeader
@@ -1004,7 +1031,6 @@ const STORAGE_KEY_PROJECTS = 'wordpi-writings';
 const STORAGE_KEY_ACTIVE_ID = 'wordpi-active-id';
 
 export default function Editor() {
-  const isMobile = useIsMobile()
   // Dashboard & Multi-Project Storage States
   const [showDashboard, setShowDashboard] = useState(true)
   const [projects, setProjects] = useState<Project[]>([])
@@ -1017,7 +1043,6 @@ export default function Editor() {
   const [isSaved, setIsSaved] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [sidebarTab, setSidebarTab] = useState<'assistant' | 'references'>('assistant')
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
   const [readTime, setReadTime] = useState(0)
@@ -1025,132 +1050,6 @@ export default function Editor() {
   const [isSimulatingAI, setIsSimulatingAI] = useState(false)
   const [simulatedAiResult, setSimulatedAiResult] = useState('')
   const [isExporting, setIsExporting] = useState(false)
-
-  // Authentication & Cloud Sync states
-  const [userEmail, setUserEmail] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('wordpi-user-email')
-    }
-    return null
-  })
-  const [showAuthModal, setShowAuthModal] = useState(false)
-
-  const handleAuthSuccess = async (email: string) => {
-    setUserEmail(email)
-    try {
-      setLoadingMessage('Syncing cloud documents...')
-      setIsExporting(true)
-      
-      // Clear previous user's local database
-      await clearAllLocalData()
-      
-      // Fetch cloud projects from server (uses the newly set token in localStorage)
-      const res = await getAllProjects()
-      setProjects(res)
-      
-      if (res.length > 0) {
-        // Load first project
-        const firstProject = res[0]
-        setActiveProjectId(firstProject.id)
-        setDocumentTitle(firstProject.title)
-        setDocHeader(firstProject.docHeader || '')
-        setDocFooter(firstProject.docFooter || '')
-        if (editor) {
-          editor.commands.setContent(JSON.parse(firstProject.content))
-        }
-      } else {
-        // Create a new blank project if cloud database is empty
-        const newId = Math.random().toString(36).substring(2, 15)
-        const emptyDoc = ensurePaginatedHtml('')
-        const newProj: Project = {
-          id: newId,
-          title: 'Untitled Document',
-          content: JSON.stringify(emptyDoc),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          wordCount: 0,
-          charCount: 0,
-          documentType: 'Project',
-          academicLevel: 'Undergraduate',
-          academicTone: 'Analytical',
-          docHeader: '',
-          docFooter: ''
-        }
-        await saveProject(newProj)
-        setProjects([newProj])
-        setActiveProjectId(newId)
-        setDocumentTitle('Untitled Document')
-        setDocHeader('')
-        setDocFooter('')
-        if (editor) {
-          editor.commands.setContent(emptyDoc)
-        }
-      }
-    } catch (err) {
-      console.error('Failed to sync projects on auth success:', err)
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
-  const handleSignOut = async () => {
-    localStorage.removeItem('wordpi-session-token')
-    localStorage.removeItem('wordpi-user-email')
-    setUserEmail(null)
-    try {
-      setLoadingMessage('Logging out and clearing local cache...')
-      setIsExporting(true)
-      
-      // Clear IndexedDB local cache on sign out for security/privacy
-      await clearAllLocalData()
-      
-      // Fetch remaining public local documents (or empty list)
-      const res = await getAllProjects()
-      setProjects(res)
-      
-      if (res.length > 0) {
-        const firstProject = res[0]
-        setActiveProjectId(firstProject.id)
-        setDocumentTitle(firstProject.title)
-        setDocHeader(firstProject.docHeader || '')
-        setDocFooter(firstProject.docFooter || '')
-        if (editor) {
-          editor.commands.setContent(JSON.parse(firstProject.content))
-        }
-      } else {
-        // If empty, clean the editor canvas and create a new project ID
-        const newId = Math.random().toString(36).substring(2, 15)
-        const emptyDoc = ensurePaginatedHtml('')
-        const newProj: Project = {
-          id: newId,
-          title: 'Untitled Document',
-          content: JSON.stringify(emptyDoc),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          wordCount: 0,
-          charCount: 0,
-          documentType: 'Project',
-          academicLevel: 'Undergraduate',
-          academicTone: 'Analytical',
-          docHeader: '',
-          docFooter: ''
-        }
-        await saveProject(newProj)
-        setProjects([newProj])
-        setActiveProjectId(newId)
-        setDocumentTitle('Untitled Document')
-        setDocHeader('')
-        setDocFooter('')
-        if (editor) {
-          editor.commands.setContent(emptyDoc)
-        }
-      }
-    } catch (err) {
-      console.error('Failed to reset project list on logout:', err)
-    } finally {
-      setIsExporting(false)
-    }
-  }
   const [docHeader, setDocHeader] = useState('')
   const [docFooter, setDocFooter] = useState('')
   const [loadingMessage, setLoadingMessage] = useState('Processing Document...')
@@ -1169,11 +1068,6 @@ export default function Editor() {
   const layoutSettingsRef = useRef<HTMLDivElement | null>(null)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
-  const [showFileMenu, setShowFileMenu] = useState(false)
-  const fileMenuRef = useRef<HTMLDivElement | null>(null)
-  const [showInsertMenu, setShowInsertMenu] = useState(false)
-  const insertMenuRef = useRef<HTMLDivElement | null>(null)
-
 
   // Import document and styling modal states
   const [showImportModal, setShowImportModal] = useState(false)
@@ -1195,7 +1089,6 @@ export default function Editor() {
   const paginationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-  const wheelAccumulatorRef = useRef(0)
 
   // WordPI Setup Wizard & Context Window States
   const [showWizard, setShowWizard] = useState(false)
@@ -1206,15 +1099,6 @@ export default function Editor() {
   const [wizardAcademicTone, setWizardAcademicTone] = useState('Analytical')
   const [aiEngine, setAiEngine] = useState<'gemini' | 'grok' | 'groq'>('gemini')
   const [wizardDocType, setWizardDocType] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom'>('Project')
-  const [targetPageCount, setTargetPageCount] = useState<'3-5' | '10-12' | '20-25'>('10-12')
-  const [generatedChapterIndices, setGeneratedChapterIndices] = useState<number[]>([])
-  const [totalChapterCount, setTotalChapterCount] = useState(0)
-  const [currentGeneratingChapter, setCurrentGeneratingChapter] = useState(0)
-  const [isHumanizingDoc, setIsHumanizingDoc] = useState(false)
-  const [humanizeProgress, setHumanizeProgress] = useState('')
-  const [isExpandingContent, setIsExpandingContent] = useState(false)
-  const [expandProgress, setExpandProgress] = useState('')
-
   
   const [studentName, setStudentName] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1322,8 +1206,8 @@ export default function Editor() {
     setWizardLineSpacing('1.5')
     setWizardTopic(finalTitle)
     
-    const templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
-    const formattedHtml = ensurePaginatedHtml(templateContent)
+    const templateContent = `<div data-type="page"><h1>${finalTitle}</h1><p>Start writing your document here...</p></div>`
+    const formattedHtml = ensurePaginatedHtml(templateContent, finalTitle)
 
     if (editor) {
       editor.commands.setContent(formattedHtml)
@@ -1393,10 +1277,10 @@ export default function Editor() {
     } else if (type === 'Project') {
       templateContent = PROJECT_TEMPLATE.replace('[Insert Topic Here]', finalTitle)
     } else {
-      templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
+      templateContent = `<div data-type="page"><h1>${finalTitle}</h1><p>Start writing your document here...</p></div>`
     }
 
-    const formattedHtml = ensurePaginatedHtml(templateContent)
+    const formattedHtml = ensurePaginatedHtml(templateContent, finalTitle)
 
     // Set active states
     setActiveProjectId(newProjId)
@@ -1566,138 +1450,6 @@ export default function Editor() {
     setProjectSources(updated)
   }
 
-  // Add reference source to IndexedDB and state
-  const handleAddReferenceSource = async (name: string, content: string, type: string) => {
-    if (!activeProjectId) return
-    try {
-      const savedSource = await saveSource(activeProjectId, name, content, type)
-      setProjectSources(prev => [...prev, savedSource])
-      return savedSource
-    } catch (e) {
-      console.error("Failed to save reference source:", e)
-      throw e
-    }
-  }
-
-  // Scan document, strip empty paragraphs, then flatten all pages into one and re-paginate
-  const handleFormatAndCleanDocument = () => {
-    if (!editor) return
-    try {
-      const { state } = editor
-      let tr = state.tr
-      let clearedParagraphsCount = 0
-
-      // Pass 1: Remove trailing and leading empty paragraphs from each page (work backwards)
-      const pageNodes: { node: any; pos: number }[] = []
-      state.doc.forEach((node: any, offset: number) => {
-        if (node.type.name === 'page') {
-          pageNodes.push({ node, pos: offset })
-        }
-      })
-
-      for (let i = pageNodes.length - 1; i >= 0; i--) {
-        const { node: pageNode, pos: pagePos } = pageNodes[i]
-
-        // Count trailing empty paragraphs (keep at least 1 child)
-        let trailingEmpty = 0
-        for (let c = pageNode.childCount - 1; c >= 1; c--) {
-          const child = pageNode.child(c)
-          if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
-            trailingEmpty++
-          } else {
-            break
-          }
-        }
-
-        // Count leading empty paragraphs
-        let leadingEmpty = 0
-        const maxLeading = pageNode.childCount - trailingEmpty - 1
-        for (let c = 0; c < maxLeading; c++) {
-          const child = pageNode.child(c)
-          if (child.type.name === 'paragraph' && child.textContent.trim() === '') {
-            leadingEmpty++
-          } else {
-            break
-          }
-        }
-
-        if (trailingEmpty > 0) {
-          let removeStart = pagePos + 1
-          for (let c = 0; c < pageNode.childCount - trailingEmpty; c++) {
-            removeStart += pageNode.child(c).nodeSize
-          }
-          let removeEnd = pagePos + 1
-          for (let c = 0; c < pageNode.childCount; c++) {
-            removeEnd += pageNode.child(c).nodeSize
-          }
-          tr = tr.delete(removeStart, removeEnd)
-          clearedParagraphsCount += trailingEmpty
-        }
-
-        if (leadingEmpty > 0) {
-          const currentPageNode = tr.doc.nodeAt(pagePos)
-          if (currentPageNode && currentPageNode.type.name === 'page') {
-            const contentStart = pagePos + 1
-            let leadingEnd = contentStart
-            for (let c = 0; c < leadingEmpty; c++) {
-              leadingEnd += currentPageNode.child(c).nodeSize
-            }
-            tr = tr.delete(contentStart, leadingEnd)
-            clearedParagraphsCount += leadingEmpty
-          }
-        }
-      }
-
-      // Pass 2: Join ALL pages into a single page so runPagination can re-split correctly.
-      // This fixes scattered single-paragraph pages by reflowing all content.
-      const joinPositions: number[] = []
-      tr.doc.forEach((node: any, offset: number) => {
-        if (offset > 0 && node.type.name === 'page') {
-          joinPositions.push(offset)
-        }
-      })
-
-      const mergedPagesCount = joinPositions.length
-
-      // Join from the end backwards so earlier positions remain stable
-      for (let i = joinPositions.length - 1; i >= 0; i--) {
-        try {
-          tr = tr.join(joinPositions[i])
-        } catch (e) {
-          // Skip boundaries that can't be joined
-        }
-      }
-
-      const hasChanges = clearedParagraphsCount > 0 || mergedPagesCount > 0
-
-      if (hasChanges) {
-        editor.view.dispatch(tr)
-        setIsSaved(false)
-
-        // Schedule multiple pagination cycles to fully re-split the flattened content
-        const repaginate = (cycle: number) => {
-          if (cycle <= 0) {
-            // Final outline refresh after all pagination settles
-            setTimeout(() => updateOutline(), 100)
-            return
-          }
-          runPagination(editor)
-          setTimeout(() => repaginate(cycle - 1), 200)
-        }
-        setTimeout(() => repaginate(Math.max(5, mergedPagesCount + 2)), 150)
-      }
-
-      alert(
-        hasChanges
-          ? `Document formatted successfully!\n\n• Reflowed content from ${mergedPagesCount + 1} pages into optimal layout.\n• Stripped ${clearedParagraphsCount} empty paragraphs.\n\nPages are being re-calculated...`
-          : `Document is already clean — no empty paragraphs or sparse pages found.`
-      )
-    } catch (e) {
-      console.error("Failed to format and clean document:", e)
-      alert("An error occurred while formatting the document.")
-    }
-  }
-
   // Utility to extract text snippet from stringified Tiptap JSON content
   const getContentSnippet = (contentStr: string): string => {
     try {
@@ -1779,37 +1531,6 @@ export default function Editor() {
 
     return () => clearTimeout(timer)
   }, [documentTitle, docHeader, docFooter, activeProjectId, projects.length])
-
-  const forceSaveActiveProject = async () => {
-    if (!activeProjectId || !editor) return
-    const project = projects.find(p => p.id === activeProjectId)
-    if (project) {
-      const updatedProj = {
-        ...project,
-        title: documentTitle,
-        content: JSON.stringify(editor.getJSON()),
-        docHeader,
-        docFooter,
-        wordCount,
-        charCount,
-        updatedAt: Date.now()
-      }
-      setLoadingMessage('Saving project changes...')
-      setIsExporting(true)
-      try {
-        await saveProject(updatedProj)
-        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
-        setIsSaved(true)
-        alert('Document saved successfully!')
-      } catch (e) {
-        console.error("Failed to save project manually:", e)
-        alert('Failed to save document.')
-      } finally {
-        setIsExporting(false)
-      }
-    }
-  }
-
 
   // Load/initialize projects list and active project on mount (with IndexedDB migration support)
   useEffect(() => {
@@ -2095,130 +1816,6 @@ export default function Editor() {
     }
   }
 
-  const scrollCursorIntoView = (editorView: any) => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    try {
-      const { selection } = editorView.state
-      const coords = editorView.coordsAtPos(selection.from)
-      if (!coords) return
-
-      const containerRect = container.getBoundingClientRect()
-      const cursorTop = coords.top
-      const cursorBottom = coords.bottom
-
-      // Only scroll if the cursor is actually outside the visible area
-      const margin = 60 // px buffer from edges
-      if (cursorTop < containerRect.top + margin) {
-        // Cursor is above the visible area — scroll up
-        const offset = containerRect.top + margin - cursorTop
-        container.scrollTop = Math.max(0, container.scrollTop - offset - 40)
-      } else if (cursorBottom > containerRect.bottom - margin) {
-        // Cursor is below the visible area — scroll down
-        const offset = cursorBottom - (containerRect.bottom - margin)
-        container.scrollTop += offset + 40
-      }
-      // If cursor is already visible, do nothing — let native scroll work
-    } catch (e) {
-      // Silently ignore coordinate failures at document boundaries
-    }
-  }
-
-  const moveCursorUpDown = (direction: 'up' | 'down') => {
-    if (!editor) return
-
-    // Ensure the editor has focus
-    if (!editor.isFocused) {
-      editor.commands.focus()
-    }
-
-    const { state, view } = editor
-    const { selection } = state
-    const { from } = selection
-
-    try {
-      const coords = view.coordsAtPos(from)
-      if (!coords) return
-
-      const lineRectHeight = coords.bottom - coords.top
-      const step = lineRectHeight > 5 ? lineRectHeight : (24 * zoomScale)
-      
-      // Target the middle of the next/prev line
-      const targetTop = direction === 'down' ? coords.bottom + (step / 2) : coords.top - (step / 2)
-      const targetLeft = coords.left
-
-      const targetPosObj = view.posAtCoords({ left: targetLeft, top: targetTop })
-      let moved = false
-
-      if (targetPosObj && typeof targetPosObj.pos === 'number') {
-        const targetPos = targetPosObj.pos
-        if (targetPos !== from) {
-          const resolvedPos = state.doc.resolve(targetPos)
-          const newSelection = TextSelection.create(state.doc, resolvedPos.pos)
-          const tr = state.tr.setSelection(newSelection)
-          view.dispatch(tr)
-          scrollCursorIntoView(view)
-          moved = true
-        }
-      }
-
-      // If coordinate-based movement failed (e.g. hitting page gaps/margins),
-      // fallback to traversing document nodes to find next/prev text blocks.
-      if (!moved) {
-        if (direction === 'up') {
-          let prevBlockEnd: number | null = null
-          state.doc.nodesBetween(0, from, (node, pos) => {
-            if (node.isTextblock && pos + node.nodeSize <= from) {
-              prevBlockEnd = pos + node.nodeSize - 1
-            }
-            return true
-          })
-          if (prevBlockEnd !== null) {
-            const resolved = state.doc.resolve(prevBlockEnd)
-            const newSelection = TextSelection.create(state.doc, resolved.pos)
-            const tr = state.tr.setSelection(newSelection)
-            view.dispatch(tr)
-            scrollCursorIntoView(view)
-            moved = true
-          }
-        } else {
-          let nextBlockStart: number | null = null
-          state.doc.nodesBetween(from, state.doc.content.size, (node, pos) => {
-            if (node.isTextblock && pos > from && nextBlockStart === null) {
-              nextBlockStart = pos + 1
-            }
-            return true
-          })
-          if (nextBlockStart !== null) {
-            const resolved = state.doc.resolve(nextBlockStart)
-            const newSelection = TextSelection.create(state.doc, resolved.pos)
-            const tr = state.tr.setSelection(newSelection)
-            view.dispatch(tr)
-            scrollCursorIntoView(view)
-            moved = true
-          }
-        }
-      }
-
-      // If selection did not change or target is out of bounds, scroll container as fallback
-      if (!moved) {
-        const container = scrollContainerRef.current
-        if (container) {
-          const dy = direction === 'down' ? 40 : -40
-          container.scrollTop += dy
-        }
-      }
-    } catch (error) {
-      console.error('Error programmatically moving cursor:', error)
-      // Fallback scroll
-      const container = scrollContainerRef.current
-      if (container) {
-        const dy = direction === 'down' ? 40 : -40
-        container.scrollTop += dy
-      }
-    }
-  }
-
   // Track latest handleScroll closure to avoid stale states in the event listener
   const handleScrollRef = useRef(handleScroll)
   useEffect(() => {
@@ -2468,19 +2065,13 @@ export default function Editor() {
       if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as any)) {
         setShowExportMenu(false)
       }
-      if (showFileMenu && fileMenuRef.current && !fileMenuRef.current.contains(event.target as any)) {
-        setShowFileMenu(false)
-      }
-      if (showInsertMenu && insertMenuRef.current && !insertMenuRef.current.contains(event.target as any)) {
-        setShowInsertMenu(false)
-      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFloatingPopup, showLayoutSettings, showExportMenu, showFileMenu, showInsertMenu])
+  }, [showFloatingPopup, showLayoutSettings, showExportMenu])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -2528,9 +2119,8 @@ export default function Editor() {
       },
     },
     onUpdate: ({ editor, transaction }) => {
-      // For pagination-induced transactions, only refresh the outline (so headings stay current)
+      // Skip all processing and re-renders if this is a pagination-induced transaction
       if (transaction && transaction.getMeta('paginating')) {
-        setTimeout(() => updateOutline(), 80)
         return
       }
 
@@ -2769,13 +2359,9 @@ export default function Editor() {
 
       if (dy !== 0 || dx !== 0) {
         e.preventDefault()
-
-        // Scroll the container directly — standard editor behavior.
-        // The cursor stays where it was; the user clicks to reposition it.
-        // This eliminates the scroll-fighting bug where scrollCursorIntoView
-        // would undo the wheel scroll to keep the cursor visible.
-        if (dy !== 0) container.scrollTop += dy
-        if (dx !== 0) container.scrollLeft += dx
+        // Directly adjust scroll coordinates to allow fluid trackpad momentum and precision
+        container.scrollTop += dy
+        container.scrollLeft += dx
       }
     }
 
@@ -2784,7 +2370,7 @@ export default function Editor() {
     return () => {
       window.removeEventListener('wheel', handleWheel)
     }
-  }, [editor, zoomScale])
+  }, [])
 
   // Touch scroll handler for touchscreen drag scrolling over pages
   useEffect(() => {
@@ -3790,28 +3376,14 @@ export default function Editor() {
       const doc = new Document({
         sections: [
           {
-            properties: {
-              page: {
-                size: {
-                  width: 11906,   // A4 width in twips: 210mm = 8.27in × 1440
-                  height: 16838,  // A4 height in twips: 297mm = 11.69in × 1440
-                  orientation: docx.PageOrientation.PORTRAIT,
-                },
-                margin: {
-                  top: 1440,    // 1 inch = 1440 twips (matches editor 96px header zone)
-                  right: 1080,  // 0.75 inch (matches editor 72px px-[72px] side padding)
-                  bottom: 1440, // 1 inch
-                  left: 1080,   // 0.75 inch
-                },
-              },
-            },
+            properties: {},
             headers: {
               default: new docx.Header({
                 children: [
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docHeader || "",
+                        text: docHeader || "WordPI Document Draft",
                         size: 18, // 9pt (half-points in docx)
                         color: "71717a", // Zinc 500
                         font: "Times New Roman"
@@ -3829,7 +3401,7 @@ export default function Editor() {
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: docFooter ? `${docFooter} | Page ` : "Page ",
+                        text: docFooter ? `${docFooter} | ` : "Page ",
                         size: 18,
                         color: "71717a",
                         font: "Times New Roman"
@@ -4341,7 +3913,7 @@ export default function Editor() {
 
     let promptText = ''
     if (action === 'intro') {
-      promptText = 'Generate a detailed academic introductory segment (Chapter 1) for a research project on this topic. Return the content styled with standard HTML tags like <h2>, <h3>, and <p>.'
+      promptText = 'Generate a detailed academic introductory segment (Chapter 1) for a research project on this topic. Start with a <h2>Chapter 1: Introduction</h2> heading, and return the content styled with standard HTML tags like <h2>, <h3>, and <p>.'
     } else if (action === 'rephrase') {
       if (!selectedText) {
         alert('Please highlight some text in the document first to rephrase!')
@@ -4366,7 +3938,7 @@ export default function Editor() {
         `- Return ONLY the rewritten text, formatted in standard HTML <p> tags.\n\n` +
         `Text to humanize:\n"${selectedText}"`
     } else if (action === 'outline') {
-      promptText = 'Generate a comprehensive academic thesis outline (Chapters 1 to 5) with subheadings formatted in structured HTML lists (<ul>/<li>).'
+      promptText = 'Generate a comprehensive academic thesis outline (Chapters 1 to 5). Start with a <h2>Thesis Project Outline</h2> heading, and return the subheadings formatted in structured HTML lists (<ul>/<li>) or nested headings.'
     } else {
       promptText = aiPrompt
     }
@@ -5075,6 +4647,7 @@ export default function Editor() {
             
             For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 800 words of rich content.
             Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
+            The very first page MUST start with a <h1> heading containing the exact topic: "${finalTitle}".
             Keep the tone highly scholarly, fitting for an ${wizardAcademicLevel} level project.`,
             context: contextText,
             academicLevel: wizardAcademicLevel || 'Undergraduate',
@@ -5104,7 +4677,7 @@ export default function Editor() {
                   if (data.text) {
                     accumulatedText += data.text
                     const formatted = formatAiResponseToHtml(accumulatedText)
-                    editor.commands.setContent(ensurePaginatedHtml(formatted))
+                    editor.commands.setContent(ensurePaginatedHtml(formatted, finalTitle))
                   }
                 } catch (e) {}
               }
@@ -5141,12 +4714,12 @@ export default function Editor() {
           .split('\n')
           .map(h => `<h3>${h}</h3><p>Start writing under this heading...</p>`)
           .join('')
-        templateContent = `<h1>${finalTitle}</h1><div data-type="page"><h2>Custom Outline</h2>${generatedOutlineHtml}</div>`
+        templateContent = `<div data-type="page"><h1>${finalTitle}</h1><h2>Custom Outline</h2>${generatedOutlineHtml}</div>`
       } else {
-        templateContent = `<h1>${finalTitle}</h1><div data-type="page"><p>Start writing your document here...</p></div>`
+        templateContent = `<div data-type="page"><h1>${finalTitle}</h1><p>Start writing your document here...</p></div>`
       }
 
-      const formattedHtml = ensurePaginatedHtml(templateContent)
+      const formattedHtml = ensurePaginatedHtml(templateContent, finalTitle)
       editor.commands.setContent(formattedHtml)
       setIsSaved(false)
       setShowWizard(false)
@@ -5242,107 +4815,118 @@ export default function Editor() {
     }
   }
 
-  const generateFullDocumentBlueprint = async (startChapterIndex = 0) => {
+  const generateFullDocumentBlueprint = async () => {
     const finalTitle = documentTitle.trim() || 'Untitled Project'
-    const isPro = targetPageCount === '20-25'
-    const isMid = targetPageCount === '10-12'
-
+    setIsSimulatingAI(true)
+    setSimulatedAiResult('')
+    setActiveAiModel('')
+    
     let contextText = ''
     if (projectSources.length > 0) {
-      contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ': ' + s.content.slice(0, 1200)).join('\n\n')
+      contextText = `Reference Ingested Sources:\n` + projectSources.map(s => s.name + ": " + s.content.slice(0, 1000)).join('\n\n')
     }
 
-    // Build chapter list from doc type
-    type Chapter = { title: string; prompt: string }
-    let chapters: Chapter[] = []
-
+    // Generate structural guide based on doc type
+    let outlineStructurePrompt = ''
     if (wizardDocType === 'Seminar') {
-      chapters = [
-        {
-          title: 'Chapter 1: Introduction',
-          prompt: `Write a deeply detailed Chapter 1 for a Seminar report on "${finalTitle}". Cover: 1.1 Introduction (background, significance, scope), 1.2 Problem Definition and Motivation (the specific problem, why it matters now), 1.4 Advantages and Limitations. Each subsection must be at least 400 words. Use <h2>, <h3>, <p>, <ul>, <li>, <strong> HTML tags. Target 2,200+ words total for this chapter.`
-        },
-        {
-          title: 'Chapter 2: Literature Review',
-          prompt: `Write a comprehensive Chapter 2 Literature Review for a Seminar on "${finalTitle}". Cover: 2.1 Summary of Existing Works (cite at least 5 real researchers, e.g. Author (Year)), 2.2 Overview of Previous Research, and identify clear Research Gaps. Each subsection must be 400+ words. Use <h2>, <h3>, <p>, <ul>, <li> HTML tags. Target 2,200+ words total.`
-        },
-        {
-          title: 'Chapter 3: Methodology',
-          prompt: `Write a thorough Chapter 3 Methodology/Working Principle for a Seminar on "${finalTitle}". Cover: 3.1 Core Concepts & Theoretical Background, 3.2 Working Principle/Process Flow, 3.3 Techniques and Tools Used. Each subsection must be 400+ words with specific technical depth. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
-        },
-        {
-          title: 'Chapter 4: Conclusion',
-          prompt: `Write a detailed Chapter 4 for a Seminar report on "${finalTitle}". Cover: 4.1 Summary of Key Takeaways and Main Findings (comprehensive, detailed analysis), 4.2 Future Scope (specific, actionable future directions). Each subsection must be 350+ words. Use <h2>, <h3>, <p> HTML tags. Target 1,500+ words total.`
-        }
-      ]
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and subheadings:
+      Chapter 1.
+      1.1. Introduction 
+      1.2. Problem Definition and Motivation 
+      1.4. Advantages and Limitations
+
+      Chapter 2
+      Literature Review/Related work 
+      2.1. Summary of exit works
+      2.2. Overview of previous research 
+      Research Gaps.
+
+      Chapter 3
+      Methodology/Working Principle 
+      3.1. Core Concepts: Theoretical Background 
+      3.2. Working Principle/Process Flow 
+      3.3. Techniques/Tool Used
+
+      Chapter 4
+      4.1. Summary of key takeaways and main findings 
+      4.2. Future Scope.`
     } else if (wizardDocType === 'Proposal') {
-      chapters = [
-        {
-          title: 'Chapter 1: Introduction',
-          prompt: `Write a comprehensive Chapter 1 for a Research Proposal on "${finalTitle}". Cover: 1.1 Background of Study, 1.2 Problem Statement, 1.3 Aim and Objectives, 1.4 Significance of Study, 1.5 Scope and Limitation. Each subsection 350+ words with academic depth. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
-        },
-        {
-          title: 'Chapter 2: Literature Review',
-          prompt: `Write a detailed Chapter 2 Literature Review for a Research Proposal on "${finalTitle}". Cover: 2.1 Conceptual Review (definitions, frameworks), 2.2 Theoretical Review (underpinning theories with scholars cited as Author (Year)), 2.3 Empirical Review (real studies and their findings). Each subsection 400+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,400+ words.`
-        },
-        {
-          title: 'Chapter 3: Research Methodology',
-          prompt: `Write a rigorous Chapter 3 Research Methodology for a Proposal on "${finalTitle}". Cover: 3.1 Research Design, 3.2 Population of the Study, 3.3 Method of Data Collection (instruments, justification), 3.4 Method of Data Analysis. Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,000+ words total.`
-        }
-      ]
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Proposal report following these chapters and subheadings:
+      Chapter 1
+      Introduction
+      1.1. Background of Study
+      1.2. Problem Statement
+      1.3. Aim and Objectives
+      1.4. Significance of Study
+      1.5. Scope and Limitation
+
+      Chapter 2
+      Literature Review
+      2.1. Conceptual Review
+      2.2. Theoretical Review
+      2.3. Empirical Review
+
+      Chapter 3
+      Research Methodology
+      3.1. Research Design
+      3.2. Population of the Study
+      3.3. Method of Data Collection
+      3.4. Method of Data Analysis`
     } else if (wizardDocType === 'Project') {
-      chapters = [
-        {
-          title: 'Chapter 1: Introduction',
-          prompt: `Write a comprehensive Chapter 1 Introduction for a Graduation Thesis on "${finalTitle}". Cover: 1.1 Background of the Study, 1.2 Statement of the Problem, 1.3 Objectives of the Study, 1.4 Research Questions, 1.5 Significance of the Study. Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul>, <li> HTML. Target 2,200+ words total.`
-        },
-        {
-          title: 'Chapter 2: Literature Review',
-          prompt: `Write a deeply academic Chapter 2 Literature Review for a thesis on "${finalTitle}". Cover: 2.1 Conceptual Framework, 2.2 Theoretical Framework (cite real theories and scholars as Author (Year)), 2.3 Empirical Framework (synthesise real studies). Each subsection 450+ words. Use <h2>, <h3>, <p>, <blockquote> HTML. Target 2,600+ words.`
-        },
-        {
-          title: 'Chapter 3: System Analysis & Methodology',
-          prompt: `Write a detailed Chapter 3 System Analysis and Design/Methodology for a thesis on "${finalTitle}". Cover: 3.1 Description of Existing System (flaws, gaps), 3.2 Method of Data Gathering (surveys, interviews, observation — justified), 3.3 Analysis of Proposed System, 3.4 Design of Proposed System (architecture, diagrams described in text). Each 350+ words. Target 2,200+ words.`
-        },
-        {
-          title: 'Chapter 4: Implementation & Results',
-          prompt: `Write a thorough Chapter 4 Implementation and Results for a thesis on "${finalTitle}". Cover: 4.1 System Requirements (hardware, software), 4.2 Installation and Configuration, 4.3 Interface Mockups and Explanations (describe each interface in detail), 4.4 Test Results and Evaluation (test cases, outcomes, performance). Each subsection 350+ words. Use <h2>, <h3>, <p>, <ul> HTML. Target 2,200+ words.`
-        },
-        {
-          title: 'Chapter 5: Conclusion & Recommendations',
-          prompt: `Write a complete Chapter 5 Conclusion and Recommendations for a thesis on "${finalTitle}". Cover: 5.1 Summary of Findings (comprehensive, tied back to objectives), 5.2 Practical Recommendations (actionable, specific), 5.3 Recommendations for Future Research (3-5 specific directions). Each 300+ words. Use <h2>, <h3>, <p> HTML. Target 1,800+ words.`
-        }
-      ]
-    } else {
-      // Custom outline — single shot but with strong length directive
-      chapters = [{
-        title: 'Full Document',
-        prompt: `Generate a complete, fully realized academic document on "${finalTitle}" following this custom outline:\n${customChapterOutline}\n\nFor EVERY section, write minimum 400 words of rich, analytical content. Do NOT use placeholders. Target ${isPro ? '8,000+' : isMid ? '4,500+' : '1,800+'} words total. Use <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong> HTML.`
-      }]
+      outlineStructurePrompt = `The document MUST be structured EXACTLY as a Project report following these chapters and subheadings:
+      Chapter 1
+      Introduction
+      1.1. Background of the Study
+      1.2. Statement of the Problem
+      1.3. Objectives of the Study
+      1.4. Research Questions
+      1.5. Significance of the Study
+
+      Chapter 2
+      Literature Review
+      2.1. Conceptual Framework
+      2.2. Theoretical Framework
+      2.3. Empirical Framework
+
+      Chapter 3
+      System Analysis and Design / Methodology
+      3.1. Description of the Existing System
+      3.2. Method of Data Gathering
+      3.3. Analysis of the Proposed System
+      3.4. Design of the Proposed System
+
+      Chapter 4
+      Implementation and Results
+      4.1. System Requirements
+      4.2. Installation and Configurations
+      4.3. Interface Mockups and Explanations
+      4.4. Test Results and Evaluation
+
+      Chapter 5
+      Conclusion and Recommendations
+      5.1. Summary of Findings
+      5.2. Practical Recommendations
+      5.3. Recommendations for Future Research`
+    } else if (wizardDocType === 'Custom' && customChapterOutline.trim()) {
+      outlineStructurePrompt = `The document MUST follow this custom chapter outline exactly:\n${customChapterOutline}`
     }
 
-    // Determine which chapters to generate this run
-    const chaptersToGenerate = isPro
-      ? chapters.slice(startChapterIndex)           // Pro: all remaining chapters
-      : isMid
-        ? chapters.slice(startChapterIndex, startChapterIndex + 2) // Mid: 2 chapters at a time
-        : chapters.slice(startChapterIndex, startChapterIndex + 1) // Brief: 1 chapter
-
-    const isFirstRun = startChapterIndex === 0
-
-    setTotalChapterCount(chapters.length)
-    setIsSimulatingAI(true)
-    setIsExporting(true)
-
-    // Shared streaming helper: fetch one chapter and return its HTML text
-    const fetchChapterHtml = async (chapterPrompt: string): Promise<string> => {
-      const fullPrompt = `${chapterPrompt}\n\nKeep tone highly ${wizardAcademicTone || 'scholarly'}, suitable for a ${wizardAcademicLevel || 'Undergraduate'} level ${wizardDocType || 'Custom'} document. Output ONLY HTML content — no markdown, no backticks, no code blocks.`
+    try {
+      setLoadingMessage('Generating Full Document Blueprint...')
+      setIsExporting(true)
 
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: fullPrompt,
+          prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
+          
+          ${outlineStructurePrompt}
+          
+          For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 1500 words of rich content.
+          Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
+          The very first page MUST start with a <h1> heading containing the exact topic: "${finalTitle}".
+          Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.`,
           context: contextText,
           academicLevel: wizardAcademicLevel || 'Undergraduate',
           academicTone: wizardAcademicTone || 'Analytical',
@@ -5350,344 +4934,71 @@ export default function Editor() {
           modelTarget: aiEngine
         })
       })
-      if (!response.ok) throw new Error(`API error: ${response.status}`)
+
+      if (!response.ok) throw new Error('API request failed')
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
-      let accum = ''
+      let accumulatedText = ''
+
       if (reader) {
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
           const chunk = decoder.decode(value, { stream: true })
-          for (const line of chunk.split('\n')) {
+          const lines = chunk.split('\n')
+          for (const line of lines) {
             if (line.startsWith('data: ')) {
               const content = line.slice(6).trim()
               if (content === '[DONE]') break
               try {
                 const parsed = JSON.parse(content)
-                if (parsed.text) accum += parsed.text
-              } catch (_) {}
+                if (parsed.text) {
+                  accumulatedText += parsed.text
+                }
+              } catch (e) {
+                // Ignore meta
+              }
             }
           }
         }
       }
-      return accum
-    }
 
-    try {
-      // If first run, clear editor and start fresh
-      if (isFirstRun && editor) {
-        editor.commands.setContent(ensurePaginatedHtml(''))
-      }
-
-      const newGeneratedIndices: number[] = [...generatedChapterIndices]
-
-      for (let i = 0; i < chaptersToGenerate.length; i++) {
-        const chapterIdx = startChapterIndex + i
-        const chapter = chaptersToGenerate[i]
-        setCurrentGeneratingChapter(chapterIdx + 1)
-        setLoadingMessage(`Generating ${chapter.title} (${chapterIdx + 1} of ${chapters.length})...`)
-
-        const chapterHtml = await fetchChapterHtml(chapter.prompt)
-
-        if (editor && chapterHtml.trim()) {
-          // Append chapter as new page content
-          const wrappedHtml = `<div data-type="page"><h1>${chapter.title}</h1>${chapterHtml}</div>`
-          if (isFirstRun && i === 0) {
-            editor.commands.setContent(ensurePaginatedHtml(chapterHtml))
-          } else {
-            // Append after existing content
-            editor.commands.focus('end')
-            editor.commands.insertContent(wrappedHtml)
+      if (editor && accumulatedText.trim()) {
+        const formattedHtml = ensurePaginatedHtml(accumulatedText, finalTitle)
+        editor.commands.setContent(formattedHtml)
+        setIsSaved(false)
+        applyOnboardingStyles(editor)
+        
+        // Save snapshot immediately
+        if (activeProjectId) {
+          const contentJSON = editor.getJSON()
+          const project = projects.find(p => p.id === activeProjectId)
+          if (project) {
+            const updatedProj = {
+              ...project,
+              content: JSON.stringify(contentJSON),
+              updatedAt: Date.now(),
+              wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
+              charCount: editor.getText().length
+            }
+            setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+            saveProject(updatedProj).catch(e => console.error("Failed to save project to IndexedDB", e))
+            setIsSaved(true)
           }
-          newGeneratedIndices.push(chapterIdx)
-          setGeneratedChapterIndices([...newGeneratedIndices])
-        }
-      }
-
-      setGeneratedChapterIndices(newGeneratedIndices)
-
-      // Auto-save snapshot
-      if (activeProjectId && editor) {
-        const contentJSON = editor.getJSON()
-        const project = projects.find(p => p.id === activeProjectId)
-        if (project) {
-          const updatedProj = {
-            ...project,
-            content: JSON.stringify(contentJSON),
-            updatedAt: Date.now(),
-            wordCount: editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0,
-            charCount: editor.getText().length
-          }
-          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
-          saveProject(updatedProj).catch(e => console.error('Save failed', e))
-          setIsSaved(true)
         }
       }
     } catch (err) {
       console.error(err)
-      alert('Chapter generation failed: ' + (err as any).message)
+      alert("Failed to generate document blueprint: " + (err as any).message)
     } finally {
       setIsSimulatingAI(false)
       setIsExporting(false)
-      setCurrentGeneratingChapter(0)
-      setLoadingMessage('Processing Document...')
     }
   }
-
-  // Humanize the entire document page-by-page AND chapter-by-chapter
-  const handleHumanizeDocument = async () => {
-    if (!editor) return
-    if (!window.confirm('This will rewrite your entire document to sound 100% human-written and bypass AI detectors. Continue?')) return
-
-    setIsHumanizingDoc(true)
-    setIsExporting(true)
-
-    const pages: { index: number; html: string }[] = []
-    editor.state.doc.forEach((node, _offset, index) => {
-      if (node.type.name === 'page') {
-        const html = node.textContent
-        if (html.trim().length > 50) pages.push({ index, html })
-      }
-    })
-
-    const total = pages.length
-    let processedCount = 0
-
-    try {
-      for (const page of pages) {
-        processedCount++
-        setHumanizeProgress(`Humanizing page ${processedCount} of ${total}...`)
-        setLoadingMessage(`Humanizing page ${processedCount} of ${total}...`)
-
-        const prompt =
-          `You are a professional academic copyeditor. Rewrite the text below to be 100% human-written and undetectable by Turnitin AI, GPTZero, and similar tools.\n\n` +
-          `Rules:\n` +
-          `- Aggressively mix short (5-8 word) and long (30-40 word) sentences\n` +
-          `- Eliminate AI clichés: "furthermore", "moreover", "consequently", "delve", "tapestry", "testament to"\n` +
-          `- Never start consecutive sentences with the same grammatical structure\n` +
-          `- Preserve all citations (APA style), factual claims, and headings\n` +
-          `- Return ONLY rewritten HTML using <h2>, <h3>, <p>, <ul>, <li>, <strong> tags\n\n` +
-          `Text to humanize:\n${page.html}`
-
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            context: '',
-            academicLevel: wizardAcademicLevel || 'Undergraduate',
-            academicTone: wizardAcademicTone || 'Analytical',
-            documentType: wizardDocType || 'Custom',
-            modelTarget: aiEngine
-          })
-        })
-        if (!response.ok) continue
-
-        const reader = response.body?.getReader()
-        const decoder = new TextDecoder()
-        let rewritten = ''
-        if (reader) {
-          while (true) {
-            const { value, done } = await reader.read()
-            if (done) break
-            for (const line of decoder.decode(value, { stream: true }).split('\n')) {
-              if (line.startsWith('data: ')) {
-                const d = line.slice(6).trim()
-                if (d === '[DONE]') break
-                try { const p = JSON.parse(d); if (p.text) rewritten += p.text } catch (_) {}
-              }
-            }
-          }
-        }
-
-        if (rewritten.trim()) {
-          // Replace the specific page node content
-          let pagePos = 0
-          let pageCount = 0
-          editor.state.doc.forEach((node, offset) => {
-            if (node.type.name === 'page') {
-              if (pageCount === page.index) pagePos = offset
-              pageCount++
-            }
-          })
-          if (pagePos >= 0) {
-            const pageNode = editor.state.doc.nodeAt(pagePos)
-            if (pageNode) {
-              editor.chain()
-                .setNodeSelection(pagePos)
-                .insertContent(`<div data-type="page">${rewritten}</div>`)
-                .run()
-            }
-          }
-        }
-      }
-
-      // Auto-save
-      if (activeProjectId && editor) {
-        const project = projects.find(p => p.id === activeProjectId)
-        if (project) {
-          const updatedProj = {
-            ...project,
-            content: JSON.stringify(editor.getJSON()),
-            updatedAt: Date.now(),
-            wordCount: editor.getText().trim().split(/\s+/).length,
-            charCount: editor.getText().length
-          }
-          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
-          saveProject(updatedProj).catch(console.error)
-          setIsSaved(true)
-        }
-      }
-
-      alert(`Humanization complete! All ${total} pages have been rewritten to bypass AI detectors.`)
-    } catch (err) {
-      console.error(err)
-      alert('Humanization failed: ' + (err as any).message)
-    } finally {
-      setIsHumanizingDoc(false)
-      setIsExporting(false)
-      setHumanizeProgress('')
-      setLoadingMessage('Processing Document...')
-    }
-  }
-
-  // Expand thin sections (under ~200 words) in the document
-  const handleExpandContent = async () => {
-    if (!editor) return
-
-    type ThinSection = { heading: string; content: string; pos: number; wordCount: number }
-    const thinSections: ThinSection[] = []
-
-    // Walk document and collect headings + their following paragraphs
-    let currentHeading = ''
-    let currentContent = ''
-    let currentPos = 0
-    let currentWords = 0
-
-    editor.state.doc.descendants((node, pos) => {
-      if (node.type.name === 'heading') {
-        // Flush previous section if it's thin
-        if (currentHeading && currentWords < 200 && currentWords > 10) {
-          thinSections.push({ heading: currentHeading, content: currentContent, pos: currentPos, wordCount: currentWords })
-        }
-        currentHeading = node.textContent
-        currentContent = ''
-        currentPos = pos
-        currentWords = 0
-      } else if (node.isTextblock && currentHeading) {
-        const text = node.textContent.trim()
-        if (text) {
-          currentContent += ' ' + text
-          currentWords += text.split(/\s+/).length
-        }
-      }
-    })
-    // Flush last section
-    if (currentHeading && currentWords < 200 && currentWords > 10) {
-      thinSections.push({ heading: currentHeading, content: currentContent, pos: currentPos, wordCount: currentWords })
-    }
-
-    if (thinSections.length === 0) {
-      alert('No thin sections detected! Your document sections all appear well-developed (200+ words each).')
-      return
-    }
-
-    if (!window.confirm(`Found ${thinSections.length} short sections to expand. This will add richer content to each one. Continue?`)) return
-
-    setIsExpandingContent(true)
-    setIsExporting(true)
-    let processed = 0
-
-    try {
-      for (const section of thinSections) {
-        processed++
-        setExpandProgress(`Expanding "${section.heading}" (${processed} of ${thinSections.length})...`)
-        setLoadingMessage(`Expanding "${section.heading}" (${processed} of ${thinSections.length})...`)
-
-        const prompt =
-          `The following academic section titled "${section.heading}" is too short (only ${section.wordCount} words). ` +
-          `Expand it significantly with deeper analysis, more specific examples, relevant real-world applications, and academic citations where appropriate. ` +
-          `Target at least 500 words for this section. Keep the same heading and topic focus.\n\n` +
-          `Current content:\n${section.content}\n\n` +
-          `Return the FULL expanded section as HTML using <h3>, <p>, <ul>, <li>, <strong> tags only. Do not repeat the main heading.`
-
-        const response = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            context: `Document topic: ${documentTitle}`,
-            academicLevel: wizardAcademicLevel || 'Undergraduate',
-            academicTone: wizardAcademicTone || 'Analytical',
-            documentType: wizardDocType || 'Custom',
-            modelTarget: aiEngine
-          })
-        })
-        if (!response.ok) continue
-
-        const reader = response.body?.getReader()
-        const decoder = new TextDecoder()
-        let expanded = ''
-        if (reader) {
-          while (true) {
-            const { value, done } = await reader.read()
-            if (done) break
-            for (const line of decoder.decode(value, { stream: true }).split('\n')) {
-              if (line.startsWith('data: ')) {
-                const d = line.slice(6).trim()
-                if (d === '[DONE]') break
-                try { const p = JSON.parse(d); if (p.text) expanded += p.text } catch (_) {}
-              }
-            }
-          }
-        }
-
-        if (expanded.trim()) {
-          // Find and replace the section content using text search
-          const range = findTextRange(editor, section.heading)
-          if (range) {
-            // Insert expanded content after the heading
-            editor.chain()
-              .setTextSelection({ from: range.to, to: range.to })
-              .insertContent(expanded)
-              .run()
-          }
-        }
-      }
-
-      // Auto-save
-      if (activeProjectId && editor) {
-        const project = projects.find(p => p.id === activeProjectId)
-        if (project) {
-          const updatedProj = {
-            ...project,
-            content: JSON.stringify(editor.getJSON()),
-            updatedAt: Date.now(),
-            wordCount: editor.getText().trim().split(/\s+/).length,
-            charCount: editor.getText().length
-          }
-          setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
-          saveProject(updatedProj).catch(console.error)
-          setIsSaved(true)
-        }
-      }
-
-      alert(`Expansion complete! ${thinSections.length} sections have been deepened.`)
-    } catch (err) {
-      console.error(err)
-      alert('Content expansion failed: ' + (err as any).message)
-    } finally {
-      setIsExpandingContent(false)
-      setIsExporting(false)
-      setExpandProgress('')
-      setLoadingMessage('Processing Document...')
-    }
-  }
-
 
   const activeProject = projects.find(p => p.id === activeProjectId)
+
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
       {isExporting && (
@@ -5701,72 +5012,8 @@ export default function Editor() {
           </div>
         </div>
       )}
-
       
-      {isMobile ? (
-        showDashboard ? (
-          <MobileDashboard
-            theme={theme}
-            toggleTheme={toggleTheme}
-            projects={projects}
-            onCreateProject={createNewProject}
-            onCreateProjectWithTemplate={createNewProjectWithTemplate}
-            onDeleteProject={deleteProject}
-            onRenameProject={renameProjectPrompt}
-            onLoadProject={loadProject}
-            userEmail={userEmail}
-            onSignOut={handleSignOut}
-            onOpenAuth={() => setShowAuthModal(true)}
-          />
-        ) : (
-          <MobileChatView
-            theme={theme}
-            toggleTheme={toggleTheme}
-            documentTitle={documentTitle}
-            setDocumentTitle={setDocumentTitle}
-            activeProjectId={activeProjectId}
-            wordCount={wordCount}
-            charCount={charCount}
-            totalPages={totalPages}
-            isSaved={isSaved}
-            onForceSave={forceSaveActiveProject}
-            docHeader={docHeader}
-            docFooter={docFooter}
-            isSimulatingAI={isSimulatingAI}
-            simulatedAiResult={simulatedAiResult}
-            activeAiModel={activeAiModel}
-            aiEngine={aiEngine}
-            setAiEngine={setAiEngine}
-            handleAiAction={handleAiAction}
-            setAiPrompt={setAiPrompt}
-            aiPrompt={aiPrompt}
-            insertAiContent={insertAiContent}
-            discardAiContent={discardAiContent}
-            exportToDocx={exportToDocx}
-            exportToPdfPrint={exportToPdfPrint}
-            exportToPptx={exportToPptx}
-            onBackToDashboard={() => {
-              window.history.pushState({}, '', '/')
-              setShowDashboard(true)
-              setActiveProjectId('')
-            }}
-            projectSources={projectSources}
-            handleWizardFileUpload={handleWizardFileUpload}
-            userEmail={userEmail}
-            onSignOut={handleSignOut}
-            onOpenAuth={() => setShowAuthModal(true)}
-            editorHtml={editor ? editor.getHTML() : ''}
-            wizardDocType={wizardDocType}
-            wizardAcademicLevel={wizardAcademicLevel}
-            onOpenWizard={() => {
-              setWizardTopic('')
-              setWizardStep(1)
-              setShowWizard(true)
-            }}
-            onGenerateBlueprint={generateFullDocumentBlueprint}
-          />
-        )
-      ) : showDashboard ? (
+      {showDashboard ? (
         <Dashboard
           theme={theme}
           toggleTheme={toggleTheme}
@@ -5776,12 +5023,11 @@ export default function Editor() {
           onDeleteProject={deleteProject}
           onRenameProject={renameProjectPrompt}
           onLoadProject={loadProject}
-          userEmail={userEmail}
-          onSignOut={handleSignOut}
-          onOpenAuth={() => setShowAuthModal(true)}
+          userEmail={null}
+          onSignOut={() => {}}
+          onOpenAuth={() => {}}
         />
       ) : (
-
         <>
           {/* Top Application Bar */}
       <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
@@ -5794,6 +5040,7 @@ export default function Editor() {
               <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
             </span>
           </div>
+          
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -5804,125 +5051,70 @@ export default function Editor() {
               }}
               className="text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-48 sm:w-64 transition-colors"
             />
-
-            {/* File Dropdown Menu */}
-            <div className="relative" ref={fileMenuRef}>
-              <button
-                onClick={() => setShowFileMenu(!showFileMenu)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 text-xs font-bold transition-all cursor-pointer"
-              >
-                <span>File</span>
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
-              </button>
-              {showFileMenu && (
-                <div className="absolute left-0 mt-1.5 w-52 bg-white border border-zinc-200 shadow-xl rounded-xl py-1.5 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  <button
-                    onClick={() => {
-                      window.history.pushState({}, '', '/')
-                      setShowDashboard(true)
-                      setActiveProjectId('')
-                      setShowFileMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <Folder className="w-4 h-4 text-indigo-500" />
-                    <span>Return to Projects</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setWizardTopic('')
-                      setWizardStep(1)
-                      setShowWizard(true)
-                      setShowFileMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <Plus className="w-4 h-4 text-emerald-500" />
-                    <span>New Project Wizard</span>
-                  </button>
-
-                  <div className="border-t border-zinc-100 dark:border-zinc-800 my-1.5"></div>
-
-                  <input
-                    type="file"
-                    accept=".docx,.pdf"
-                    id="import-file-menu"
-                    onChange={(e) => {
-                      handleImportFile(e)
-                      setShowFileMenu(false)
-                    }}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="import-file-menu"
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <Upload className="w-4 h-4 text-blue-500" />
-                    <span>Import (.docx / .pdf)</span>
-                  </label>
-
-                  <div className="border-t border-zinc-100 dark:border-zinc-800 my-1.5"></div>
-
-                  <button
-                    onClick={() => {
-                      clearDocument()
-                      setShowFileMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>Clear Document</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Insert Dropdown Menu */}
-            <div className="relative" ref={insertMenuRef}>
-              <button
-                onClick={() => setShowInsertMenu(!showInsertMenu)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 text-xs font-bold transition-all cursor-pointer"
-              >
-                <span>Insert</span>
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
-              </button>
-              {showInsertMenu && (
-                <div className="absolute left-0 mt-1.5 w-56 bg-white border border-zinc-200 shadow-xl rounded-xl py-1.5 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  <button
-                    onClick={() => {
-                      setShowCoverPageModal(true)
-                      setShowInsertMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <FileText className="w-4 h-4 text-amber-500" />
-                    <span>Academic Cover Page</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowTocModal(true)
-                      setShowInsertMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <OrderedListIcon className="w-4 h-4 text-teal-500" />
-                    <span>Table of Contents</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowGeneratorPopup(true)
-                      setShowInsertMenu(false)
-                    }}
-                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
-                  >
-                    <Sparkles className="w-4 h-4 text-indigo-500" />
-                    <span>AI Blueprint Generator</span>
-                  </button>
-                </div>
-              )}
-            </div>
             
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none ml-2">
+            <button
+              onClick={() => {
+                window.history.pushState({}, '', '/')
+                setShowDashboard(true)
+                setActiveProjectId('')
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
+              title="Return to Document Center Dashboard"
+            >
+              <Folder className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Projects</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setWizardTopic('')
+                setWizardStep(1)
+                setShowWizard(true)
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Reset workspace and launch Onboarding Wizard"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Project</span>
+            </button>
+            
+            <button
+              onClick={() => setShowCoverPageModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200/50 dark:border-amber-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Create a professional academic cover page"
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-500" />
+              <span>Create Cover Page</span>
+            </button>
+
+            <button
+              onClick={clearDocument}
+              className="flex items-center gap-1.5 px-3 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Clear all pages and content to start blank"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Document</span>
+            </button>
+
+            <button
+              onClick={() => setShowGeneratorPopup(true)}
+              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-650 hover:bg-indigo-700 text-white rounded border border-indigo-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              title="Open full document blueprint generator popup"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Generate Full Blueprint</span>
+            </button>
+
+            <button
+              onClick={() => setShowTocModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Generate a Table of Contents based on document headings"
+            >
+              <OrderedListIcon className="w-3.5 h-3.5 text-teal-500" />
+              <span>Table of Contents</span>
+            </button>
+            
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
               <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-zinc-300'}`} />
               <span>{isSaved ? 'Draft saved locally' : 'Saving...'}</span>
             </div>
@@ -5930,15 +5122,31 @@ export default function Editor() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Export Dropdown Menu */}
+          {/* Import Actions */}
+          <input
+            type="file"
+            accept=".docx,.pdf"
+            id="import-file"
+            onChange={handleImportFile}
+            className="hidden"
+          />
+          <label
+            htmlFor="import-file"
+            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors"
+            title="Import a Word (.docx) or PDF (.pdf) file to format or edit"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import</span>
+          </label>
+
+          {/* Export Actions */}
           <div className="relative" ref={exportMenuRef}>
             <button 
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export</span>
-              <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
             </button>
             {showExportMenu && (
               <div className="absolute right-0 mt-1.5 w-48 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
@@ -6039,28 +5247,6 @@ export default function Editor() {
           </button>
         </div>
       </header>
-
-      {/* Generate Remaining Chapters Banner — shown when partial generation was done */}
-      {totalChapterCount > 0 && generatedChapterIndices.length < totalChapterCount && !isExporting && (
-        <div className="flex items-center justify-between px-6 py-2.5 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40 text-xs animate-in fade-in slide-in-from-top-1 duration-300">
-          <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
-            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-            <span className="font-semibold">
-              Chapters {generatedChapterIndices.map(i => i + 1).join(', ')} generated.{' '}
-              {totalChapterCount - generatedChapterIndices.length} chapter{totalChapterCount - generatedChapterIndices.length !== 1 ? 's' : ''} remaining.
-            </span>
-            <span className="text-amber-600 dark:text-amber-400">Upgrade to Pro or continue generating remaining chapters.</span>
-          </div>
-          <button
-            onClick={() => generateFullDocumentBlueprint(generatedChapterIndices.length)}
-            disabled={isSimulatingAI}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Generate Remaining Chapters
-          </button>
-        </div>
-      )}
 
       {/* Editor Main Canvas & Layout */}
       <div className="flex flex-1 overflow-hidden relative">
@@ -6365,17 +5551,6 @@ export default function Editor() {
                   </div>
                 )}
               </div>
-
-              {/* Format & Clean Action Button */}
-              <button
-                type="button"
-                onClick={handleFormatAndCleanDocument}
-                className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-700 dark:text-zinc-300 flex items-center gap-1 cursor-pointer transition-colors"
-                title="Format & Clean Document spacing and remove blank pages"
-              >
-                <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
-                <span className="text-[11px] font-semibold hidden md:inline">Format & Clean</span>
-              </button>
             </div>
           </div>
         </div>
@@ -6439,40 +5614,8 @@ export default function Editor() {
                 </button>
               </div>
 
-              {/* Tab Switcher */}
-              <div className="flex border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold select-none bg-zinc-50/50 dark:bg-zinc-950/30 shrink-0">
-                <button
-                  onClick={() => setSidebarTab('assistant')}
-                  className={`flex-1 py-2.5 text-center border-b-2 cursor-pointer transition-all ${
-                    sidebarTab === 'assistant'
-                      ? 'border-indigo-650 text-indigo-600 dark:text-indigo-400 font-bold bg-white dark:bg-zinc-900'
-                      : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-350'
-                  }`}
-                >
-                  AI Writer
-                </button>
-                <button
-                  onClick={() => setSidebarTab('references')}
-                  className={`flex-1 py-2.5 text-center border-b-2 cursor-pointer transition-all ${
-                    sidebarTab === 'references'
-                      ? 'border-indigo-650 text-indigo-600 dark:text-indigo-400 font-bold bg-white dark:bg-zinc-900'
-                      : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-350'
-                  }`}
-                >
-                  References
-                </button>
-              </div>
-
-              {sidebarTab === 'references' && (
-                <ReferenceFinder
-                  onAddSource={handleAddReferenceSource}
-                  existingSourcesCount={projectSources.length}
-                />
-              )}
-
               {/* Chat/Generation Input and Presets */}
-              {sidebarTab === 'assistant' && (
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 
                  {/* AI Instructions Info Alert */}
                 <div className="bg-indigo-50 border border-indigo-100 text-indigo-950 dark:bg-indigo-950/20 dark:border-indigo-900/30 dark:text-indigo-300 rounded-lg p-3 text-xs leading-5">
@@ -6747,32 +5890,6 @@ export default function Editor() {
                       <ChevronRight className="w-3 h-3 text-emerald-550 group-hover:translate-x-0.5 transition-transform" />
                     </button>
 
-                    {/* Humanize Entire Document */}
-                    <button
-                      disabled={isHumanizingDoc}
-                      onClick={handleHumanizeDocument}
-                      className="w-full text-left p-2.5 rounded-lg border border-emerald-300 dark:border-emerald-900 bg-emerald-50/30 hover:bg-emerald-100/50 dark:bg-emerald-950/15 dark:hover:bg-emerald-950/30 text-xs font-semibold text-emerald-900 dark:text-emerald-300 transition-all group flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>{isHumanizingDoc ? humanizeProgress || 'Humanizing...' : 'Humanize Entire Document'}</span>
-                      </span>
-                      <ChevronRight className="w-3 h-3 text-emerald-600 group-hover:translate-x-0.5 transition-transform" />
-                    </button>
-
-                    {/* Expand Short Sections */}
-                    <button
-                      disabled={isExpandingContent}
-                      onClick={handleExpandContent}
-                      className="w-full text-left p-2.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/20 hover:bg-blue-50/40 dark:bg-blue-950/10 dark:hover:bg-blue-950/20 text-xs font-semibold text-blue-800 dark:text-blue-300 transition-all group flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <FileText className="w-3.5 h-3.5 text-blue-500" />
-                        <span>{isExpandingContent ? expandProgress || 'Expanding...' : 'Expand Short Sections'}</span>
-                      </span>
-                      <ChevronRight className="w-3 h-3 text-blue-500 group-hover:translate-x-0.5 transition-transform" />
-                    </button>
-
                     <button
                       onClick={() => handleAiAction('rephrase')}
                       className="w-full text-left p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-850 hover:bg-indigo-50 hover:border-indigo-200 dark:hover:bg-indigo-950/20 dark:hover:border-indigo-900/30 text-xs font-medium transition-all group flex items-center justify-between"
@@ -6888,8 +6005,7 @@ export default function Editor() {
                     </div>
                   </div>
                 )}
-                </div>
-              )}
+              </div>
 
               {/* Sidebar Footer Information */}
               <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-[10px] text-zinc-400 dark:text-zinc-500 space-y-1">
@@ -8009,22 +7125,6 @@ export default function Editor() {
                 </select>
               </div>
 
-              {/* Target Document Length */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
-                  Target Document Length (Page Range)
-                </label>
-                <select
-                  value={targetPageCount}
-                  onChange={(e) => setTargetPageCount(e.target.value as any)}
-                  className="w-full text-xs p-3 rounded-lg border border-zinc-200 focus:ring-2 focus:ring-indigo-500 bg-zinc-50 dark:bg-zinc-850 dark:border-zinc-700 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
-                >
-                  <option value="3-5">3 - 5 Pages (Brief Outline/Summary - ~1,500 words)</option>
-                  <option value="10-12">10 - 12 Pages (Standard Report/Seminar - ~4,500 words)</option>
-                  <option value="20-25">20 - 25 Pages (Detailed Thesis/Project - ~8,500 words)</option>
-                </select>
-              </div>
-
               {/* Ingested journals & reference materials */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
@@ -8071,25 +7171,6 @@ export default function Editor() {
                     className="hidden"
                   />
                 </label>
-
-                {/* Online Reference Search */}
-                <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden bg-zinc-50/50 dark:bg-zinc-900/30">
-                  <details className="group">
-                    <summary className="flex items-center justify-between p-3 text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-850 select-none">
-                      <div className="flex items-center gap-1.5">
-                        <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
-                        <span>Search & Ingest Academic Journals Online</span>
-                      </div>
-                      <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90 text-zinc-400" />
-                    </summary>
-                    <div className="border-t border-zinc-150 dark:border-zinc-850 max-h-64 flex flex-col overflow-hidden bg-white dark:bg-zinc-900/50">
-                      <ReferenceFinder
-                        onAddSource={handleAddReferenceSource}
-                        existingSourcesCount={projectSources.length}
-                      />
-                    </div>
-                  </details>
-                </div>
               </div>
             </div>
 
@@ -8101,40 +7182,21 @@ export default function Editor() {
               >
                 Close
               </button>
-              {targetPageCount !== '20-25' && (
-                <button
-                  onClick={() => {
-                    setShowGeneratorPopup(false)
-                    setGeneratedChapterIndices([])
-                    generateFullDocumentBlueprint(0)
-                  }}
-                  className="px-5 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Generate Preview ({targetPageCount === '3-5' ? '1 Chapter' : '2 Chapters'})</span>
-                </button>
-              )}
               <button
                 onClick={() => {
                   setShowGeneratorPopup(false)
-                  setGeneratedChapterIndices([])
-                  generateFullDocumentBlueprint(0)
+                  generateFullDocumentBlueprint()
                 }}
                 className="px-5 py-2 bg-indigo-650 hover:bg-indigo-750 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer flex items-center gap-1.5"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                <span>{targetPageCount === '20-25' ? 'Generate Full Document (All Chapters)' : 'Generate All Chapters (Pro)'}</span>
+                <span>Generate Full Document</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-        onSuccess={handleAuthSuccess}
-      />
     </div>
   )
 }
