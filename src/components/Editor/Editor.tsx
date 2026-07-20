@@ -51,6 +51,7 @@ import {
   Clock,
   FileText,
   ChevronRight,
+  ChevronDown,
   ChevronLeft,
   Minimize2,
   Maximize2,
@@ -1168,6 +1169,11 @@ export default function Editor() {
   const layoutSettingsRef = useRef<HTMLDivElement | null>(null)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const [showFileMenu, setShowFileMenu] = useState(false)
+  const fileMenuRef = useRef<HTMLDivElement | null>(null)
+  const [showInsertMenu, setShowInsertMenu] = useState(false)
+  const insertMenuRef = useRef<HTMLDivElement | null>(null)
+
 
   // Import document and styling modal states
   const [showImportModal, setShowImportModal] = useState(false)
@@ -2454,13 +2460,19 @@ export default function Editor() {
       if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as any)) {
         setShowExportMenu(false)
       }
+      if (showFileMenu && fileMenuRef.current && !fileMenuRef.current.contains(event.target as any)) {
+        setShowFileMenu(false)
+      }
+      if (showInsertMenu && insertMenuRef.current && !insertMenuRef.current.contains(event.target as any)) {
+        setShowInsertMenu(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFloatingPopup, showLayoutSettings, showExportMenu])
+  }, [showFloatingPopup, showLayoutSettings, showExportMenu, showFileMenu, showInsertMenu])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -5390,7 +5402,6 @@ export default function Editor() {
               <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
             </span>
           </div>
-          
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -5401,70 +5412,125 @@ export default function Editor() {
               }}
               className="text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-48 sm:w-64 transition-colors"
             />
-            
-            <button
-              onClick={() => {
-                window.history.pushState({}, '', '/')
-                setShowDashboard(true)
-                setActiveProjectId('')
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
-              title="Return to Document Center Dashboard"
-            >
-              <Folder className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Projects</span>
-            </button>
-            
-            <button
-              onClick={() => {
-                setWizardTopic('')
-                setWizardStep(1)
-                setShowWizard(true)
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Reset workspace and launch Onboarding Wizard"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Project</span>
-            </button>
-            
-            <button
-              onClick={() => setShowCoverPageModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200/50 dark:border-amber-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Create a professional academic cover page"
-            >
-              <FileText className="w-3.5 h-3.5 text-amber-500" />
-              <span>Create Cover Page</span>
-            </button>
 
-            <button
-              onClick={clearDocument}
-              className="flex items-center gap-1.5 px-3 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Clear all pages and content to start blank"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear Document</span>
-            </button>
+            {/* File Dropdown Menu */}
+            <div className="relative" ref={fileMenuRef}>
+              <button
+                onClick={() => setShowFileMenu(!showFileMenu)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <span>File</span>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+              {showFileMenu && (
+                <div className="absolute left-0 mt-1.5 w-52 bg-white border border-zinc-200 shadow-xl rounded-xl py-1.5 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  <button
+                    onClick={() => {
+                      window.history.pushState({}, '', '/')
+                      setShowDashboard(true)
+                      setActiveProjectId('')
+                      setShowFileMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <Folder className="w-4 h-4 text-indigo-500" />
+                    <span>Return to Projects</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setWizardTopic('')
+                      setWizardStep(1)
+                      setShowWizard(true)
+                      setShowFileMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-500" />
+                    <span>New Project Wizard</span>
+                  </button>
 
-            <button
-              onClick={() => setShowGeneratorPopup(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-650 hover:bg-indigo-700 text-white rounded border border-indigo-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-              title="Open full document blueprint generator popup"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Generate Full Blueprint</span>
-            </button>
+                  <div className="border-t border-zinc-100 dark:border-zinc-800 my-1.5"></div>
 
-            <button
-              onClick={() => setShowTocModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Generate a Table of Contents based on document headings"
-            >
-              <OrderedListIcon className="w-3.5 h-3.5 text-teal-500" />
-              <span>Table of Contents</span>
-            </button>
+                  <input
+                    type="file"
+                    accept=".docx,.pdf"
+                    id="import-file-menu"
+                    onChange={(e) => {
+                      handleImportFile(e)
+                      setShowFileMenu(false)
+                    }}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="import-file-menu"
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <Upload className="w-4 h-4 text-blue-500" />
+                    <span>Import (.docx / .pdf)</span>
+                  </label>
+
+                  <div className="border-t border-zinc-100 dark:border-zinc-800 my-1.5"></div>
+
+                  <button
+                    onClick={() => {
+                      clearDocument()
+                      setShowFileMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Clear Document</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Insert Dropdown Menu */}
+            <div className="relative" ref={insertMenuRef}>
+              <button
+                onClick={() => setShowInsertMenu(!showInsertMenu)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <span>Insert</span>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+              {showInsertMenu && (
+                <div className="absolute left-0 mt-1.5 w-56 bg-white border border-zinc-200 shadow-xl rounded-xl py-1.5 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  <button
+                    onClick={() => {
+                      setShowCoverPageModal(true)
+                      setShowInsertMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <FileText className="w-4 h-4 text-amber-500" />
+                    <span>Academic Cover Page</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowTocModal(true)
+                      setShowInsertMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <OrderedListIcon className="w-4 h-4 text-teal-500" />
+                    <span>Table of Contents</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowGeneratorPopup(true)
+                      setShowInsertMenu(false)
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer flex items-center gap-2.5"
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    <span>AI Blueprint Generator</span>
+                  </button>
+                </div>
+              )}
+            </div>
             
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none ml-2">
               <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-zinc-300'}`} />
               <span>{isSaved ? 'Draft saved locally' : 'Saving...'}</span>
             </div>
@@ -5472,31 +5538,15 @@ export default function Editor() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Import Actions */}
-          <input
-            type="file"
-            accept=".docx,.pdf"
-            id="import-file"
-            onChange={handleImportFile}
-            className="hidden"
-          />
-          <label
-            htmlFor="import-file"
-            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors"
-            title="Import a Word (.docx) or PDF (.pdf) file to format or edit"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Import</span>
-          </label>
-
-          {/* Export Actions */}
+          {/* Export Dropdown Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button 
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-zinc-150 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-250 dark:border-zinc-700 transition-all cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export</span>
+              <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
             </button>
             {showExportMenu && (
               <div className="absolute right-0 mt-1.5 w-48 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
