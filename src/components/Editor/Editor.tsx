@@ -3018,73 +3018,198 @@ export default function Editor() {
 
 
   // Export to PDF using browser native print engine (Fast, Searchable Vector format)
+  // Export to PDF using browser native print engine (Fast, Searchable Vector format)
   const exportToPdfPrint = (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
-    // Find all pages, check if they have a heading with "References" or "Bibliography"
-    const pages = document.querySelectorAll('.page-sheet')
-    const modifiedElements: HTMLElement[] = []
-    const hiddenElements: HTMLElement[] = []
-    const originalHeadingsText: { el: HTMLElement; text: string }[] = []
-    
-    // Temporarily capitalize all headings in the editor print canvas to Title Case
-    const allHeadings = document.querySelectorAll('.page-sheet h1, .page-sheet h2, .page-sheet h3, .page-sheet h4, .page-sheet h5, .page-sheet h6')
-    allHeadings.forEach((h) => {
-      const htmlEl = h as HTMLElement
-      originalHeadingsText.push({ el: htmlEl, text: htmlEl.innerText })
-      htmlEl.innerText = toTitleCase(htmlEl.innerText)
+    if (!editor) return
+
+    // Create print mount point in the DOM if it doesn't exist
+    let printMount = document.getElementById('print-mount')
+    if (!printMount) {
+      printMount = document.createElement('div')
+      printMount.id = 'print-mount'
+      document.body.appendChild(printMount)
+    }
+    printMount.innerHTML = ''
+    printMount.style.display = 'none'
+
+    // Parse pages from editor HTML
+    const htmlContent = editor.getHTML()
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(htmlContent, 'text/html')
+    const pageNodes = doc.querySelectorAll('div[data-type="page"]')
+
+    // Fallback if no page nodes exist
+    let pagesToProcess: Element[] = []
+    if (pageNodes.length > 0) {
+      pagesToProcess = Array.from(pageNodes)
+    } else {
+      const tempPage = doc.createElement('div')
+      tempPage.setAttribute('data-type', 'page')
+      tempPage.innerHTML = htmlContent
+      pagesToProcess = [tempPage]
+    }
+
+    const pagesToPrint = pagesToProcess.filter((pageNode) => {
+      const isCover = pageNode.getAttribute('data-cover') === 'true' || pageNode.querySelector('div[data-cover="true"]') !== null
+      const isToc = pageNode.getAttribute('data-toc') === 'true' || pageNode.querySelector('div[data-toc="true"]') !== null
+
+      if (scope === 'cover' && !isCover) return false
+      if (scope === 'toc' && !isToc) return false
+      if (scope === 'content' && (isCover || isToc)) return false
+      return true
     })
 
-    pages.forEach((page) => {
-      const htmlPage = page as HTMLElement
-      const isCover = htmlPage.querySelector('div[data-cover="true"]') || htmlPage.getAttribute('data-cover') === 'true'
-      const isToc = htmlPage.querySelector('div[data-toc="true"]') || htmlPage.getAttribute('data-toc') === 'true'
-      
-      let shouldHide = false
-      if (scope === 'cover' && !isCover) {
-        shouldHide = true
-      } else if (scope === 'toc' && !isToc) {
-        shouldHide = true
-      } else if (scope === 'content' && (isCover || isToc)) {
-        shouldHide = true
+    if (pagesToPrint.length === 0) {
+      alert('No pages to export in the selected scope.')
+      return
+    }
+
+    pagesToPrint.forEach((pageNode, index) => {
+      const isCover = pageNode.getAttribute('data-cover') === 'true' || pageNode.querySelector('div[data-cover="true"]') !== null
+
+      // Create page container
+      const pageSheet = document.createElement('div')
+      pageSheet.className = 'page-sheet'
+      pageSheet.style.width = '210mm'
+      pageSheet.style.height = '297mm'
+      pageSheet.style.position = 'relative'
+      pageSheet.style.pageBreakAfter = 'always'
+      pageSheet.style.breakAfter = 'page'
+      pageSheet.style.boxSizing = 'border-box'
+      pageSheet.style.backgroundColor = 'white'
+      pageSheet.style.color = 'black'
+      pageSheet.style.overflow = 'hidden'
+
+      const hasReferences = pageNode.textContent?.trim().toLowerCase().includes('references') || 
+                            pageNode.textContent?.trim().toLowerCase().includes('bibliography')
+
+      // Create header
+      if (!isCover) {
+        const headerEl = document.createElement('div')
+        headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-150 pb-2 select-none pointer-events-none text-xs text-zinc-400 font-sans'
+        headerEl.innerHTML = `<span>${docHeader}</span>`
+        headerEl.style.position = 'absolute'
+        headerEl.style.top = '0'
+        headerEl.style.left = '0'
+        headerEl.style.right = '0'
+        headerEl.style.height = '96px'
+        headerEl.style.padding = '0 72px'
+        headerEl.style.display = 'flex'
+        headerEl.style.alignItems = 'flex-end'
+        headerEl.style.justifyContent = 'space-between'
+        headerEl.style.borderBottom = '1px dashed #e4e4e7'
+        headerEl.style.paddingBottom = '8px'
+        pageSheet.appendChild(headerEl)
       }
 
-      if (shouldHide) {
-        htmlPage.classList.add('print-hidden-override')
-        hiddenElements.push(htmlPage)
-      }
+      // Create content
+      const contentEl = document.createElement('div')
+      contentEl.className = 'page-content'
+      contentEl.style.position = 'absolute'
+      contentEl.style.top = '96px'
+      contentEl.style.left = '0'
+      contentEl.style.right = '0'
+      contentEl.style.height = '931px'
+      contentEl.style.padding = '0 72px'
+      contentEl.style.overflow = 'hidden'
+      contentEl.style.textAlign = 'left'
+      contentEl.style.fontFamily = "'Times New Roman', Times, serif"
+      contentEl.style.fontSize = '12pt'
+      contentEl.style.lineHeight = '1.5'
+      contentEl.innerHTML = pageNode.innerHTML
 
-      const headings = page.querySelectorAll('h1, h2, h3, h4, h5, h6')
-      let hasReferencesHeading = false
+      // Capitalize headings to Title Case
+      const headings = contentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
       headings.forEach((h) => {
-        const text = h.textContent?.trim().toLowerCase() || ''
-        if (text === 'references' || text === 'bibliography') {
-          hasReferencesHeading = true
-        }
+        const htmlH = h as HTMLElement
+        htmlH.innerText = toTitleCase(htmlH.innerText)
+        htmlH.style.fontFamily = "'Times New Roman', Times, serif"
+        htmlH.style.color = 'black'
+        htmlH.style.fontWeight = 'bold'
       })
-      
-      if (hasReferencesHeading) {
-        // Add class to paragraphs for APA 7th hanging indent style
-        const paragraphs = page.querySelectorAll('p')
+
+      if (hasReferences) {
+        const paragraphs = contentEl.querySelectorAll('p')
         paragraphs.forEach((p) => {
           p.classList.add('apa-reference-entry')
-          modifiedElements.push(p as HTMLElement)
         })
       }
+
+      pageSheet.appendChild(contentEl)
+
+      // Create footer
+      if (!isCover) {
+        const footerEl = document.createElement('div')
+        footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-150 pt-2 select-none pointer-events-none text-xs text-zinc-400 font-sans'
+        footerEl.innerHTML = `
+          <span>${docFooter}</span>
+          <span>Page ${index + 1} of ${pagesToPrint.length}</span>
+        `
+        footerEl.style.position = 'absolute'
+        footerEl.style.bottom = '0'
+        footerEl.style.left = '0'
+        footerEl.style.right = '0'
+        footerEl.style.height = '96px'
+        footerEl.style.padding = '0 72px'
+        footerEl.style.display = 'flex'
+        footerEl.style.alignItems = 'flex-start'
+        footerEl.style.justifyContent = 'space-between'
+        footerEl.style.borderTop = '1px dashed #e4e4e7'
+        footerEl.style.paddingTop = '8px'
+        pageSheet.appendChild(footerEl)
+      }
+
+      printMount.appendChild(pageSheet)
     })
-    
+
+    // Add print styles to hide everything except print-mount
+    const styleEl = document.createElement('style')
+    styleEl.id = 'print-mount-styles'
+    styleEl.innerHTML = `
+      #print-mount {
+        display: none;
+      }
+      @media print {
+        body > *:not(#print-mount) {
+          display: none !important;
+        }
+        #print-mount {
+          display: block !important;
+          width: 210mm !important;
+          height: auto !important;
+          background: white !important;
+          color: black !important;
+        }
+        .page-sheet {
+          display: block !important;
+          width: 210mm !important;
+          height: 297mm !important;
+          background: white !important;
+          color: black !important;
+          page-break-after: always !important;
+          break-after: page !important;
+        }
+        .page-sheet * {
+          color: black !important;
+          background: transparent !important;
+        }
+        .apa-reference-entry {
+          padding-left: 0.5in !important;
+          text-indent: -0.5in !important;
+          margin-bottom: 0.5em !important;
+        }
+      }
+    `
+    document.head.appendChild(styleEl)
+
     window.print()
-    
-    // Clean up classes and restore headings after print dialog opens
+
+    // Clean up after print dialog opens
     setTimeout(() => {
-      modifiedElements.forEach((el) => {
-        el.classList.remove('apa-reference-entry')
-      })
-      hiddenElements.forEach((el) => {
-        el.classList.remove('print-hidden-override')
-      })
-      originalHeadingsText.forEach(({ el, text }) => {
-        el.innerText = text
-      })
-    }, 100)
+      if (printMount) printMount.innerHTML = ''
+      const styleElement = document.getElementById('print-mount-styles')
+      if (styleElement) styleElement.remove()
+    }, 1500)
   }
 
   const applyCoverPage = (details: typeof coverDetails) => {
