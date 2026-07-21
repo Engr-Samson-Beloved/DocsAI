@@ -2763,25 +2763,15 @@ export default function Editor() {
 
       pageSheet.appendChild(contentEl)
 
-      // Create footer
+      // Create clean academic footer — centered page number only
       if (!isCover) {
         const footerEl = document.createElement('div')
-        footerEl.className = 'absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-150 pt-2 select-none pointer-events-none text-xs text-zinc-400 font-sans'
-        footerEl.innerHTML = `
-          <span>${docFooter}</span>
-          <span>Page ${index + 1} of ${pagesToPrint.length}</span>
-        `
+        footerEl.innerHTML = `<span style="font-family: 'Times New Roman', Times, serif; font-size: 10pt; color: black;">${index + 1}</span>`
         footerEl.style.position = 'absolute'
-        footerEl.style.bottom = '0'
+        footerEl.style.bottom = '24px'
         footerEl.style.left = '0'
         footerEl.style.right = '0'
-        footerEl.style.height = '96px'
-        footerEl.style.padding = '0 72px'
-        footerEl.style.display = 'flex'
-        footerEl.style.alignItems = 'flex-start'
-        footerEl.style.justifyContent = 'space-between'
-        footerEl.style.borderTop = '1px dashed #e4e4e7'
-        footerEl.style.paddingTop = '8px'
+        footerEl.style.textAlign = 'center'
         pageSheet.appendChild(footerEl)
       }
 
@@ -2818,6 +2808,13 @@ export default function Editor() {
         .page-sheet * {
           color: black !important;
           background: transparent !important;
+        }
+        .page-content p {
+          text-align: justify !important;
+          text-indent: 0.5in !important;
+        }
+        .page-content h1, .page-content h2, .page-content h3 {
+          text-indent: 0 !important;
         }
         .apa-reference-entry {
           padding-left: 0.5in !important;
@@ -3166,12 +3163,12 @@ export default function Editor() {
         return
       }
 
-      // Helper to map alignments
+      // Helper to map alignments — default to JUSTIFIED for academic formatting
       const getAlignment = (align?: string) => {
         if (align === 'center') return AlignmentType.CENTER
         if (align === 'right') return AlignmentType.RIGHT
-        if (align === 'justify') return AlignmentType.JUSTIFIED
-        return AlignmentType.LEFT
+        if (align === 'left') return AlignmentType.LEFT
+        return AlignmentType.JUSTIFIED
       }
 
       // Helper to map headings
@@ -3373,11 +3370,16 @@ export default function Editor() {
                 }
               }
 
+              // Academic formatting: justified text with first-line indent for body paragraphs
+              const paraIndent = inReferencesSection
+                ? { left: 720, hanging: 720 }
+                : (isCover || isToc) ? undefined : { firstLine: 720 }
+
               children.push(
                 new Paragraph({
                   children: runs,
                   alignment: align,
-                  indent: inReferencesSection ? { left: 720, hanging: 720 } : undefined,
+                  indent: paraIndent,
                   spacing: { before: spacingBefore, after: spacingAfter, line: 360 }
                 })
               )
@@ -3470,7 +3472,17 @@ export default function Editor() {
       const doc = new Document({
         sections: [
           {
-            properties: {},
+            properties: {
+              page: {
+                margin: {
+                  top: 1440,    // 1 inch (1440 twips)
+                  bottom: 1440,
+                  left: 1440,
+                  right: 1440
+                }
+              },
+              titlePage: true  // Suppress header/footer on cover page
+            },
             headers: {
               default: new docx.Header({
                 children: [
@@ -3907,8 +3919,60 @@ export default function Editor() {
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i)
           const textContent = await page.getTextContent()
-          const pageStrings = textContent.items.map((item: any) => item.str).join(' ')
-          accumulatedHtml += `<p>${pageStrings}</p>`
+          const items = textContent.items as any[]
+          
+          // Group text items into paragraphs using Y-coordinate gaps
+          if (items.length === 0) continue
+          
+          let currentParagraph = ''
+          let lastY: number | null = null
+          const paragraphs: string[] = []
+          
+          for (const item of items) {
+            const str = item.str || ''
+            if (!str.trim()) continue
+            
+            const y = item.transform ? item.transform[5] : null
+            
+            if (lastY !== null && y !== null) {
+              const yGap = Math.abs(lastY - y)
+              // A Y gap > 5 units typically indicates a new line/paragraph
+              if (yGap > 5) {
+                if (currentParagraph.trim()) {
+                  paragraphs.push(currentParagraph.trim())
+                }
+                currentParagraph = str
+              } else {
+                currentParagraph += ' ' + str
+              }
+            } else {
+              currentParagraph += (currentParagraph ? ' ' : '') + str
+            }
+            lastY = y
+          }
+          
+          if (currentParagraph.trim()) {
+            paragraphs.push(currentParagraph.trim())
+          }
+          
+          // Detect headings: short lines that are all uppercase or start with chapter/section numbers
+          for (const para of paragraphs) {
+            const isHeading = (
+              (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
+              /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
+            )
+            const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
+            
+            if (isHeading) {
+              accumulatedHtml += `<h1>${para}</h1>`
+            } else if (isSectionHeading) {
+              const level = para.split('.').length // e.g. 1.2 = h2, 1.2.3 = h3
+              const hTag = level <= 2 ? 'h2' : 'h3'
+              accumulatedHtml += `<${hTag}>${para}</${hTag}>`
+            } else {
+              accumulatedHtml += `<p>${para}</p>`
+            }
+          }
         }
         
         setImportFileData({
@@ -3948,15 +4012,19 @@ export default function Editor() {
       contentToLoad = paragraphs.map(p => `<p>${p}</p>`).join('')
     }
 
+    // Clean imported content: convert any leftover markdown bold markers to HTML strong tags
+    let cleanedContent = contentToLoad
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    
     // 2. Load the content into Tiptap
-    editor.commands.setContent(ensurePaginatedHtml(contentToLoad))
+    editor.commands.setContent(ensurePaginatedHtml(cleanedContent))
     setIsSaved(false)
 
     // 3. Apply Style Formats
     if (importOption === 'seminar') {
-      // Apply Arial, 1.5 line height
+      // Apply Times New Roman (academic standard), 1.5 line height
       setTimeout(() => {
-        editor.chain().focus().selectAll().setFontFamily('arial').setLineHeight('1.5').run()
+        editor.chain().focus().selectAll().setFontFamily('Times New Roman').setLineHeight('1.5').run()
         runPagination(editor)
       }, 100)
     } else if (importOption === 'apa') {
@@ -4434,8 +4502,57 @@ export default function Editor() {
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i)
         const textContent = await page.getTextContent()
-        const pageStrings = textContent.items.map((item: any) => item.str).join(' ')
-        accumulatedHtml += `<p>${pageStrings}</p>`
+        const items = textContent.items as any[]
+        
+        if (items.length === 0) continue
+        
+        let currentParagraph = ''
+        let lastY: number | null = null
+        const paragraphs: string[] = []
+        
+        for (const item of items) {
+          const str = item.str || ''
+          if (!str.trim()) continue
+          
+          const y = item.transform ? item.transform[5] : null
+          
+          if (lastY !== null && y !== null) {
+            const yGap = Math.abs(lastY - y)
+            if (yGap > 5) {
+              if (currentParagraph.trim()) {
+                paragraphs.push(currentParagraph.trim())
+              }
+              currentParagraph = str
+            } else {
+              currentParagraph += ' ' + str
+            }
+          } else {
+            currentParagraph += (currentParagraph ? ' ' : '') + str
+          }
+          lastY = y
+        }
+        
+        if (currentParagraph.trim()) {
+          paragraphs.push(currentParagraph.trim())
+        }
+        
+        for (const para of paragraphs) {
+          const isHeading = (
+            (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
+            /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
+          )
+          const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
+          
+          if (isHeading) {
+            accumulatedHtml += `<h1>${para}</h1>`
+          } else if (isSectionHeading) {
+            const level = para.split('.').length
+            const hTag = level <= 2 ? 'h2' : 'h3'
+            accumulatedHtml += `<${hTag}>${para}</${hTag}>`
+          } else {
+            accumulatedHtml += `<p>${para}</p>`
+          }
+        }
       }
       return {
         name: file.name,
