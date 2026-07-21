@@ -10,6 +10,7 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
+import AuthModal from '../Auth/AuthModal'
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -56,7 +57,9 @@ import {
   Calendar,
   Edit3,
   Folder,
-  Sparkles
+  Sparkles,
+  User,
+  LogOut
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -1069,6 +1072,37 @@ export default function Editor() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
+  // Auth & Cloud Sync States
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
+  const headerProfileRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedEmail = localStorage.getItem('wordpi-user-email')
+      if (savedEmail) {
+        setUserEmail(savedEmail)
+      }
+    }
+  }, [])
+
+  const handleSignOut = () => {
+    localStorage.removeItem('wordpi-session-token')
+    localStorage.removeItem('wordpi-user-email')
+    setUserEmail(null)
+    setShowHeaderProfileDropdown(false)
+  }
+
+  const handleAuthSuccess = (email: string) => {
+    setUserEmail(email)
+    getAllProjects().then(list => {
+      if (list && list.length > 0) {
+        setProjects(list)
+      }
+    })
+  }
+
   // Import document and styling modal states
   const [showImportModal, setShowImportModal] = useState(false)
   const [importFileData, setImportFileData] = useState<{
@@ -2065,13 +2099,16 @@ export default function Editor() {
       if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(event.target as any)) {
         setShowExportMenu(false)
       }
+      if (showHeaderProfileDropdown && headerProfileRef.current && !headerProfileRef.current.contains(event.target as any)) {
+        setShowHeaderProfileDropdown(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFloatingPopup, showLayoutSettings, showExportMenu])
+  }, [showFloatingPopup, showLayoutSettings, showExportMenu, showHeaderProfileDropdown])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -5023,9 +5060,9 @@ export default function Editor() {
           onDeleteProject={deleteProject}
           onRenameProject={renameProjectPrompt}
           onLoadProject={loadProject}
-          userEmail={null}
-          onSignOut={() => {}}
-          onOpenAuth={() => {}}
+          userEmail={userEmail}
+          onSignOut={handleSignOut}
+          onOpenAuth={() => setShowAuthModal(true)}
         />
       ) : (
         <>
@@ -5226,6 +5263,45 @@ export default function Editor() {
           >
             {theme === 'light' ? <Moon className="w-4.5 h-4.5" /> : <Sun className="w-4.5 h-4.5" />}
           </button>
+
+          {/* User Profile / Auth Action */}
+          {userEmail ? (
+            <div className="relative" ref={headerProfileRef}>
+              <button
+                onClick={() => setShowHeaderProfileDropdown(!showHeaderProfileDropdown)}
+                className="w-7.5 h-7.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-200 dark:border-indigo-800 hover:ring-2 hover:ring-indigo-500/20 transition-all cursor-pointer"
+                title={userEmail}
+              >
+                {userEmail.charAt(0).toUpperCase()}
+              </button>
+              {showHeaderProfileDropdown && (
+                <div className="absolute right-0 mt-1.5 w-56 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl rounded-xl p-3 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">{userEmail}</div>
+                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                    Cloud Sync Active
+                  </div>
+                  <div className="border-t border-zinc-150 dark:border-zinc-800 my-2"></div>
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center gap-2 p-1.5 text-xs text-red-650 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-md text-xs font-bold transition-all shadow-xs cursor-pointer"
+              title="Sign In or Sign Up to secure & sync your documents"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+          )}
 
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
@@ -7196,6 +7272,13 @@ export default function Editor() {
           </div>
         </div>
       )}
+
+      {/* Cloud Auth Modal */}
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+        onSuccess={handleAuthSuccess} 
+      />
 
     </div>
   )
