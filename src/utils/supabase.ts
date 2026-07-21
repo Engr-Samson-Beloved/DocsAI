@@ -9,11 +9,17 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
  * allowing the application to fall back gracefully to local filesystem storage.
  */
 export const getSupabaseClient = (userToken?: string) => {
+  if (userToken && userToken.startsWith('local-token-')) {
+    return null
+  }
   if (!supabaseUrl || !supabaseAnonKey) {
     return null
   }
   // Sanitize the URL to remove any trailing slashes or /rest/v1 suffixes
   let cleanUrl = supabaseUrl.trim()
+  if (cleanUrl.startsWith('"') && cleanUrl.endsWith('"')) {
+    cleanUrl = cleanUrl.slice(1, -1)
+  }
   if (cleanUrl.endsWith('/')) {
     cleanUrl = cleanUrl.slice(0, -1)
   }

@@ -18,8 +18,10 @@ import {
   deleteSourcesForProject,
   saveProject,
   getAllProjects,
+  syncProjects,
   deleteProject as dbDeleteProject,
-  saveProjectsBatch
+  saveProjectsBatch,
+  clearAllLocalData
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import {
@@ -1096,10 +1098,8 @@ export default function Editor() {
 
   const handleAuthSuccess = (email: string) => {
     setUserEmail(email)
-    getAllProjects().then(list => {
-      if (list && list.length > 0) {
-        setProjects(list)
-      }
+    syncProjects().then(list => {
+      setProjects(list || [])
     })
   }
 
@@ -1572,8 +1572,8 @@ export default function Editor() {
       let list: Project[] = []
       
       try {
-        // 1. Try to load projects from IndexedDB
-        list = await getAllProjects()
+        // 1. Try to load and sync projects from database/IndexedDB
+        list = await syncProjects()
         
         // 2. If IndexedDB is empty, check for legacy localStorage projects to migrate
         const storedProjects = localStorage.getItem(STORAGE_KEY_PROJECTS)
