@@ -367,8 +367,7 @@ body {
   /* Each page-sheet = one A4 printed page. */
   .page-sheet {
     width: 210mm !important;
-    height: auto !important;
-    min-height: 297mm !important;
+    height: 297mm !important;
     position: relative !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -379,25 +378,7 @@ body {
     box-sizing: border-box !important;
     background: white !important;
     color: black !important;
-    overflow: visible !important;
-    font-family: 'Times New Roman', Times, serif !important;
-    line-height: 1.5 !important;
-  }
-
-  /* 
-   * The page-content div sits absolutely inside the page-sheet with fixed px heights.
-   * For print, we must undo absolute/fixed dimensions so content flows naturally.
-  */
-  .page-content {
-    position: static !important;
-    overflow: visible !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    padding-top: 25mm !important;
-    padding-bottom: 25mm !important;
-    padding-left: 20mm !important;
-    padding-right: 20mm !important;
+    overflow: hidden !important;
   }
 
   /* Hide decorative header/footer elements to avoid overlap with static content */
@@ -407,6 +388,7 @@ body {
 
   .page-sheet * {
     font-family: 'Times New Roman', Times, serif !important;
+    font-size: 12pt !important;
     line-height: 1.5 !important;
     color: black !important;
     background-color: transparent !important;
@@ -419,6 +401,7 @@ body {
   .page-sheet h4,
   .page-sheet h5,
   .page-sheet h6 {
+    font-size: 12pt !important;
     font-weight: bold !important;
     color: black !important;
   }
