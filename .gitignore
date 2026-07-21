@@ -44,3 +44,17 @@ next-env.d.ts
 # local filesystem data storage
 /data
 
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local scratch scripts & generated output
+/scratch/
+/Input/
+/sample/
+/Sample/
+requirements.txt
+
+# Gemini agent workspace
+.agents/

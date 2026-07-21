@@ -2739,7 +2739,10 @@ export default function Editor() {
       contentEl.style.fontFamily = "'Times New Roman', Times, serif"
       contentEl.style.fontSize = '12pt'
       contentEl.style.lineHeight = '1.5'
-      contentEl.innerHTML = pageNode.innerHTML
+      // Replace markdown bold asterisks in innerHTML with strong tags
+      let cleanHtml = pageNode.innerHTML || ''
+      cleanHtml = cleanHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      contentEl.innerHTML = cleanHtml
 
       // Capitalize headings to Title Case
       const headings = contentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
@@ -3258,7 +3261,7 @@ export default function Editor() {
             const runs = (node.content || []).map((childNode: any) => {
               const marks = childNode.marks || []
               return new TextRun({
-                text: toTitleCase(childNode.text || ''),
+                text: toTitleCase((childNode.text || '').replace(/\*\*/g, '')),
                 bold: true,
                 color: "000000", // black / uncolored
                 italics: marks.some((m: any) => m.type === 'italic'),
@@ -3316,17 +3319,45 @@ export default function Editor() {
                 })
               )
             } else {
-              const runs = (node.content || []).map((childNode: any) => {
-                const marks = childNode.marks || []
-                return new TextRun({
-                  text: childNode.text || '',
-                  bold: marks.some((m: any) => m.type === 'bold') || isCover,
-                  italics: marks.some((m: any) => m.type === 'italic'),
-                  underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                  strike: marks.some((m: any) => m.type === 'strike'),
-                  font: 'Times New Roman'
+              const runs: any[] = []
+              if (node.content && node.content.length > 0) {
+                node.content.forEach((childNode: any) => {
+                  const text = childNode.text || ''
+                  const marks = childNode.marks || []
+                  const isBoldFromMark = marks.some((m: any) => m.type === 'bold') || isCover
+                  const isItalic = marks.some((m: any) => m.type === 'italic')
+                  const isUnderline = marks.some((m: any) => m.type === 'underline')
+                  const isStrike = marks.some((m: any) => m.type === 'strike')
+
+                  if (text.includes('**')) {
+                    const parts = text.split('**')
+                    parts.forEach((part: string, partIdx: number) => {
+                      if (!part) return
+                      runs.push(
+                        new TextRun({
+                          text: part,
+                          bold: isBoldFromMark || (partIdx % 2 === 1),
+                          italics: isItalic,
+                          underline: isUnderline ? {} : undefined,
+                          strike: isStrike,
+                          font: 'Times New Roman'
+                        })
+                      )
+                    })
+                  } else {
+                    runs.push(
+                      new TextRun({
+                        text: text,
+                        bold: isBoldFromMark,
+                        italics: isItalic,
+                        underline: isUnderline ? {} : undefined,
+                        strike: isStrike,
+                        font: 'Times New Roman'
+                      })
+                    )
+                  }
                 })
-              })
+              }
 
               let spacingBefore = 0
               let spacingAfter = 120
@@ -3355,16 +3386,42 @@ export default function Editor() {
             const isOrdered = node.type === 'orderedList'
             node.content?.forEach((listItem: any) => {
               listItem.content?.forEach((listItemPara: any) => {
-                const runs = (listItemPara.content || []).map((childNode: any) => {
-                  const marks = childNode.marks || []
-                  return new TextRun({
-                    text: childNode.text || '',
-                    bold: marks.some((m: any) => m.type === 'bold'),
-                    italics: marks.some((m: any) => m.type === 'italic'),
-                    underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                    font: 'Times New Roman'
+                const runs: any[] = []
+                if (listItemPara.content && listItemPara.content.length > 0) {
+                  listItemPara.content.forEach((childNode: any) => {
+                    const text = childNode.text || ''
+                    const marks = childNode.marks || []
+                    const isBoldFromMark = marks.some((m: any) => m.type === 'bold')
+                    const isItalic = marks.some((m: any) => m.type === 'italic')
+                    const isUnderline = marks.some((m: any) => m.type === 'underline')
+
+                    if (text.includes('**')) {
+                      const parts = text.split('**')
+                      parts.forEach((part: string, partIdx: number) => {
+                        if (!part) return
+                        runs.push(
+                          new TextRun({
+                            text: part,
+                            bold: isBoldFromMark || (partIdx % 2 === 1),
+                            italics: isItalic,
+                            underline: isUnderline ? {} : undefined,
+                            font: 'Times New Roman'
+                          })
+                        )
+                      })
+                    } else {
+                      runs.push(
+                        new TextRun({
+                          text: text,
+                          bold: isBoldFromMark,
+                          italics: isItalic,
+                          underline: isUnderline ? {} : undefined,
+                          font: 'Times New Roman'
+                        })
+                      )
+                    }
                   })
-                })
+                }
 
                 children.push(
                   new Paragraph({
