@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState } from 'react'
+import { PricingModal } from '../Subscription/PricingModal'
 import {
   Plus,
   Search,
@@ -825,101 +826,11 @@ export default function Dashboard({
       </div>
 
       {/* Upgrade Plan Modal */}
-      {showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl relative space-y-6 animate-in scale-in duration-200">
-            {/* Close Button */}
-            <button
-              onClick={() => setShowUpgradeModal(false)}
-              className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-755 text-xl font-bold cursor-pointer"
-            >
-              ×
-            </button>
-            
-            <div className="text-center space-y-2">
-              <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 text-[10px] uppercase font-bold tracking-widest px-2.5 py-1 rounded-full">
-                WordPI Premium
-              </span>
-              <h3 className="text-xl sm:text-2xl font-extrabold text-zinc-900 dark:text-zinc-50">
-                Supercharge Your Academic Document Intelligence
-              </h3>
-              <p className="text-xs text-zinc-500 max-w-lg mx-auto leading-relaxed">
-                Unlock advanced formatting rules, bibliography automated citation engines, and faster AI processing limit cycles.
-              </p>
-            </div>
-
-            {/* Pricing Tiers Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-              {/* Free Tier */}
-              <div className="border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between space-y-5 bg-zinc-50/50 dark:bg-zinc-900/30">
-                <div className="space-y-3">
-                  <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">WordPI Free</h4>
-                  <div className="flex items-baseline text-zinc-900 dark:text-zinc-50">
-                    <span className="text-2xl font-extrabold">$0</span>
-                    <span className="text-xs text-zinc-500 ml-1">/ month</span>
-                  </div>
-                  <ul className="text-[11px] text-zinc-500 dark:text-zinc-400 space-y-2 pt-2">
-                    <li className="flex items-center gap-1.5">✓ 15 API calls / min</li>
-                    <li className="flex items-center gap-1.5">✓ Zero-server browser storage</li>
-                    <li className="flex items-center gap-1.5">✓ Basic paper outlines</li>
-                  </ul>
-                </div>
-                <button className="w-full py-2 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold rounded-xl text-xs cursor-default">
-                  Active Plan
-                </button>
-              </div>
-
-              {/* Pro Tier (Popular) */}
-              <div className="border-2 border-blue-500 dark:border-blue-600 rounded-2xl p-5 flex flex-col justify-between space-y-5 bg-blue-50/10 dark:bg-blue-950/10 relative shadow-sm">
-                <span className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full">
-                  Popular
-                </span>
-                <div className="space-y-3">
-                  <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Researcher Pro</h4>
-                  <div className="flex items-baseline text-zinc-900 dark:text-zinc-50">
-                    <span className="text-2xl font-extrabold">$8</span>
-                    <span className="text-xs text-zinc-500 ml-1">/ month</span>
-                  </div>
-                  <ul className="text-[11px] text-zinc-500 dark:text-zinc-400 space-y-2 pt-2">
-                    <li className="flex items-center gap-1.5">✓ Priority high-speed API keys</li>
-                    <li className="flex items-center gap-1.5">✓ Bibliography automated citation</li>
-                    <li className="flex items-center gap-1.5">✓ Styled PDF custom formats</li>
-                    <li className="flex items-center gap-1.5">✓ Unlimited reference documents</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => alert("Subscription gateway coming soon! Thank you for your interest.")}
-                  className="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
-                >
-                  Upgrade to Pro
-                </button>
-              </div>
-
-              {/* Institution Tier */}
-              <div className="border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 flex flex-col justify-between space-y-5 bg-zinc-50/50 dark:bg-zinc-900/30">
-                <div className="space-y-3">
-                  <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Academic Lab</h4>
-                  <div className="flex items-baseline text-zinc-900 dark:text-zinc-50">
-                    <span className="text-2xl font-extrabold">$19</span>
-                    <span className="text-xs text-zinc-500 ml-1">/ user / mo</span>
-                  </div>
-                  <ul className="text-[11px] text-zinc-500 dark:text-zinc-400 space-y-2 pt-2">
-                    <li className="flex items-center gap-1.5">✓ Shared workspace & projects</li>
-                    <li className="flex items-center gap-1.5">✓ University stylesheet matching</li>
-                    <li className="flex items-center gap-1.5">✓ SSO & audit history controls</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => alert("Please contact our sales team at sales@wordpi.edu")}
-                  className="w-full py-2 bg-zinc-850 hover:bg-zinc-800 text-white font-bold rounded-xl text-xs cursor-pointer"
-                >
-                  Contact Us
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <PricingModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        userEmail={userEmail}
+      />
 
     </div>
   )

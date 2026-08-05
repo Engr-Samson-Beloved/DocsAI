@@ -12,7 +12,7 @@ const PRIORITIZED_MODELS = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, context, academicLevel, documentType, modelTarget } = await req.json()
+    const { prompt, context, academicLevel, documentType, modelTarget, userEmail } = await req.json()
 
     if (!prompt) {
       return new Response(
