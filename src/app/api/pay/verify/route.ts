@@ -35,16 +35,33 @@ export async function GET(req: NextRequest) {
 
     const data = await res.json()
 
-    if (!res.ok || !data.status || data.data?.status !== 'success') {
-      console.warn('[Korapay Verify] Transaction not successful:', data)
+    if (!res.ok || !data.status) {
+      console.warn('[Korapay Verify] Verification call failed or reference not found:', data)
       return NextResponse.json({
         success: false,
-        status: data.data?.status || 'pending',
-        message: data.message || 'Payment has not been completed yet.'
-      }, { status: 400 })
+        status: 'not_found',
+        message: data.message || 'Transaction reference not found on Korapay.'
+      }, { status: 404 })
     }
 
     const transactionData = data.data
+    const koraStatus = (transactionData?.status || '').toLowerCase()
+
+    if (koraStatus !== 'success') {
+      console.warn(`[Korapay Verify] Reference ${reference} is NOT success. Status: ${koraStatus}`)
+      
+      const isFailed = koraStatus === 'failed' || koraStatus === 'declined' || koraStatus === 'expired'
+      
+      return NextResponse.json({
+        success: false,
+        status: isFailed ? 'failed' : 'pending',
+        message: isFailed 
+          ? 'Transaction failed or was declined on Korapay. No charges were made.'
+          : 'Payment is incomplete or pending completion on Korapay.'
+      }, { status: 400 })
+    }
+
+    // Payment is CONFIRMED SUCCESSFUL by Korapay API!
     const userEmail = transactionData.customer?.email || emailParam || 'user@docuai.app'
     const amount = transactionData.amount || 5000
     const planTier: 'basic' | 'pro' | 'enterprise' = transactionData.metadata?.plan_tier || tierParam ||
@@ -80,7 +97,8 @@ export async function GET(req: NextRequest) {
         status: 'active',
         korapay_reference: reference,
         expiration_date: expirationDate.toISOString()
-      }
+      },
+      message: `Payment Verified! Your ${planTier.toUpperCase()} plan is active.`
     })
   } catch (error: any) {
     console.error('Korapay verification error:', error)

@@ -249,3 +249,73 @@ export async function saveSubscription(sub: UserSubscription): Promise<void> {
     }
   }
 }
+
+/**
+ * Verifies returning payment references from Korapay redirect URLs
+ */
+export async function verifyPaymentCallback(userEmail?: string | null): Promise<{
+  checked: boolean
+  success: boolean
+  status: 'active' | 'failed' | 'pending' | 'none'
+  message: string
+  subscription?: UserSubscription
+}> {
+  if (typeof window === 'undefined') return { checked: false, success: false, status: 'none', message: '' }
+
+  const params = new URLSearchParams(window.location.search)
+  const reference = params.get('reference')
+  const tier = (params.get('tier') || 'basic') as 'basic' | 'pro' | 'enterprise'
+  const email = userEmail || 'user@docuai.app'
+
+  if (!reference) {
+    return { checked: false, success: false, status: 'none', message: '' }
+  }
+
+  console.log(`[Payment Verification] Verifying payment reference from URL: ${reference}`)
+
+  try {
+    const res = await fetch(`/api/pay/verify?reference=${reference}&tier=${tier}&email=${encodeURIComponent(email)}`)
+    const data = await res.json()
+
+    // Clean up URL query parameters to avoid duplicate verification loops
+    window.history.replaceState({}, document.title, window.location.pathname)
+
+    if (res.ok && data.success && data.status === 'active') {
+      const newSub: UserSubscription = {
+        user_id: email,
+        email: email,
+        plan_tier: tier,
+        amount: tier === 'enterprise' ? 10000 : tier === 'pro' ? 7000 : 5000,
+        status: 'active',
+        korapay_reference: reference,
+        expiration_date: data.subscription?.expiration_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      await saveSubscription(newSub)
+
+      return {
+        checked: true,
+        success: true,
+        status: 'active',
+        message: `✅ Payment Verified! Your ${PLAN_DETAILS[tier].name} is active for 30 days.`,
+        subscription: newSub
+      }
+    } else {
+      return {
+        checked: true,
+        success: false,
+        status: (data.status as any) || 'failed',
+        message: `❌ Payment Incomplete or Declined: Korapay reports this transaction was not completed. Your account remains on the Free fallback tier.`
+      }
+    }
+  } catch (err: any) {
+    window.history.replaceState({}, document.title, window.location.pathname)
+    return {
+      checked: true,
+      success: false,
+      status: 'failed',
+      message: `❌ Verification Error: Could not confirm transaction status. If debited, your subscription will be auto-activated via webhook shortly.`
+    }
+  }
+}
