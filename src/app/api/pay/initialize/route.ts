@@ -11,6 +11,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Enforce authentication: prevent guest/anonymous payment initializations to avoid loss of funds
+    const cleanEmail = email.trim().toLowerCase()
+    if (!cleanEmail || cleanEmail.includes('guest') || cleanEmail === 'guest@docuai.app') {
+      return NextResponse.json(
+        { error: 'Authentication Required: Please sign in or create an account before subscribing so your payment is linked safely to your account.' },
+        { status: 401 }
+      )
+    }
+
     const tierAmounts: Record<string, number> = {
       basic: 5000,
       pro: 7000,
@@ -51,19 +60,19 @@ export async function POST(req: NextRequest) {
     const reference = `DOCUAI_KORA_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`
 
     // Call official Korapay Charges Initialize API
-    console.log(`[Korapay Init] Initializing live charge for ${email}, plan: ${planTier}, amount: ₦${amount}, ref: ${reference}, appUrl: ${appUrl}`)
+    console.log(`[Korapay Init] Initializing live charge for ${cleanEmail}, plan: ${planTier}, amount: ₦${amount}, ref: ${reference}, appUrl: ${appUrl}`)
 
     const payload: any = {
       amount: amount,
       currency: 'NGN',
       reference: reference,
       customer: {
-        email: email
+        email: cleanEmail
       },
       merchant_bears_cost: false,
       metadata: {
-        user_id: userId || email,
-        email: email,
+        user_id: userId || cleanEmail,
+        email: cleanEmail,
         plan_tier: planTier
       }
     }

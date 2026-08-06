@@ -11,7 +11,9 @@ import {
   CreditCard,
   AlertCircle,
   Clock,
-  ExternalLink
+  ExternalLink,
+  LogIn,
+  Lock
 } from 'lucide-react'
 import {
   PLAN_DETAILS,
@@ -24,6 +26,7 @@ interface PricingModalProps {
   isOpen: boolean
   onClose: () => void
   userEmail: string | null
+  onOpenAuth?: () => void
   onSubscriptionUpdated?: (sub: UserSubscription) => void
 }
 
@@ -31,6 +34,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   isOpen,
   onClose,
   userEmail,
+  onOpenAuth,
   onSubscriptionUpdated
 }) => {
   const [currentSub, setCurrentSub] = useState<UserSubscription | null>(null)
@@ -38,6 +42,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [redirectingUrl, setRedirectingUrl] = useState<string | null>(null)
+
+  const isGuest = !userEmail || userEmail.includes('guest')
 
   useEffect(() => {
     if (isOpen) {
@@ -71,12 +77,23 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   if (!isOpen) return null
 
   const handleSubscribe = async (tier: 'basic' | 'pro' | 'enterprise') => {
-    setLoadingTier(tier)
     setErrorMessage(null)
     setSuccessMessage(null)
     setRedirectingUrl(null)
 
-    const email = userEmail || 'guest@docuai.app'
+    // Enforce Authentication: Prevent unauthenticated guest payments to prevent loss of funds
+    if (isGuest) {
+      setErrorMessage('🔐 Sign In Required: Please sign in or register an account before subscribing so your payment and subscription access are linked safely to your email.')
+      if (onOpenAuth) {
+        setTimeout(() => {
+          onClose()
+          onOpenAuth()
+        }, 1500)
+      }
+      return
+    }
+
+    setLoadingTier(tier)
 
     try {
       // 1. Initialize charge with backend server
@@ -84,9 +101,9 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email,
+          email: userEmail,
           planTier: tier,
-          userId: email
+          userId: userEmail
         })
       })
 
@@ -168,13 +185,35 @@ export const PricingModal: React.FC<PricingModalProps> = ({
             Select your plan to complete payment securely via Korapay. Instant automated activation upon payment confirmation.
           </p>
 
-          {/* Fallback Free Quota Banner */}
-          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl max-w-2xl mx-auto flex items-start gap-3 text-left">
-            <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-800 dark:text-amber-300">
-              <strong className="font-bold">Free Quota Fallback:</strong> Expired subscriptions automatically receive <strong className="underline">5 free AI generations every 24 hours</strong>. Your work is never locked out!
+          {/* Authentication Banner for Guest Users */}
+          {isGuest ? (
+            <div className="mt-4 p-3.5 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl max-w-2xl mx-auto flex items-center justify-between gap-3 text-left">
+              <div className="flex items-center gap-2.5 text-xs text-indigo-900 dark:text-indigo-200">
+                <Lock className="w-4 h-4 text-indigo-600 shrink-0" />
+                <span><strong>Sign In Required:</strong> You are currently browsing as a guest. Please sign in before subscribing so your plan is linked safely to your email account.</span>
+              </div>
+              {onOpenAuth && (
+                <button
+                  onClick={() => {
+                    onClose()
+                    onOpenAuth()
+                  }}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shrink-0 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign In Now</span>
+                </button>
+              )}
             </div>
-          </div>
+          ) : (
+            /* Fallback Free Quota Banner */
+            <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl max-w-2xl mx-auto flex items-start gap-3 text-left">
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-800 dark:text-amber-300">
+                <strong className="font-bold">Free Quota Fallback:</strong> Expired subscriptions automatically receive <strong className="underline">5 free AI generations every 24 hours</strong>. Your work is never locked out!
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Notifications */}
@@ -260,6 +299,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   <ShieldCheck className="w-4 h-4" />
                   <span>Current Active Plan</span>
                 </>
+              ) : isGuest ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Sign In to Pay ₦5,000</span>
+                </>
               ) : (
                 <>
                   <CreditCard className="w-4 h-4" />
@@ -326,6 +370,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                   <ShieldCheck className="w-4 h-4" />
                   <span>Current Active Plan</span>
                 </>
+              ) : isGuest ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Sign In to Pay ₦7,000</span>
+                </>
               ) : (
                 <>
                   <Zap className="w-4 h-4 fill-current" />
@@ -389,6 +438,11 @@ export const PricingModal: React.FC<PricingModalProps> = ({
                 <>
                   <ShieldCheck className="w-4 h-4" />
                   <span>Current Active Plan</span>
+                </>
+              ) : isGuest ? (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Sign In to Pay ₦10,000</span>
                 </>
               ) : (
                 <>

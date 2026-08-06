@@ -830,6 +830,7 @@ export default function Dashboard({
         isOpen={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
         userEmail={userEmail}
+        onOpenAuth={onOpenAuth}
       />
 
     </div>
