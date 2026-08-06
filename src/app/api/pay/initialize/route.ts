@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     // Only attach callback URLs if they are valid public HTTPS URLs (or local HTTP during test mode)
     if (appUrl && (!appUrl.includes('localhost') || korapaySecret.startsWith('sk_test_'))) {
       payload.notification_url = `${appUrl}/api/pay/webhook`
-      payload.redirect_url = `${appUrl}/dashboard?payment=success&reference=${reference}&tier=${planTier}`
+      payload.redirect_url = `${appUrl}/?payment=success&reference=${reference}&tier=${planTier}`
     }
 
     const response = await fetch(`${korapayBaseUrl}/charges/initialize`, {
