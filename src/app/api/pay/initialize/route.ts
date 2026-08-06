@@ -28,11 +28,22 @@ export async function POST(req: NextRequest) {
     const korapaySecret = process.env.KORAPAY_SECRET_KEY
     const korapayPublic = process.env.NEXT_PUBLIC_KORAPAY_PUBLIC_KEY
     const korapayBaseUrl = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1'
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || req.headers.get('origin') || 'http://localhost:3000'
+
+    // Dynamically derive host & scheme for production HTTPS URLs
+    const hostHeader = req.headers.get('host')
+    const protoHeader = req.headers.get('x-forwarded-proto') || (hostHeader?.includes('localhost') ? 'http' : 'https')
+    const inferredUrl = hostHeader ? `${protoHeader}://${hostHeader}` : null
+    
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL || req.headers.get('origin') || inferredUrl || 'http://localhost:3000'
+    
+    // In live mode, ensure localhost URLs are replaced by inferred production domain if available
+    if (korapaySecret?.startsWith('sk_live_') && appUrl.includes('localhost') && inferredUrl && !inferredUrl.includes('localhost')) {
+      appUrl = inferredUrl
+    }
 
     if (!korapaySecret || korapaySecret.includes('your_korapay')) {
       return NextResponse.json(
-        { error: 'Korapay Secret Key is not configured on the server. Please check your .env.local configuration.' },
+        { error: 'Korapay Secret Key is not configured on the server. Please check your production environment variables.' },
         { status: 500 }
       )
     }
@@ -40,7 +51,28 @@ export async function POST(req: NextRequest) {
     const reference = `DOCUAI_KORA_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`
 
     // Call official Korapay Charges Initialize API
-    console.log(`[Korapay Init] Initializing charge for ${email}, plan: ${planTier}, amount: ₦${amount}, ref: ${reference}`)
+    console.log(`[Korapay Init] Initializing live charge for ${email}, plan: ${planTier}, amount: ₦${amount}, ref: ${reference}, appUrl: ${appUrl}`)
+
+    const payload: any = {
+      amount: amount,
+      currency: 'NGN',
+      reference: reference,
+      customer: {
+        email: email
+      },
+      merchant_bears_cost: false,
+      metadata: {
+        user_id: userId || email,
+        email: email,
+        plan_tier: planTier
+      }
+    }
+
+    // Only attach callback URLs if they are valid public HTTPS URLs (or local HTTP during test mode)
+    if (appUrl && (!appUrl.includes('localhost') || korapaySecret.startsWith('sk_test_'))) {
+      payload.notification_url = `${appUrl}/api/pay/webhook`
+      payload.redirect_url = `${appUrl}/dashboard?payment=success&reference=${reference}&tier=${planTier}`
+    }
 
     const response = await fetch(`${korapayBaseUrl}/charges/initialize`, {
       method: 'POST',
@@ -48,22 +80,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${korapaySecret}`
       },
-      body: JSON.stringify({
-        amount: amount,
-        currency: 'NGN',
-        reference: reference,
-        customer: {
-          email: email
-        },
-        notification_url: `${appUrl}/api/pay/webhook`,
-        redirect_url: `${appUrl}/dashboard?payment=success&reference=${reference}&tier=${planTier}`,
-        merchant_bears_cost: false,
-        metadata: {
-          user_id: userId || email,
-          email: email,
-          plan_tier: planTier
-        }
-      })
+      body: JSON.stringify(payload)
     })
 
     const korapayData = await response.json()
