@@ -27,14 +27,6 @@ interface PricingModalProps {
   onSubscriptionUpdated?: (sub: UserSubscription) => void
 }
 
-declare global {
-  interface Window {
-    Korapay?: {
-      initialize: (config: any) => void
-    }
-  }
-}
-
 export const PricingModal: React.FC<PricingModalProps> = ({
   isOpen,
   onClose,
@@ -50,7 +42,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadSubscription()
-      loadKorapayScript()
       checkUrlPaymentVerification()
     }
   }, [isOpen, userEmail])
@@ -58,17 +49,6 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   const loadSubscription = async () => {
     const sub = await getSubscription(userEmail)
     setCurrentSub(sub)
-  }
-
-  // Load Korapay Inline SDK
-  const loadKorapayScript = () => {
-    if (document.getElementById('korapay-js-sdk')) return
-
-    const script = document.createElement('script')
-    script.id = 'korapay-js-sdk'
-    script.src = 'https://korablobstorage.blob.core.windows.net/modal-bucket/korapay-collections.min.js'
-    script.async = true
-    document.body.appendChild(script)
   }
 
   // Check if returning from Korapay checkout redirect
@@ -112,52 +92,17 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
       const data = await res.json()
 
-      if (!res.ok || !data.success) {
+      if (!res.ok || !data.success || !data.checkoutUrl) {
         throw new Error(data.error || 'Failed to initialize Korapay payment')
       }
 
       const checkoutUrl = data.checkoutUrl
-      const reference = data.reference
-      const publicKey = data.publicKey || process.env.NEXT_PUBLIC_KORAPAY_PUBLIC_KEY
-
-      // 2. Try Korapay Popup Modal if SDK script is loaded
-      if (window.Korapay && publicKey) {
-        try {
-          console.log('[Korapay Modal] Initializing popup modal...')
-          window.Korapay.initialize({
-            key: publicKey,
-            reference: reference,
-            amount: data.amount,
-            currency: 'NGN',
-            customer: {
-              email: email,
-              name: email.split('@')[0]
-            },
-            notification_url: `${window.location.origin}/api/pay/webhook`,
-            onClose: () => {
-              setLoadingTier(null)
-              console.log('Korapay checkout modal closed by user')
-            },
-            onSuccess: async (response: any) => {
-              console.log('Korapay Payment Success Response:', response)
-              await verifyAndActivate(response.reference || reference, tier, email)
-              setLoadingTier(null)
-            }
-          })
-          return
-        } catch (modalErr) {
-          console.warn('Korapay popup initialization failed, falling back to direct checkout URL redirect:', modalErr)
-        }
-      }
-
-      // 3. Fallback: Redirect directly to Korapay hosted checkout page
-      if (checkoutUrl) {
-        console.log('[Korapay Redirect] Opening checkout page:', checkoutUrl)
-        setRedirectingUrl(checkoutUrl)
-        window.location.href = checkoutUrl
-      } else {
-        throw new Error('No valid checkout URL received from Korapay API.')
-      }
+      console.log('[Korapay Checkout Redirect] Redirecting to:', checkoutUrl)
+      
+      setRedirectingUrl(checkoutUrl)
+      
+      // 2. Redirect directly to official Korapay hosted checkout page
+      window.location.href = checkoutUrl
     } catch (err: any) {
       console.error('Subscription error:', err)
       setErrorMessage(err.message || 'Payment initialization failed. Please try again.')
