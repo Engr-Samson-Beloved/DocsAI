@@ -30,25 +30,18 @@ export async function POST(req: NextRequest) {
     const korapayBaseUrl = process.env.KORAPAY_BASE_URL || 'https://api.korapay.com/merchant/api/v1'
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || req.headers.get('origin') || 'http://localhost:3000'
 
-    const reference = `DOCUAI_KORA_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`
-
-    // If Korapay secret key is not set or is test key, handle initialization gracefully
-    if (!korapaySecret || korapaySecret.includes('xxxxxxxx')) {
-      console.warn('[Korapay] Secret key missing or placeholder. Returning mock checkout initialization response.')
-      return NextResponse.json({
-        success: true,
-        reference,
-        amount,
-        currency: 'NGN',
-        planTier,
-        publicKey: korapayPublic || 'pk_test_mock_key',
-        checkoutUrl: `${appUrl}/dashboard?payment=success&reference=${reference}&tier=${planTier}`,
-        isMockMode: true,
-        message: 'Korapay Test Mode initialized (Add KORAPAY_SECRET_KEY in .env.local for live payments).'
-      })
+    if (!korapaySecret || korapaySecret.includes('your_korapay')) {
+      return NextResponse.json(
+        { error: 'Korapay Secret Key is not configured on the server. Please check your .env.local configuration.' },
+        { status: 500 }
+      )
     }
 
+    const reference = `DOCUAI_KORA_${Date.now()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`
+
     // Call official Korapay Charges Initialize API
+    console.log(`[Korapay Init] Initializing charge for ${email}, plan: ${planTier}, amount: ₦${amount}, ref: ${reference}`)
+
     const response = await fetch(`${korapayBaseUrl}/charges/initialize`, {
       method: 'POST',
       headers: {
@@ -83,6 +76,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const checkoutUrl = korapayData.data?.checkout_url || korapayData.data?.payment_url
+
     return NextResponse.json({
       success: true,
       reference,
@@ -90,9 +85,7 @@ export async function POST(req: NextRequest) {
       currency: 'NGN',
       planTier,
       publicKey: korapayPublic,
-      checkoutUrl: korapayData.data?.checkout_url || korapayData.data?.payment_url,
-      checkoutToken: korapayData.data?.token || korapayData.data?.charge_token,
-      isMockMode: false
+      checkoutUrl
     })
   } catch (error: any) {
     console.error('Korapay initialization exception:', error)

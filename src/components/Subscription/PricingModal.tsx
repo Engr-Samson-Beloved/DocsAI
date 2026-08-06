@@ -10,13 +10,11 @@ import {
   ShieldCheck,
   CreditCard,
   AlertCircle,
-  HelpCircle,
   Clock,
-  ArrowRight
+  ExternalLink
 } from 'lucide-react'
 import {
   PLAN_DETAILS,
-  SubscriptionTier,
   UserSubscription,
   getSubscription,
   saveSubscription
@@ -47,11 +45,13 @@ export const PricingModal: React.FC<PricingModalProps> = ({
   const [loadingTier, setLoadingTier] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [redirectingUrl, setRedirectingUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen) {
       loadSubscription()
       loadKorapayScript()
+      checkUrlPaymentVerification()
     }
   }, [isOpen, userEmail])
 
@@ -71,17 +71,35 @@ export const PricingModal: React.FC<PricingModalProps> = ({
     document.body.appendChild(script)
   }
 
+  // Check if returning from Korapay checkout redirect
+  const checkUrlPaymentVerification = async () => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const paymentStatus = params.get('payment')
+    const reference = params.get('reference')
+    const tier = params.get('tier') as 'basic' | 'pro' | 'enterprise' | null
+
+    if (paymentStatus === 'success' && reference) {
+      setLoadingTier(tier || 'basic')
+      await verifyAndActivate(reference, tier || 'basic', userEmail || 'user@docuai.app')
+      setLoadingTier(null)
+      // Clean query params from URL
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }
+
   if (!isOpen) return null
 
   const handleSubscribe = async (tier: 'basic' | 'pro' | 'enterprise') => {
     setLoadingTier(tier)
     setErrorMessage(null)
     setSuccessMessage(null)
+    setRedirectingUrl(null)
 
     const email = userEmail || 'guest@docuai.app'
 
     try {
-      // 1. Initialize payment via server API
+      // 1. Initialize charge with backend server
       const res = await fetch('/api/pay/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,41 +113,51 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       const data = await res.json()
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to initialize payment')
+        throw new Error(data.error || 'Failed to initialize Korapay payment')
       }
 
-      // 2. Mock mode or test key handling
-      if (data.isMockMode || !window.Korapay) {
-        console.log('Using simulated Korapay flow...')
-        // Auto-verify mock transaction
-        await verifyAndActivate(data.reference, tier, email)
-        setLoadingTier(null)
-        return
-      }
+      const checkoutUrl = data.checkoutUrl
+      const reference = data.reference
+      const publicKey = data.publicKey || process.env.NEXT_PUBLIC_KORAPAY_PUBLIC_KEY
 
-      // 3. Official Korapay Popup Checkout Modal
-      const korapayConfig = {
-        key: data.publicKey || process.env.NEXT_PUBLIC_KORAPAY_PUBLIC_KEY,
-        reference: data.reference,
-        amount: data.amount,
-        currency: 'NGN',
-        customer: {
-          email: email,
-          name: email.split('@')[0]
-        },
-        notification_url: `${window.location.origin}/api/pay/webhook`,
-        onClose: () => {
-          setLoadingTier(null)
-          console.log('Korapay checkout modal closed by user')
-        },
-        onSuccess: async (response: any) => {
-          console.log('Korapay Payment Success Response:', response)
-          await verifyAndActivate(response.reference || data.reference, tier, email)
-          setLoadingTier(null)
+      // 2. Try Korapay Popup Modal if SDK script is loaded
+      if (window.Korapay && publicKey) {
+        try {
+          console.log('[Korapay Modal] Initializing popup modal...')
+          window.Korapay.initialize({
+            key: publicKey,
+            reference: reference,
+            amount: data.amount,
+            currency: 'NGN',
+            customer: {
+              email: email,
+              name: email.split('@')[0]
+            },
+            notification_url: `${window.location.origin}/api/pay/webhook`,
+            onClose: () => {
+              setLoadingTier(null)
+              console.log('Korapay checkout modal closed by user')
+            },
+            onSuccess: async (response: any) => {
+              console.log('Korapay Payment Success Response:', response)
+              await verifyAndActivate(response.reference || reference, tier, email)
+              setLoadingTier(null)
+            }
+          })
+          return
+        } catch (modalErr) {
+          console.warn('Korapay popup initialization failed, falling back to direct checkout URL redirect:', modalErr)
         }
       }
 
-      window.Korapay.initialize(korapayConfig)
+      // 3. Fallback: Redirect directly to Korapay hosted checkout page
+      if (checkoutUrl) {
+        console.log('[Korapay Redirect] Opening checkout page:', checkoutUrl)
+        setRedirectingUrl(checkoutUrl)
+        window.location.href = checkoutUrl
+      } else {
+        throw new Error('No valid checkout URL received from Korapay API.')
+      }
     } catch (err: any) {
       console.error('Subscription error:', err)
       setErrorMessage(err.message || 'Payment initialization failed. Please try again.')
@@ -142,9 +170,8 @@ export const PricingModal: React.FC<PricingModalProps> = ({
       const res = await fetch(`/api/pay/verify?reference=${reference}&tier=${tier}&email=${encodeURIComponent(email)}`)
       const data = await res.json()
 
-      if (data.success) {
-        const expirationDate = new Date()
-        expirationDate.setDate(expirationDate.getDate() + 30)
+      if (res.ok && data.success && data.status === 'active') {
+        const expirationDate = data.subscription?.expiration_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
         const newSub: UserSubscription = {
           user_id: email,
@@ -153,7 +180,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           amount: tier === 'enterprise' ? 10000 : tier === 'pro' ? 7000 : 5000,
           status: 'active',
           korapay_reference: reference,
-          expiration_date: expirationDate.toISOString(),
+          expiration_date: expirationDate,
           updated_at: new Date().toISOString()
         }
 
@@ -162,12 +189,12 @@ export const PricingModal: React.FC<PricingModalProps> = ({
         if (onSubscriptionUpdated) onSubscriptionUpdated(newSub)
 
         const tierName = PLAN_DETAILS[tier].name
-        setSuccessMessage(`Congratulations! Your ${tierName} is now active for 30 days.`)
+        setSuccessMessage(`Payment Verified! Your ${tierName} is now active for 30 days.`)
       } else {
-        throw new Error(data.message || 'Verification failed')
+        throw new Error(data.message || 'Payment has not been completed or verified by Korapay.')
       }
     } catch (e: any) {
-      setErrorMessage('Could not verify payment status. If debited, your subscription will be auto-activated via webhook shortly.')
+      setErrorMessage(e.message || 'Could not verify payment status. If debited, your subscription will be auto-activated via webhook shortly.')
     }
   }
 
@@ -186,21 +213,21 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           
           <div className="inline-flex items-center gap-2 px-3 py-1 mb-3 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Korapay Secure Subscription Gateway</span>
+            <span>Korapay Realtime Payment Gateway</span>
           </div>
 
           <h2 className="text-2xl sm:text-3xl font-extrabold text-zinc-900 dark:text-white tracking-tight">
             Unlock Full Academic Research Power
           </h2>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 max-w-xl mx-auto">
-            Choose the subscription tier tailored to your study needs. Upgrade anytime with instant automated activation via Korapay.
+            Select your plan to complete payment securely via Korapay. Instant automated activation upon payment confirmation.
           </p>
 
           {/* Fallback Free Quota Banner */}
           <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl max-w-2xl mx-auto flex items-start gap-3 text-left">
             <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-800 dark:text-amber-300">
-              <strong className="font-bold">Free Fallback Guarantee:</strong> When your subscription expires or if you stay on the free tier, you automatically receive <strong className="underline">5 free AI generations every 24 hours</strong>. Your work is never locked out!
+              <strong className="font-bold">Free Quota Fallback:</strong> Expired subscriptions automatically receive <strong className="underline">5 free AI generations every 24 hours</strong>. Your work is never locked out!
             </div>
           </div>
         </div>
@@ -217,6 +244,19 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           <div className="mx-6 mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-xs rounded-xl flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 shrink-0" />
             <span>{successMessage}</span>
+          </div>
+        )}
+
+        {redirectingUrl && (
+          <div className="mx-6 mt-4 p-3 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs rounded-xl flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <span>Redirecting to Korapay secure checkout page...</span>
+            </div>
+            <a href={redirectingUrl} className="font-bold underline flex items-center gap-1">
+              <span>Click if not redirected</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
         )}
 
@@ -278,7 +318,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               ) : (
                 <>
                   <CreditCard className="w-4 h-4" />
-                  <span>Subscribe ₦5,000 via Korapay</span>
+                  <span>Pay ₦5,000 via Korapay</span>
                 </>
               )}
             </button>
@@ -344,7 +384,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               ) : (
                 <>
                   <Zap className="w-4 h-4 fill-current" />
-                  <span>Subscribe ₦7,000 via Korapay</span>
+                  <span>Pay ₦7,000 via Korapay</span>
                 </>
               )}
             </button>
@@ -408,7 +448,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               ) : (
                 <>
                   <Crown className="w-4 h-4" />
-                  <span>Subscribe ₦10,000 via Korapay</span>
+                  <span>Pay ₦10,000 via Korapay</span>
                 </>
               )}
             </button>
