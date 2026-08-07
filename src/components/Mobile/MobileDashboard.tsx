@@ -224,6 +224,26 @@ export default function MobileDashboard({
                 <p className="text-[8px] text-zinc-450">Template</p>
               </div>
             </button>
+            <button
+              onClick={() => onCreateProjectWithTemplate('Project')}
+              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-purple-500 text-left active:scale-[0.98] transition-all shadow-xs"
+            >
+              <span className="w-6 h-6 rounded-lg bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center text-purple-600">🎓</span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">Graduation Project</p>
+                <p className="text-[8px] text-zinc-450">Thesis</p>
+              </div>
+            </button>
+            <button
+              onClick={() => onCreateProjectWithTemplate('Custom')}
+              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-amber-500 text-left active:scale-[0.98] transition-all shadow-xs"
+            >
+              <span className="w-6 h-6 rounded-lg bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-600">✍️</span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">Custom Document</p>
+                <p className="text-[8px] text-zinc-450">Blank</p>
+              </div>
+            </button>
           </div>
         </div>
 

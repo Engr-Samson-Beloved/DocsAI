@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Send,
   Paperclip,
@@ -23,7 +23,11 @@ import {
   Settings,
   HelpCircle,
   User,
-  Crown
+  Crown,
+  GraduationCap,
+  BookOpenCheck,
+  FileEdit,
+  Layers
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 
@@ -33,8 +37,11 @@ interface ChatMessage {
   role: 'user' | 'ai' | 'system'
   content: string
   timestamp: number
-  type?: 'text' | 'status' | 'export-card' | 'suggestion-chips'
+  type?: 'text' | 'status' | 'export-card' | 'suggestion-chips' | 'choice-card' | 'form-card'
   isStreaming?: boolean
+  choices?: { id: string; label: string; icon: string; description?: string }[]
+  formType?: 'seminar-info' | 'chapter-sources' | 'proposal-info' | 'project-info'
+  onChoice?: (choiceId: string) => void
 }
 
 // ─── Props Interface ───────────────────────────────────────────────
@@ -92,6 +99,11 @@ export interface MobileChatViewProps {
   // Academic settings
   wizardDocType: 'Seminar' | 'Proposal' | 'Project' | 'Custom'
   wizardAcademicLevel: string
+  setWizardDocType?: (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => void
+  setWizardTopic?: (topic: string) => void
+  setStudentName?: (name: string) => void
+  setMatricNumber?: (matric: string) => void
+  setSupervisorName?: (name: string) => void
   
   // Setup wizard
   onOpenWizard: () => void
@@ -102,6 +114,10 @@ export interface MobileChatViewProps {
   // Subscription modal & state
   onOpenPricingModal?: () => void
   userSubscription?: any
+
+  // Guided template onboarding
+  initialTemplate?: 'Seminar' | 'Proposal' | 'Project' | 'Custom' | null
+  onClearInitialTemplate?: () => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -145,6 +161,18 @@ const parsePagesFromHtml = (htmlStr: string): string[] => {
 // ─── Helper to generate unique IDs ────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 
+// ─── Onboarding Flow Stages ───────────────────────────────────────
+type OnboardingStage = 
+  | 'idle'
+  | 'template-greeting'
+  | 'cover-or-chapters'
+  | 'collecting-info'
+  | 'info-collected'
+  | 'collecting-sources'
+  | 'sources-collected'
+  | 'ready-to-generate'
+  | 'generating'
+
 // ─── Main Component ───────────────────────────────────────────────
 export default function MobileChatView({
   theme,
@@ -181,10 +209,17 @@ export default function MobileChatView({
   editorHtml,
   wizardDocType,
   wizardAcademicLevel,
+  setWizardDocType,
+  setWizardTopic,
+  setStudentName,
+  setMatricNumber,
+  setSupervisorName,
   onOpenWizard,
   onGenerateBlueprint,
   onOpenPricingModal,
-  userSubscription
+  userSubscription,
+  initialTemplate,
+  onClearInitialTemplate
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -195,6 +230,19 @@ export default function MobileChatView({
   const previewContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>('idle')
+  const [showInfoForm, setShowInfoForm] = useState(false)
+  const [showSourcesForm, setShowSourcesForm] = useState(false)
+  const [formData, setFormData] = useState({
+    topic: '',
+    department: '',
+    studentName: '',
+    matricNumber: '',
+    supervisorName: '',
+    academicLevel: 'Undergraduate'
+  })
+  const onboardingTemplateRef = useRef<string | null>(null)
+  const hasProcessedTemplateRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (showPreview && previewContainerRef.current) {
@@ -213,7 +261,7 @@ export default function MobileChatView({
 
   // ─── Initialize with welcome message ─────────────────────────
   useEffect(() => {
-    if (messages.length === 0) {
+    if (messages.length === 0 && !initialTemplate) {
       setMessages([
         {
           id: uid(),
@@ -225,6 +273,251 @@ export default function MobileChatView({
       ])
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Guided Template Onboarding Flow ─────────────────────────
+  const templateLabels: Record<string, string> = {
+    Seminar: 'Seminar Report',
+    Proposal: 'Research Proposal',
+    Project: 'Graduation Thesis Project',
+    Custom: 'Custom Document'
+  }
+
+  const addBotMessage = useCallback((content: string, extras?: Partial<ChatMessage>) => {
+    setMessages(prev => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'ai' as const,
+        content,
+        timestamp: Date.now(),
+        type: 'text' as const,
+        ...extras
+      }
+    ])
+  }, [])
+
+  const addBotMessageDelayed = useCallback((content: string, delayMs: number, extras?: Partial<ChatMessage>) => {
+    return new Promise<void>(resolve => {
+      setTimeout(() => {
+        addBotMessage(content, extras)
+        resolve()
+      }, delayMs)
+    })
+  }, [addBotMessage])
+
+  // Handle initial template selection from MobileDashboard
+  useEffect(() => {
+    if (!initialTemplate || hasProcessedTemplateRef.current === initialTemplate) return
+    hasProcessedTemplateRef.current = initialTemplate
+    onboardingTemplateRef.current = initialTemplate
+    setOnboardingStage('template-greeting')
+
+    const label = templateLabels[initialTemplate] || initialTemplate
+
+    // Clear existing messages and start fresh guided flow
+    setMessages([])
+
+    // Typewriter-style greeting sequence
+    setTimeout(() => {
+      addBotMessage(`📝 Great choice! Let's build your **${label}** together.`)
+    }, 300)
+
+    setTimeout(() => {
+      addBotMessage(`I'll guide you step by step. First, let me know — would you like to **set up your front cover** with your details, or **skip straight to generating chapters**?`)
+    }, 1200)
+
+    setTimeout(() => {
+      const coverLabel = initialTemplate === 'Seminar' 
+        ? 'Set Up Front Cover (Topic, Student Info, Supervisor)'
+        : initialTemplate === 'Proposal'
+        ? 'Set Up Cover Page (Topic, Department)'
+        : 'Set Up Cover Page (Project Details)'
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'choice-card',
+          choices: [
+            { id: 'setup-cover', label: coverLabel, icon: '📋', description: 'Fill in your details for the title page' },
+            { id: 'skip-to-chapters', label: 'Skip to Generating Chapters', icon: '⚡', description: 'Jump straight to AI content generation' }
+          ]
+        }
+      ])
+      setOnboardingStage('cover-or-chapters')
+    }, 2200)
+
+    onClearInitialTemplate?.()
+  }, [initialTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle onboarding choice selections
+  const handleOnboardingChoice = useCallback((choiceId: string) => {
+    const template = onboardingTemplateRef.current || wizardDocType
+
+    if (choiceId === 'setup-cover') {
+      // User wants to fill in cover page info
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'user', content: '📋 Set Up Front Cover', timestamp: Date.now(), type: 'text' }
+      ])
+      setTimeout(() => {
+        addBotMessage(`Perfect! Fill in your ${templateLabels[template] || 'document'} details below. You can leave fields blank if you're not sure yet.`)
+      }, 400)
+      setTimeout(() => {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'system',
+            content: '',
+            timestamp: Date.now(),
+            type: 'form-card',
+            formType: template === 'Seminar' ? 'seminar-info' : template === 'Proposal' ? 'proposal-info' : 'project-info'
+          }
+        ])
+        setShowInfoForm(true)
+        setOnboardingStage('collecting-info')
+      }, 1000)
+    } else if (choiceId === 'skip-to-chapters') {
+      // Skip cover, go to sources/generation
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'user', content: '⚡ Skip to Generating Chapters', timestamp: Date.now(), type: 'text' }
+      ])
+      promptForSources()
+    } else if (choiceId === 'add-sources') {
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'user', content: '📎 Add Reference Materials', timestamp: Date.now(), type: 'text' }
+      ])
+      setTimeout(() => {
+        addBotMessage('Upload your reference journals, PDFs, or DOCX files below. These will help me generate more accurate and cited content.')
+      }, 400)
+      setTimeout(() => {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'system',
+            content: '',
+            timestamp: Date.now(),
+            type: 'form-card',
+            formType: 'chapter-sources'
+          }
+        ])
+        setShowSourcesForm(true)
+        setOnboardingStage('collecting-sources')
+      }, 1000)
+    } else if (choiceId === 'generate-now') {
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'user', content: '✨ Generate Full Document Now', timestamp: Date.now(), type: 'text' }
+      ])
+      setTimeout(() => {
+        addBotMessage(`🚀 Starting AI generation for your **${templateLabels[template] || 'document'}**... This may take a moment.`)
+        setOnboardingStage('generating')
+        // Trigger the actual blueprint generation
+        setTimeout(() => onGenerateBlueprint(), 600)
+      }, 500)
+    }
+  }, [wizardDocType, addBotMessage, onGenerateBlueprint]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const promptForSources = useCallback(() => {
+    const template = onboardingTemplateRef.current || wizardDocType
+    setTimeout(() => {
+      addBotMessage(`Now, to generate high-quality chapters for your **${templateLabels[template] || 'document'}**, I can use reference materials. Would you like to add journals/references, or generate directly?`)
+    }, 500)
+    setTimeout(() => {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'choice-card',
+          choices: [
+            { id: 'add-sources', label: 'Add Reference Materials (PDF/DOCX)', icon: '📎', description: 'Upload journals, papers, or templates' },
+            { id: 'generate-now', label: 'Generate Chapters Now', icon: '✨', description: 'Use AI to create content directly' }
+          ]
+        }
+      ])
+      setOnboardingStage('ready-to-generate')
+    }, 1600)
+  }, [wizardDocType, addBotMessage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle form submission (seminar info / project info)
+  const handleInfoFormSubmit = useCallback(() => {
+    const template = onboardingTemplateRef.current || wizardDocType
+    setShowInfoForm(false)
+    setOnboardingStage('info-collected')
+
+    // Apply form data to parent state
+    if (formData.topic) {
+      setDocumentTitle(formData.topic)
+      setWizardTopic?.(formData.topic)
+    }
+    if (formData.studentName) setStudentName?.(formData.studentName)
+    if (formData.matricNumber) setMatricNumber?.(formData.matricNumber)
+    if (formData.supervisorName) setSupervisorName?.(formData.supervisorName)
+    setWizardDocType?.(template as any)
+
+    // Show confirmation
+    const infoSummary = [
+      formData.topic && `📌 Topic: ${formData.topic}`,
+      formData.department && `🏛️ Department: ${formData.department}`,
+      formData.studentName && `👤 Student: ${formData.studentName}`,
+      formData.matricNumber && `🎓 Matric: ${formData.matricNumber}`,
+      formData.supervisorName && `👨‍🏫 Supervisor: ${formData.supervisorName}`
+    ].filter(Boolean).join('\n')
+
+    setMessages(prev => [
+      ...prev,
+      { id: uid(), role: 'user', content: `✅ Details submitted:\n${infoSummary}`, timestamp: Date.now(), type: 'text' }
+    ])
+
+    setTimeout(() => {
+      addBotMessage(`Great! Your cover page details are saved. Now let's set up the content. 📖`)
+    }, 500)
+
+    // Move to sources step
+    promptForSources()
+  }, [formData, wizardDocType, addBotMessage, promptForSources, setDocumentTitle, setWizardTopic, setStudentName, setMatricNumber, setSupervisorName, setWizardDocType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle sources form completion
+  const handleSourcesComplete = useCallback(() => {
+    setShowSourcesForm(false)
+    setOnboardingStage('sources-collected')
+    
+    setMessages(prev => [
+      ...prev,
+      { id: uid(), role: 'system', content: `📎 ${projectSources.length} reference file(s) loaded successfully.`, timestamp: Date.now(), type: 'status' }
+    ])
+
+    setTimeout(() => {
+      addBotMessage(`Excellent! I've loaded your reference materials. Ready to generate your document?`)
+    }, 500)
+
+    setTimeout(() => {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'choice-card',
+          choices: [
+            { id: 'generate-now', label: 'Generate Full Document Now', icon: '✨', description: 'AI-powered chapter-by-chapter generation' },
+            { id: 'add-sources', label: 'Add More References', icon: '📎', description: 'Upload additional source materials' }
+          ]
+        }
+      ])
+    }, 1500)
+  }, [projectSources, addBotMessage])
 
   // ─── Track AI response and push to chat ──────────────────────
   const lastAiResultRef = useRef('')
@@ -375,6 +668,168 @@ export default function MobileChatView({
       )
     }
 
+    // ─── Choice Card (Interactive Buttons) ─────────────────────
+    if (msg.type === 'choice-card' && msg.choices) {
+      return (
+        <div key={msg.id} className="flex justify-start px-4 mb-3 chat-bubble-enter">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 max-w-[90%] space-y-2 shadow-sm">
+            {msg.choices.map(choice => (
+              <button
+                key={choice.id}
+                onClick={() => handleOnboardingChoice(choice.id)}
+                className="w-full flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 border border-zinc-200/60 dark:border-zinc-700/40 hover:border-indigo-300 dark:hover:border-indigo-700 rounded-xl text-left transition-all active:scale-[0.97] cursor-pointer group"
+              >
+                <span className="text-lg flex-shrink-0">{choice.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-100 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 block">{choice.label}</span>
+                  {choice.description && (
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-500 block mt-0.5">{choice.description}</span>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 text-zinc-300 dark:text-zinc-600 group-hover:text-indigo-400 flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    // ─── Form Card (Inline Forms) ──────────────────────────────
+    if (msg.type === 'form-card') {
+      return (
+        <div key={msg.id} className="flex justify-start px-4 mb-3 chat-bubble-enter">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 max-w-[92%] w-full shadow-sm space-y-3">
+            {msg.formType === 'chapter-sources' ? (
+              // Sources upload form
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                  <Upload className="w-4 h-4 text-indigo-500" />
+                  <span>Upload Reference Materials</span>
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Upload PDF or DOCX files. These will be used as context for AI generation.</p>
+                <label className="flex items-center justify-center gap-2 py-3 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 border-2 border-dashed border-indigo-300 dark:border-indigo-700 rounded-xl text-xs font-bold cursor-pointer active:scale-[0.97] transition-transform">
+                  <Upload className="w-4 h-4" />
+                  <span>Tap to Select Files</span>
+                  <input
+                    type="file"
+                    accept=".docx,.pdf"
+                    multiple
+                    onChange={(e) => {
+                      handleWizardFileUpload(e)
+                    }}
+                    className="hidden"
+                  />
+                </label>
+                {projectSources.length > 0 && (
+                  <div className="space-y-1">
+                    {projectSources.map((src, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/40 px-3 py-1.5 rounded-lg">
+                        <FileText className="w-3 h-3 text-indigo-400" />
+                        <span className="truncate flex-1">{src.name}</span>
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={handleSourcesComplete}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all active:scale-[0.97] cursor-pointer shadow-sm"
+                >
+                  {projectSources.length > 0 ? `Continue with ${projectSources.length} file(s)` : 'Skip — No References'}
+                </button>
+              </div>
+            ) : (
+              // Info form (seminar/proposal/project)
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                  <GraduationCap className="w-4 h-4 text-indigo-500" />
+                  <span>{msg.formType === 'seminar-info' ? 'Seminar Report Details' : msg.formType === 'proposal-info' ? 'Research Proposal Details' : 'Project Details'}</span>
+                </div>
+                
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Topic / Title *</label>
+                    <input
+                      type="text"
+                      value={formData.topic}
+                      onChange={(e) => setFormData(prev => ({ ...prev, topic: e.target.value }))}
+                      placeholder="e.g. Impact of AI on Modern Education"
+                      className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/30 transition-all placeholder:text-zinc-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Department</label>
+                    <input
+                      type="text"
+                      value={formData.department}
+                      onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+                      placeholder="e.g. Computer Science"
+                      className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/30 transition-all placeholder:text-zinc-400"
+                    />
+                  </div>
+                  {(msg.formType === 'seminar-info' || msg.formType === 'project-info') && (
+                    <>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Student Full Name</label>
+                        <input
+                          type="text"
+                          value={formData.studentName}
+                          onChange={(e) => setFormData(prev => ({ ...prev, studentName: e.target.value }))}
+                          placeholder="e.g. Olabanji Samuel"
+                          className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/30 transition-all placeholder:text-zinc-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Matric Number</label>
+                        <input
+                          type="text"
+                          value={formData.matricNumber}
+                          onChange={(e) => setFormData(prev => ({ ...prev, matricNumber: e.target.value }))}
+                          placeholder="e.g. 2020/ENG/001"
+                          className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/30 transition-all placeholder:text-zinc-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Supervisor Name</label>
+                        <input
+                          type="text"
+                          value={formData.supervisorName}
+                          onChange={(e) => setFormData(prev => ({ ...prev, supervisorName: e.target.value }))}
+                          placeholder="e.g. Dr. Adeyemi Johnson"
+                          className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/30 transition-all placeholder:text-zinc-400"
+                        />
+                      </div>
+                    </>
+                  )}
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">Academic Level</label>
+                    <select
+                      value={formData.academicLevel}
+                      onChange={(e) => setFormData(prev => ({ ...prev, academicLevel: e.target.value }))}
+                      className="w-full text-xs p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                    >
+                      <option value="High School">High School</option>
+                      <option value="Undergraduate">Undergraduate</option>
+                      <option value="Master's">Master's</option>
+                      <option value="Ph.D.">Ph.D.</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleInfoFormSubmit}
+                  disabled={!formData.topic.trim()}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-zinc-300 dark:disabled:bg-zinc-700 text-white disabled:text-zinc-500 rounded-xl text-xs font-bold transition-all active:scale-[0.97] cursor-pointer shadow-sm"
+                >
+                  Save Details & Continue
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     if (msg.type === 'status') {
       return (
         <div key={msg.id} className="flex justify-center px-4 mb-3 chat-bubble-enter">
@@ -388,7 +843,7 @@ export default function MobileChatView({
     if (msg.role === 'user') {
       return (
         <div key={msg.id} className="flex justify-end px-4 mb-3 chat-bubble-enter">
-          <div className="bg-indigo-600 text-white rounded-2xl rounded-br-md px-4 py-2.5 max-w-[80%] text-sm leading-relaxed shadow-sm">
+          <div className="bg-indigo-600 text-white rounded-2xl rounded-br-md px-4 py-2.5 max-w-[80%] text-sm leading-relaxed shadow-sm whitespace-pre-wrap">
             {msg.content}
           </div>
         </div>

@@ -1092,6 +1092,7 @@ export default function Editor() {
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
   const mobileToolsMenuRef = useRef<HTMLDivElement | null>(null)
+  const [pendingTemplate, setPendingTemplate] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom' | null>(null)
 
   // Mobile viewport detection
   const [isMobile, setIsMobile] = useState(false)
@@ -5299,7 +5300,10 @@ export default function Editor() {
             toggleTheme={toggleTheme}
             projects={projects}
             onCreateProject={createNewProject}
-            onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onCreateProjectWithTemplate={(type) => {
+              createNewProjectWithTemplate(type)
+              setPendingTemplate(type)
+            }}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5362,10 +5366,17 @@ export default function Editor() {
             editorHtml={editorHtml}
             wizardDocType={wizardDocType}
             wizardAcademicLevel={wizardAcademicLevel}
+            setWizardDocType={setWizardDocType}
+            setWizardTopic={setWizardTopic}
+            setStudentName={setStudentName}
+            setMatricNumber={setMatricNumber}
+            setSupervisorName={setSupervisorName}
             onOpenWizard={() => setShowWizard(true)}
             onGenerateBlueprint={generateFullDocumentBlueprint}
             onOpenPricingModal={() => setShowPricingView(true)}
             userSubscription={userSubscription}
+            initialTemplate={pendingTemplate}
+            onClearInitialTemplate={() => setPendingTemplate(null)}
           />
         ) : (
         <>
