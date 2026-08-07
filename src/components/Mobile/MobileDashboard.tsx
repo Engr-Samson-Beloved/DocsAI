@@ -69,7 +69,7 @@ export default function MobileDashboard({
   )
 
   return (
-    <div className="flex flex-col flex-1 h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 overflow-hidden relative font-sans select-none safe-area-top safe-area-bottom">
+    <div className="flex flex-col flex-1 h-screen h-[100dvh] bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 overflow-hidden relative font-sans safe-area-top safe-area-bottom touch-pan-y">
       
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0 z-20">
@@ -184,7 +184,7 @@ export default function MobileDashboard({
       </header>
 
       {/* Main container */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-20">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4 pb-24 touch-pan-y overscroll-contain">
         
         {/* Search */}
         <div className="relative flex items-center">

@@ -418,7 +418,7 @@ export default function MobileChatView({
   }
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-950 overflow-hidden relative">
+    <div className="flex flex-col h-screen h-[100dvh] bg-zinc-50 dark:bg-zinc-950 overflow-hidden relative touch-pan-y">
       
       {/* ━━━ Top Bar ━━━ */}
       <header className="flex items-center justify-between px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 flex-shrink-0 safe-area-top">
@@ -493,7 +493,7 @@ export default function MobileChatView({
       </div>
 
       {/* ━━━ Chat Messages Area ━━━ */}
-      <div className="flex-1 overflow-y-auto py-4 space-y-0">
+      <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-0 touch-pan-y overscroll-contain">
         {messages.map(renderMessage)}
 
         {/* Streaming indicator */}
