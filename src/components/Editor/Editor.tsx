@@ -61,7 +61,10 @@ import {
   Folder,
   Sparkles,
   User,
-  LogOut
+  LogOut,
+  SlidersHorizontal,
+  ChevronDown,
+  Menu
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -1074,11 +1077,13 @@ export default function Editor() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
-  // Auth & Cloud Sync States
+  // Auth, Mobile Menu & Cloud Sync States
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
+  const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
+  const mobileToolsMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -2102,13 +2107,16 @@ export default function Editor() {
       if (showHeaderProfileDropdown && headerProfileRef.current && !headerProfileRef.current.contains(event.target as any)) {
         setShowHeaderProfileDropdown(false)
       }
+      if (showMobileToolsMenu && mobileToolsMenuRef.current && !mobileToolsMenuRef.current.contains(event.target as any)) {
+        setShowMobileToolsMenu(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFloatingPopup, showLayoutSettings, showExportMenu, showHeaderProfileDropdown])
+  }, [showFloatingPopup, showLayoutSettings, showExportMenu, showHeaderProfileDropdown, showMobileToolsMenu])
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light'
@@ -5241,18 +5249,19 @@ export default function Editor() {
       ) : (
         <>
           {/* Top Application Bar */}
-      <header className="flex items-center justify-between px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-10">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <img src="/WordPI.png" alt="WordPiLot Logo" className="w-6.5 h-6.5 object-contain rounded-md" />
-            <span className="font-bold text-lg tracking-tight select-none">
+      <header className="flex items-center justify-between px-3 sm:px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-30 relative select-none">
+        {/* Left: Brand Logo & Title Input */}
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <img src="/WordPI.png" alt="WordPiLot Logo" className="w-6 h-6 sm:w-6.5 sm:h-6.5 object-contain rounded-md" />
+            <span className="font-bold text-base sm:text-lg tracking-tight hidden xs:inline-block">
               <span className="text-[#1B1F23] dark:text-[#E5E7EB]">Word</span>
               <span className="text-[#185ABD] dark:text-[#3B82F6]">Pi</span>
               <span className="text-[#B68A35] text-[10px] align-super ml-0.5 font-bold uppercase">lot</span>
             </span>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <input
               type="text"
               value={documentTitle}
@@ -5260,80 +5269,86 @@ export default function Editor() {
                 setDocumentTitle(e.target.value)
                 setIsSaved(false)
               }}
-              className="text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-48 sm:w-64 transition-colors"
+              className="text-xs sm:text-sm font-semibold px-2 py-1 bg-transparent hover:bg-zinc-100 focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded outline-none border-none dark:hover:bg-zinc-800 dark:focus:bg-zinc-850 w-28 xs:w-40 sm:w-56 md:w-64 transition-all truncate"
+              placeholder="Document Title"
             />
-            
-            <button
-              onClick={() => {
-                window.history.pushState({}, '', '/')
-                setShowDashboard(true)
-                setActiveProjectId('')
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
-              title="Return to Document Center Dashboard"
-            >
-              <Folder className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Projects</span>
-            </button>
-            
-            <button
-              onClick={() => {
-                setWizardTopic('')
-                setWizardStep(1)
-                setShowWizard(true)
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Reset workspace and launch Onboarding Wizard"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Project</span>
-            </button>
-            
-            <button
-              onClick={() => setShowCoverPageModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200/50 dark:border-amber-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Create a professional academic cover page"
-            >
-              <FileText className="w-3.5 h-3.5 text-amber-500" />
-              <span>Create Cover Page</span>
-            </button>
 
-            <button
-              onClick={clearDocument}
-              className="flex items-center gap-1.5 px-3 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Clear all pages and content to start blank"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear Document</span>
-            </button>
-
-            <button
-              onClick={() => setShowGeneratorPopup(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-650 hover:bg-indigo-700 text-white rounded border border-indigo-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-              title="Open full document blueprint generator popup"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Generate Full Blueprint</span>
-            </button>
-
-            <button
-              onClick={() => setShowTocModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Generate a Table of Contents based on document headings"
-            >
-              <OrderedListIcon className="w-3.5 h-3.5 text-teal-500" />
-              <span>Table of Contents</span>
-            </button>
-            
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 select-none">
-              <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-zinc-300'}`} />
-              <span>{isSaved ? 'Draft saved locally' : 'Saving...'}</span>
+            {/* Save status badge / dot */}
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 shrink-0">
+              <CheckCircle2 className={`w-3.5 h-3.5 transition-colors ${isSaved ? 'text-emerald-500' : 'text-amber-500 animate-pulse'}`} />
+              <span className="hidden md:inline">{isSaved ? 'Draft saved' : 'Saving...'}</span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Import Actions */}
+        {/* Desktop Full Action Buttons (visible on xl+ screens) */}
+        <div className="hidden xl:flex items-center gap-2">
+          <button
+            onClick={() => {
+              window.history.pushState({}, '', '/')
+              setShowDashboard(true)
+              setActiveProjectId('')
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700 text-xs font-semibold transition-colors cursor-pointer"
+            title="Return to Document Center Dashboard"
+          >
+            <Folder className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Projects</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setWizardTopic('')
+              setWizardStep(1)
+              setShowWizard(true)
+            }}
+            className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200/50 dark:border-indigo-900/40 text-xs font-semibold transition-colors cursor-pointer"
+            title="Reset workspace and launch Onboarding Wizard"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>New Project</span>
+          </button>
+          
+          <button
+            onClick={() => setShowCoverPageModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded border border-amber-200/50 dark:border-amber-900/40 text-xs font-semibold transition-colors cursor-pointer"
+            title="Create a professional academic cover page"
+          >
+            <FileText className="w-3.5 h-3.5 text-amber-500" />
+            <span>Cover Page</span>
+          </button>
+
+          <button
+            onClick={() => setShowTocModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/20 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded border border-teal-200/50 dark:border-teal-900/40 text-xs font-semibold transition-colors cursor-pointer"
+            title="Generate a Table of Contents based on document headings"
+          >
+            <OrderedListIcon className="w-3.5 h-3.5 text-teal-500" />
+            <span>Table of Contents</span>
+          </button>
+
+          <button
+            onClick={() => setShowGeneratorPopup(true)}
+            className="flex items-center gap-1.5 px-3 py-1 bg-indigo-650 hover:bg-indigo-700 text-white rounded border border-indigo-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+            title="Open full document blueprint generator popup"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Generate Blueprint</span>
+          </button>
+
+          <button
+            onClick={clearDocument}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/10 dark:hover:bg-red-950/20 text-red-600 dark:text-red-400 rounded border border-red-200/50 dark:border-red-900/40 text-xs font-semibold transition-colors cursor-pointer"
+            title="Clear all pages and content to start blank"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Clear</span>
+          </button>
+        </div>
+
+        {/* Right Controls Group */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Import (Desktop visible, mobile inside Quick Tools menu) */}
           <input
             type="file"
             accept=".docx,.pdf"
@@ -5343,24 +5358,25 @@ export default function Editor() {
           />
           <label
             htmlFor="import-file"
-            className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors"
+            className="hidden sm:flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors"
             title="Import a Word (.docx) or PDF (.pdf) file to format or edit"
           >
             <Upload className="w-3.5 h-3.5" />
             <span>Import</span>
           </label>
 
-          {/* Export Actions */}
+          {/* Export Actions Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button 
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 rounded-md border border-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+              title="Export document"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
+              <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="hidden sm:inline">Export</span>
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-1.5 w-48 bg-white border border-zinc-200 shadow-lg rounded-lg py-1 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="absolute right-0 mt-1.5 w-52 bg-white border border-zinc-200 shadow-xl rounded-xl py-1.5 dark:bg-zinc-900 dark:border-zinc-800 z-50 animate-in fade-in slide-in-from-top-1 duration-150">
                 <div className="px-4 py-1 pb-1 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                   Export Scope
                 </div>
@@ -5368,7 +5384,7 @@ export default function Editor() {
                   <select 
                     value={exportScope}
                     onChange={(e: any) => setExportScope(e.target.value)}
-                    className="w-full text-xs bg-zinc-50 border border-zinc-200 rounded p-1 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 outline-none cursor-pointer"
+                    className="w-full text-xs bg-zinc-50 border border-zinc-200 rounded p-1.5 dark:bg-zinc-800 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 outline-none cursor-pointer"
                   >
                     <option value="full">Full Document</option>
                     <option value="cover">Cover Page Only</option>
@@ -5404,7 +5420,7 @@ export default function Editor() {
                     exportToDocx(exportScope)
                     setShowExportMenu(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
                 >
                   Word (.docx)
                 </button>
@@ -5413,7 +5429,7 @@ export default function Editor() {
                     exportToPdfPrint(exportScope)
                     setShowExportMenu(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
                 >
                   PDF Document (Vector)
                 </button>
@@ -5422,7 +5438,7 @@ export default function Editor() {
                     exportToPptx()
                     setShowExportMenu(false)
                   }}
-                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  className="w-full text-left px-4 py-2 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
                 >
                   Powerpoint (.pptx)
                 </button>
@@ -5430,9 +5446,168 @@ export default function Editor() {
             )}
           </div>
 
+          {/* Outline Toggle (Desktop) */}
+          <button
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+            className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 rounded-md transition-colors border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+            title={leftSidebarOpen ? "Hide Outline" : "Show Outline"}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Outline</span>
+          </button>
+
+          {/* Assistant Toggle Button */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-md transition-colors cursor-pointer"
+            title="AI Research Assistant"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">Assistant</span>
+          </button>
+
+          {/* Quick Tools Mobile Dropdown Button (Visible on screens < xl) */}
+          <div className="relative xl:hidden" ref={mobileToolsMenuRef}>
+            <button
+              onClick={() => setShowMobileToolsMenu(!showMobileToolsMenu)}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300 rounded-md border border-zinc-200 dark:border-zinc-700 transition-colors cursor-pointer"
+              title="Workspace Tools"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="hidden sm:inline">Tools</span>
+              <ChevronDown className="w-3 h-3 text-zinc-400" />
+            </button>
+
+            {showMobileToolsMenu && (
+              <div className="absolute right-0 mt-1.5 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl rounded-xl p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 space-y-2">
+                {/* Navigation & Projects Section */}
+                <div className="space-y-1">
+                  <div className="px-2 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                    Workspace & Projects
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      window.history.pushState({}, '', '/')
+                      setShowDashboard(true)
+                      setActiveProjectId('')
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Folder className="w-4 h-4 text-indigo-500" />
+                    <span>Projects Dashboard</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setWizardTopic('')
+                      setWizardStep(1)
+                      setShowWizard(true)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-4 h-4 text-indigo-600" />
+                    <span>New Project Wizard</span>
+                  </button>
+                  <label className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer transition-colors">
+                    <Upload className="w-4 h-4 text-zinc-500" />
+                    <span>Import (.docx / .pdf)</span>
+                    <input
+                      type="file"
+                      accept=".docx,.pdf"
+                      onChange={(e) => {
+                        setShowMobileToolsMenu(false)
+                        handleImportFile(e)
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div className="border-t border-zinc-150 dark:border-zinc-800"></div>
+
+                {/* AI & Academic Section */}
+                <div className="space-y-1">
+                  <div className="px-2 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                    AI & Document Builders
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setShowGeneratorPopup(true)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer transition-colors shadow-xs"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>Generate Full Blueprint</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setShowCoverPageModal(true)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <FileText className="w-4 h-4 text-amber-500" />
+                    <span>Create Cover Page</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setShowTocModal(true)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/30 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <OrderedListIcon className="w-4 h-4 text-teal-500" />
+                    <span>Table of Contents</span>
+                  </button>
+                </div>
+
+                <div className="border-t border-zinc-150 dark:border-zinc-800"></div>
+
+                {/* Editor & Theme Section */}
+                <div className="space-y-1">
+                  <div className="px-2 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                    Controls
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setLeftSidebarOpen(!leftSidebarOpen)
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <FileText className="w-4 h-4 text-zinc-500" />
+                    <span>{leftSidebarOpen ? 'Hide Document Outline' : 'Show Document Outline'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      toggleTheme()
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer transition-colors"
+                  >
+                    {theme === 'light' ? <Moon className="w-4 h-4 text-indigo-500" /> : <Sun className="w-4 h-4 text-amber-400" />}
+                    <span>Switch to {theme === 'light' ? 'Dark' : 'Light'} Mode</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      clearDocument()
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Clear Document</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Theme Toggle (Desktop visible) */}
           <button
             onClick={toggleTheme}
-            className="p-1.5 text-zinc-500 hover:text-indigo-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-indigo-400 dark:hover:bg-zinc-800 rounded-lg transition-all"
+            className="hidden xl:flex p-1.5 text-zinc-500 hover:text-indigo-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-indigo-400 dark:hover:bg-zinc-800 rounded-lg transition-all"
             title="Toggle color theme"
           >
             {theme === 'light' ? <Moon className="w-4.5 h-4.5" /> : <Sun className="w-4.5 h-4.5" />}
@@ -5443,7 +5618,7 @@ export default function Editor() {
             <div className="relative" ref={headerProfileRef}>
               <button
                 onClick={() => setShowHeaderProfileDropdown(!showHeaderProfileDropdown)}
-                className="w-7.5 h-7.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-200 dark:border-indigo-800 hover:ring-2 hover:ring-indigo-500/20 transition-all cursor-pointer"
+                className="w-7 sm:w-7.5 h-7 sm:h-7.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-200 dark:border-indigo-800 hover:ring-2 hover:ring-indigo-500/20 transition-all cursor-pointer"
                 title={userEmail}
               >
                 {userEmail.charAt(0).toUpperCase()}
@@ -5469,32 +5644,13 @@ export default function Editor() {
           ) : (
             <button
               onClick={() => setShowAuthModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-md text-xs font-bold transition-all shadow-xs cursor-pointer"
-              title="Sign In or Sign Up to secure & sync your documents"
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-md text-xs font-bold transition-all shadow-xs cursor-pointer shrink-0"
+              title="Sign In or Sign Up"
             >
               <User className="w-3.5 h-3.5" />
-              <span>Sign In</span>
+              <span className="hidden sm:inline">Sign In</span>
             </button>
           )}
-
-          <button
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-zinc-50 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 rounded-md transition-colors border border-zinc-200 dark:border-zinc-700 cursor-pointer"
-            title={leftSidebarOpen ? "Hide Outline" : "Show Outline"}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Outline</span>
-            {leftSidebarOpen ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-300 rounded-md transition-colors cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span>Assistant</span>
-            {sidebarOpen ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-          </button>
         </div>
       </header>
 
@@ -5578,9 +5734,9 @@ export default function Editor() {
 
         <div className="flex flex-col flex-1 min-h-0 h-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
           {/* Formatting Toolbar */}
-          <div className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2 z-30 flex justify-center flex-shrink-0">
-            <div className="w-full max-w-[816px] flex flex-wrap gap-1 items-center justify-start sm:justify-between">
-            <div className="flex flex-wrap items-center gap-0.5 text-zinc-650 dark:text-zinc-400">
+          <div className="w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 py-1.5 z-20 flex justify-center flex-shrink-0 overflow-x-auto no-scrollbar">
+            <div className="w-full max-w-[816px] flex flex-nowrap sm:flex-wrap items-center gap-1 py-0.5 px-1 justify-start sm:justify-between shrink-0">
+            <div className="flex flex-nowrap sm:flex-wrap items-center gap-0.5 text-zinc-650 dark:text-zinc-400 shrink-0">
               {/* Heading Dropdown */}
               <select
                 value={getActiveHeading()}
