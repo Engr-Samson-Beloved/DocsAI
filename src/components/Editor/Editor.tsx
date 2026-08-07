@@ -10,6 +10,8 @@ import FontFamily from '@tiptap/extension-font-family'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
+import MobileDashboard from '../Mobile/MobileDashboard'
+import MobileChatView from '../Mobile/MobileChatView'
 import AuthModal from '../Auth/AuthModal'
 import { 
   saveSource, 
@@ -1084,6 +1086,15 @@ export default function Editor() {
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
   const mobileToolsMenuRef = useRef<HTMLDivElement | null>(null)
+
+  // Mobile viewport detection
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -5218,6 +5229,33 @@ export default function Editor() {
 
   const activeProject = projects.find(p => p.id === activeProjectId)
 
+  // Compute editor HTML for mobile preview
+  const editorHtml = editor ? editor.getHTML() : ''
+
+  // Manual save trigger for mobile
+  const handleForceSave = () => {
+    if (!editor || !activeProjectId) return
+    const contentJSON = editor.getJSON()
+    const text = editor.getText()
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0
+    const chars = text.length
+    setProjects(prev => {
+      let updatedProj: Project | null = null
+      const updated = prev.map(p => {
+        if (p.id === activeProjectId) {
+          updatedProj = { ...p, content: JSON.stringify(contentJSON), updatedAt: Date.now(), wordCount: words, charCount: chars }
+          return updatedProj
+        }
+        return p
+      })
+      if (updatedProj) {
+        saveProject(updatedProj).catch(e => console.error('Force save failed:', e))
+      }
+      return updated
+    })
+    setIsSaved(true)
+  }
+
   return (
     <div className="flex flex-col flex-1 h-screen overflow-hidden bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
       {isExporting && (
@@ -5233,20 +5271,76 @@ export default function Editor() {
       )}
       
       {showDashboard ? (
-        <Dashboard
-          theme={theme}
-          toggleTheme={toggleTheme}
-          projects={projects}
-          onCreateProject={createNewProject}
-          onCreateProjectWithTemplate={createNewProjectWithTemplate}
-          onDeleteProject={deleteProject}
-          onRenameProject={renameProjectPrompt}
-          onLoadProject={loadProject}
-          userEmail={userEmail}
-          onSignOut={handleSignOut}
-          onOpenAuth={() => setShowAuthModal(true)}
-        />
+        isMobile ? (
+          <MobileDashboard
+            theme={theme}
+            toggleTheme={toggleTheme}
+            projects={projects}
+            onCreateProject={createNewProject}
+            onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onDeleteProject={deleteProject}
+            onRenameProject={renameProjectPrompt}
+            onLoadProject={loadProject}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
+        ) : (
+          <Dashboard
+            theme={theme}
+            toggleTheme={toggleTheme}
+            projects={projects}
+            onCreateProject={createNewProject}
+            onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onDeleteProject={deleteProject}
+            onRenameProject={renameProjectPrompt}
+            onLoadProject={loadProject}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => setShowAuthModal(true)}
+          />
+        )
       ) : (
+        isMobile ? (
+          <MobileChatView
+            theme={theme}
+            toggleTheme={toggleTheme}
+            documentTitle={documentTitle}
+            setDocumentTitle={setDocumentTitle}
+            activeProjectId={activeProjectId}
+            wordCount={wordCount}
+            charCount={charCount}
+            totalPages={totalPages}
+            isSaved={isSaved}
+            onForceSave={handleForceSave}
+            docHeader={docHeader}
+            docFooter={docFooter}
+            isSimulatingAI={isSimulatingAI}
+            simulatedAiResult={simulatedAiResult}
+            activeAiModel={activeAiModel}
+            aiEngine={aiEngine}
+            setAiEngine={setAiEngine}
+            handleAiAction={handleAiAction}
+            setAiPrompt={setAiPrompt}
+            aiPrompt={aiPrompt}
+            insertAiContent={insertAiContent}
+            discardAiContent={discardAiContent}
+            exportToDocx={exportToDocx}
+            exportToPdfPrint={exportToPdfPrint}
+            exportToPptx={exportToPptx}
+            onBackToDashboard={() => setShowDashboard(true)}
+            projectSources={projectSources}
+            handleWizardFileUpload={handleWizardFileUpload}
+            userEmail={userEmail}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => setShowAuthModal(true)}
+            editorHtml={editorHtml}
+            wizardDocType={wizardDocType}
+            wizardAcademicLevel={wizardAcademicLevel}
+            onOpenWizard={() => setShowWizard(true)}
+            onGenerateBlueprint={generateFullDocumentBlueprint}
+          />
+        ) : (
         <>
           {/* Top Application Bar */}
       <header className="flex items-center justify-between px-3 sm:px-6 py-2 border-b bg-white border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 z-30 relative select-none">
@@ -6573,6 +6667,7 @@ export default function Editor() {
         </div>
       )}
         </>
+        )
       )}
 
       {showWizard && (

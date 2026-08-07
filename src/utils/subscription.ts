@@ -293,7 +293,6 @@ export async function verifyPaymentCallback(userEmail?: string | null): Promise<
       }
 
       await saveSubscription(newSub)
-
       return {
         checked: true,
         success: true,
