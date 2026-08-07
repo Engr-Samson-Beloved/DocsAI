@@ -52,6 +52,7 @@ interface DashboardProps {
   userEmail: string | null
   onSignOut: () => void
   onOpenAuth: () => void
+  onOpenPricingModal?: () => void
 }
 
 // Subcomponent to render a miniature version of the document content
@@ -118,7 +119,8 @@ export default function Dashboard({
   onLoadProject,
   userEmail,
   onSignOut,
-  onOpenAuth
+  onOpenAuth,
+  onOpenPricingModal
 }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'title' | 'words'>('updated')
@@ -216,7 +218,7 @@ export default function Dashboard({
 
           {/* Upgrade Pill Button */}
           <button
-            onClick={() => setShowUpgradeModal(true)}
+            onClick={() => onOpenPricingModal ? onOpenPricingModal() : setShowUpgradeModal(true)}
             className="flex items-center gap-1.5 px-5 py-1.5 bg-[#E8F0FE] dark:bg-indigo-950 text-[#1A73E8] dark:text-indigo-350 rounded-full text-xs font-semibold hover:bg-[#D2E3FC] dark:hover:bg-indigo-900/60 transition-all cursor-pointer shadow-xs"
           >
             <Sparkles className="w-3.5 h-3.5" />

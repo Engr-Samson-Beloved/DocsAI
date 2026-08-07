@@ -14,6 +14,7 @@ import MobileDashboard from '../Mobile/MobileDashboard'
 import MobileChatView from '../Mobile/MobileChatView'
 import AuthModal from '../Auth/AuthModal'
 import { PricingModal } from '../Subscription/PricingModal'
+import { PricingView } from '../Subscription/PricingView'
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -1085,6 +1086,7 @@ export default function Editor() {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showPricingModal, setShowPricingModal] = useState(false)
+  const [showPricingView, setShowPricingView] = useState(false)
   const [userSubscription, setUserSubscription] = useState<any>(null)
   const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
@@ -5283,7 +5285,14 @@ export default function Editor() {
         </div>
       )}
       
-      {showDashboard ? (
+      {showPricingView ? (
+        <PricingView
+          onBack={() => setShowPricingView(false)}
+          userEmail={userEmail}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onSubscriptionUpdated={(sub) => setUserSubscription(sub)}
+        />
+      ) : showDashboard ? (
         isMobile ? (
           <MobileDashboard
             theme={theme}
@@ -5297,7 +5306,7 @@ export default function Editor() {
             userEmail={userEmail}
             onSignOut={handleSignOut}
             onOpenAuth={() => setShowAuthModal(true)}
-            onOpenPricingModal={() => setShowPricingModal(true)}
+            onOpenPricingModal={() => setShowPricingView(true)}
             userSubscription={userSubscription}
           />
         ) : (
@@ -5313,6 +5322,7 @@ export default function Editor() {
             userEmail={userEmail}
             onSignOut={handleSignOut}
             onOpenAuth={() => setShowAuthModal(true)}
+            onOpenPricingModal={() => setShowPricingView(true)}
           />
         )
       ) : (
@@ -5354,7 +5364,7 @@ export default function Editor() {
             wizardAcademicLevel={wizardAcademicLevel}
             onOpenWizard={() => setShowWizard(true)}
             onGenerateBlueprint={generateFullDocumentBlueprint}
-            onOpenPricingModal={() => setShowPricingModal(true)}
+            onOpenPricingModal={() => setShowPricingView(true)}
             userSubscription={userSubscription}
           />
         ) : (
