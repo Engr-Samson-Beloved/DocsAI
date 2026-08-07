@@ -891,17 +891,17 @@ export default function MobileChatView({
     <div className="flex flex-col h-screen h-[100dvh] bg-zinc-50 dark:bg-zinc-950 overflow-hidden relative touch-pan-y">
       
       {/* ━━━ Top Bar ━━━ */}
-      <header className="flex items-center justify-between px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 flex-shrink-0 safe-area-top">
-        <div className="flex items-center gap-2.5">
+      <header className="flex items-center justify-between px-2.5 sm:px-4 py-2 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 flex-shrink-0 safe-area-top">
+        <div className="flex items-center gap-1.5 min-w-0">
           <button
             onClick={() => setShowDrawer(true)}
-            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors active:scale-95"
+            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors active:scale-95 shrink-0"
           >
             <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
           </button>
-          <div className="flex items-center gap-1.5">
-            <img src="/WordPI.png" alt="WordPiLot" className="w-6 h-6 object-contain rounded-md" />
-            <span className="font-bold text-sm tracking-tight">
+          <div className="flex items-center gap-1 min-w-0">
+            <img src="/WordPI.png" alt="WordPiLot" className="w-5.5 h-5.5 object-contain rounded-md shrink-0" />
+            <span className="font-bold text-xs sm:text-sm tracking-tight truncate">
               <span className="text-zinc-900 dark:text-zinc-100">Word</span>
               <span className="text-[#185ABD] dark:text-[#3B82F6]">Pi</span>
               <span className="text-[#B68A35] text-[8px] align-super ml-0.5 font-bold uppercase">lot</span>
@@ -909,34 +909,34 @@ export default function MobileChatView({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => onOpenPricingModal?.()}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-lg text-xs font-bold transition-all mr-1 shadow-sm active:scale-95 cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
             title="Upgrade your plan for unlimited AI generations"
           >
-            <Crown className="w-3.5 h-3.5 fill-amber-300 text-amber-200" />
-            <span>Upgrade</span>
+            <Crown className="w-3.5 h-3.5 fill-amber-300 text-amber-200 shrink-0" />
+            <span className="hidden sm:inline">Upgrade</span>
           </button>
 
           <button
             onClick={() => setShowPreview(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all mr-1 active:scale-95 cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer"
             title="Preview your document pages"
           >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Preview</span>
+            <Eye className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">Preview</span>
           </button>
           
           <button
             onClick={toggleTheme}
-            className="p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer shrink-0"
           >
             {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           </button>
           <button
             onClick={() => userEmail ? setShowDrawer(true) : onOpenAuth()}
-            className="w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center uppercase"
+            className="w-6.5 h-6.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center uppercase shrink-0"
           >
             {userEmail ? userEmail.charAt(0) : 'G'}
           </button>
@@ -1225,27 +1225,20 @@ export default function MobileChatView({
                 <Download className="w-4 h-4 text-amber-500" />
                 <span>Export Document</span>
               </button>
-              <button
-                onClick={() => { onOpenPricingModal?.(); setShowDrawer(false) }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20 rounded-lg text-left transition-colors font-bold"
-              >
-                <Crown className="w-4 h-4 text-amber-500 fill-amber-500" />
-                <span>Subscription & Plan Benefits</span>
-              </button>
 
               <div className="border-t border-zinc-150 dark:border-zinc-800 my-2" />
 
-              {/* AI Engine Selector */}
+              {/* WordPI Intelligence Engine Selector */}
               <div className="px-3 py-2">
-                <label className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block mb-1.5">AI Engine</label>
+                <label className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block mb-1.5">WordPI Intelligence Engine</label>
                 <select
                   value={aiEngine}
                   onChange={(e) => setAiEngine(e.target.value as any)}
-                  className="w-full text-xs p-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                  className="w-full text-xs p-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer font-medium"
                 >
-                  <option value="gemini">Gemini 2.5 Flash (Free)</option>
-                  <option value="groq">Groq Llama 3 (Free & Fast)</option>
-                  <option value="grok">xAI Grok-2 (Subscription)</option>
+                  <option value="gemini">WordPI Flash Engine (Standard)</option>
+                  <option value="groq">WordPI Turbo Engine (Ultra Fast)</option>
+                  <option value="grok">WordPI Pro Research Engine (Advanced)</option>
                 </select>
               </div>
 
