@@ -16,7 +16,8 @@ import {
   User,
   Sparkles,
   FileText,
-  Clock
+  Clock,
+  Crown
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 
@@ -32,6 +33,8 @@ interface MobileDashboardProps {
   userEmail: string | null
   onSignOut: () => void
   onOpenAuth: () => void
+  onOpenPricingModal?: () => void
+  userSubscription?: any
 }
 
 export default function MobileDashboard({
@@ -45,7 +48,9 @@ export default function MobileDashboard({
   onLoadProject,
   userEmail,
   onSignOut,
-  onOpenAuth
+  onOpenAuth,
+  onOpenPricingModal,
+  userSubscription
 }: MobileDashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeMenuProjectId, setActiveMenuProjectId] = useState<string | null>(null)
@@ -78,6 +83,16 @@ export default function MobileDashboard({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Upgrade Button */}
+          <button
+            onClick={() => onOpenPricingModal?.()}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer mr-0.5"
+            title="Upgrade plan"
+          >
+            <Crown className="w-3.5 h-3.5 fill-amber-300 text-amber-200" />
+            <span>Upgrade</span>
+          </button>
+
           {/* Theme switcher */}
           <button
             onClick={toggleTheme}
@@ -106,6 +121,16 @@ export default function MobileDashboard({
                     <>
                       <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-xs truncate max-w-full">Active User</h4>
                       <p className="text-[10px] text-zinc-450 dark:text-zinc-500 truncate max-w-full px-2">{userEmail}</p>
+                      <div className="mt-1 flex items-center justify-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${
+                          userSubscription?.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                        }`} />
+                        <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 capitalize">
+                          {userSubscription?.status === 'active' 
+                            ? `${userSubscription.plan_tier || 'Pro'} Plan Active` 
+                            : 'Free Tier (5 Daily Limit)'}
+                        </span>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -122,6 +147,15 @@ export default function MobileDashboard({
                   )}
                   
                   <div className="w-full border-t border-zinc-150 dark:border-zinc-800 my-2.5"></div>
+                  
+                  {/* Upgrade button in profile card */}
+                  <button
+                    onClick={() => { onOpenPricingModal?.(); setShowProfileDropdown(false) }}
+                    className="w-full flex items-center justify-center gap-2 p-2 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-sm mb-2 active:scale-[0.98] transition-transform cursor-pointer"
+                  >
+                    <Crown className="w-4 h-4 text-amber-200 fill-amber-300" />
+                    <span>{userSubscription?.status === 'active' ? 'Manage Subscription' : 'Upgrade to Pro / Enterprise'}</span>
+                  </button>
                   
                   <div className="w-full flex flex-col gap-0.5 text-left text-xs text-zinc-600 dark:text-zinc-350">
                     <button className="flex items-center gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg">

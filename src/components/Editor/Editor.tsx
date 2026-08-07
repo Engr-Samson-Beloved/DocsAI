@@ -13,6 +13,7 @@ import Dashboard, { Project } from '../Dashboard/Dashboard'
 import MobileDashboard from '../Mobile/MobileDashboard'
 import MobileChatView from '../Mobile/MobileChatView'
 import AuthModal from '../Auth/AuthModal'
+import { PricingModal } from '../Subscription/PricingModal'
 import { 
   saveSource, 
   getSourcesForProject, 
@@ -1080,9 +1081,11 @@ export default function Editor() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
-  // Auth, Mobile Menu & Cloud Sync States
+  // Auth, Mobile Menu, Subscription & Cloud Sync States
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showPricingModal, setShowPricingModal] = useState(false)
+  const [userSubscription, setUserSubscription] = useState<any>(null)
   const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
@@ -1105,7 +1108,9 @@ export default function Editor() {
         syncProjects().then(list => {
           if (list) setProjects(list)
         })
-        getSubscription(savedEmail)
+        getSubscription(savedEmail).then(sub => setUserSubscription(sub))
+      } else {
+        getSubscription(null).then(sub => setUserSubscription(sub))
       }
     }
   }, [])
@@ -1115,6 +1120,7 @@ export default function Editor() {
     localStorage.removeItem('wordpi-user-email')
     localStorage.removeItem('docuai_user_subscription')
     setUserEmail(null)
+    setUserSubscription(null)
     setShowHeaderProfileDropdown(false)
   }
 
@@ -1123,7 +1129,7 @@ export default function Editor() {
     syncProjects().then(list => {
       setProjects(list || [])
     })
-    getSubscription(email)
+    getSubscription(email).then(sub => setUserSubscription(sub))
   }
 
   // Import document and styling modal states
@@ -5291,6 +5297,8 @@ export default function Editor() {
             userEmail={userEmail}
             onSignOut={handleSignOut}
             onOpenAuth={() => setShowAuthModal(true)}
+            onOpenPricingModal={() => setShowPricingModal(true)}
+            userSubscription={userSubscription}
           />
         ) : (
           <Dashboard
@@ -5346,6 +5354,8 @@ export default function Editor() {
             wizardAcademicLevel={wizardAcademicLevel}
             onOpenWizard={() => setShowWizard(true)}
             onGenerateBlueprint={generateFullDocumentBlueprint}
+            onOpenPricingModal={() => setShowPricingModal(true)}
+            userSubscription={userSubscription}
           />
         ) : (
         <>
@@ -7704,6 +7714,15 @@ export default function Editor() {
           </div>
         </div>
       )}
+
+      {/* Upgrade & Pricing Plan Modal */}
+      <PricingModal
+        isOpen={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        userEmail={userEmail}
+        onOpenAuth={() => setShowAuthModal(true)}
+        onSubscriptionUpdated={(sub) => setUserSubscription(sub)}
+      />
 
       {/* Cloud Auth Modal */}
       <AuthModal 

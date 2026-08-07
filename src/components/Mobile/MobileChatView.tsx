@@ -22,7 +22,8 @@ import {
   LogOut,
   Settings,
   HelpCircle,
-  User
+  User,
+  Crown
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 
@@ -97,6 +98,10 @@ export interface MobileChatViewProps {
 
   // Full blueprint generator
   onGenerateBlueprint: () => void
+
+  // Subscription modal & state
+  onOpenPricingModal?: () => void
+  userSubscription?: any
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -178,6 +183,8 @@ export default function MobileChatView({
   wizardAcademicLevel,
   onOpenWizard,
   onGenerateBlueprint,
+  onOpenPricingModal,
+  userSubscription
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -434,8 +441,17 @@ export default function MobileChatView({
 
         <div className="flex items-center gap-1">
           <button
+            onClick={() => onOpenPricingModal?.()}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-indigo-600 text-white rounded-lg text-xs font-bold transition-all mr-1 shadow-sm active:scale-95 cursor-pointer"
+            title="Upgrade your plan for unlimited AI generations"
+          >
+            <Crown className="w-3.5 h-3.5 fill-amber-300 text-amber-200" />
+            <span>Upgrade</span>
+          </button>
+
+          <button
             onClick={() => setShowPreview(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all mr-1.5 active:scale-95 cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all mr-1 active:scale-95 cursor-pointer"
             title="Preview your document pages"
           >
             <Eye className="w-3.5 h-3.5" />
@@ -620,21 +636,40 @@ export default function MobileChatView({
               </button>
             </div>
 
-            {/* User info */}
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+            {/* User info & Subscription */}
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center uppercase text-sm">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white font-bold flex items-center justify-center uppercase text-sm shadow-sm">
                   {userEmail ? userEmail.charAt(0) : 'G'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
                     {userEmail || 'Guest Mode'}
                   </p>
-                  <p className="text-[10px] text-zinc-400">
-                    {userEmail ? 'Cloud Sync Active' : 'Offline Only'}
-                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className={`inline-block w-2 h-2 rounded-full ${
+                      userSubscription?.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                    }`} />
+                    <span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 capitalize">
+                      {userSubscription?.status === 'active' 
+                        ? `${userSubscription.plan_tier || 'Pro'} Plan Active` 
+                        : 'Free Tier (5 Daily Limit)'}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* Upgrade Button in Drawer */}
+              <button
+                onClick={() => { onOpenPricingModal?.(); setShowDrawer(false) }}
+                className="w-full flex items-center justify-between p-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md active:scale-[0.98] transition-transform cursor-pointer"
+              >
+                <div className="flex items-center gap-2">
+                  <Crown className="w-4 h-4 text-amber-200 fill-amber-300" />
+                  <span>{userSubscription?.status === 'active' ? 'Manage Plan & Benefits' : 'Upgrade Plan & Unlock All'}</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-white/80" />
+              </button>
             </div>
 
             {/* Menu items */}
@@ -666,6 +701,13 @@ export default function MobileChatView({
               >
                 <Download className="w-4 h-4 text-amber-500" />
                 <span>Export Document</span>
+              </button>
+              <button
+                onClick={() => { onOpenPricingModal?.(); setShowDrawer(false) }}
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20 rounded-lg text-left transition-colors font-bold"
+              >
+                <Crown className="w-4 h-4 text-amber-500 fill-amber-500" />
+                <span>Subscription & Plan Benefits</span>
               </button>
 
               <div className="border-t border-zinc-150 dark:border-zinc-800 my-2" />
