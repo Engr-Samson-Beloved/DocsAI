@@ -5,7 +5,6 @@ import {
   Check,
   Zap,
   Crown,
-  Sparkles,
   X,
   ShieldCheck,
   CreditCard,
@@ -174,7 +173,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
           </button>
           
           <div className="inline-flex items-center gap-2 px-3 py-1 mb-3 rounded-full text-xs font-semibold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
-            <Sparkles className="w-3.5 h-3.5" />
+            <Crown className="w-3.5 h-3.5" />
             <span>Korapay Realtime Payment Gateway</span>
           </div>
 

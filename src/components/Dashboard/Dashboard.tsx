@@ -221,7 +221,7 @@ export default function Dashboard({
             onClick={() => onOpenPricingModal ? onOpenPricingModal() : setShowUpgradeModal(true)}
             className="flex items-center gap-1.5 px-5 py-1.5 bg-[#E8F0FE] dark:bg-indigo-950 text-[#1A73E8] dark:text-indigo-350 rounded-full text-xs font-semibold hover:bg-[#D2E3FC] dark:hover:bg-indigo-900/60 transition-all cursor-pointer shadow-xs"
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <Crown className="w-3.5 h-3.5 text-amber-500" />
             <span>Upgrade</span>
           </button>
 

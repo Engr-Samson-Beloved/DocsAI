@@ -83,7 +83,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="mx-auto w-12 h-12 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-            <Sparkles className="w-6 h-6 animate-pulse" />
+            <User className="w-6 h-6" />
           </div>
           <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
             {isSignUp ? 'Create your WordPI Account' : 'Welcome back to WordPI'}

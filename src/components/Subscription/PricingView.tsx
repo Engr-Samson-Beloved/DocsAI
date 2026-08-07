@@ -5,7 +5,6 @@ import {
   Check,
   Zap,
   Crown,
-  Sparkles,
   ArrowLeft,
   Coins,
   ShieldCheck,

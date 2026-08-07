@@ -14,7 +14,6 @@ import {
   Trash2,
   Edit3,
   User,
-  Sparkles,
   FileText,
   Clock,
   Crown

@@ -5,7 +5,6 @@ import {
   Send,
   Paperclip,
   FileText,
-  Sparkles,
   Download,
   Moon,
   Sun,
@@ -27,7 +26,9 @@ import {
   GraduationCap,
   BookOpenCheck,
   FileEdit,
-  Layers
+  Layers,
+  Loader2,
+  Bot
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 
@@ -160,6 +161,23 @@ const parsePagesFromHtml = (htmlStr: string): string[] => {
 
 // ─── Helper to generate unique IDs ────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+
+// ─── Helper to parse Markdown to HTML (Fix bold asterisks & italics) ───
+const parseMarkdownToHtml = (content: string): string => {
+  if (!content) return ''
+  let parsed = content
+  // Replace **bold** with <strong>bold</strong>
+  parsed = parsed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  // Replace *italic* or _italic_ with <em>italic</em>
+  parsed = parsed.replace(/\*(.*?)\*/g, '<em>$1</em>')
+  // Replace `code` with <code>code</code>
+  parsed = parsed.replace(/`(.*?)`/g, '<code class="bg-zinc-100 dark:bg-zinc-800 px-1 rounded text-xs font-mono">$1</code>')
+  // If not already HTML tags, convert newlines to <br/>
+  if (!/<[a-z][\s\S]*>/i.test(parsed)) {
+    parsed = parsed.replace(/\n/g, '<br/>')
+  }
+  return parsed
+}
 
 // ─── Onboarding Flow Stages ───────────────────────────────────────
 type OnboardingStage = 
@@ -833,9 +851,10 @@ export default function MobileChatView({
     if (msg.type === 'status') {
       return (
         <div key={msg.id} className="flex justify-center px-4 mb-3 chat-bubble-enter">
-          <div className="bg-zinc-100 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 text-[11px] font-medium px-4 py-1.5 rounded-full">
-            {msg.content}
-          </div>
+          <div 
+            className="bg-zinc-100 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 text-[11px] font-medium px-4 py-1.5 rounded-full"
+            dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(msg.content) }}
+          />
         </div>
       )
     }
@@ -855,17 +874,13 @@ export default function MobileChatView({
       <div key={msg.id} className="flex justify-start px-4 mb-3 chat-bubble-enter">
         <div className="flex gap-2.5 max-w-[88%]">
           <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <Bot className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
           </div>
           <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl rounded-tl-md px-4 py-2.5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 shadow-sm">
-            {msg.role === 'ai' ? (
-              <div
-                className="prose-mobile [&_p]:my-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_strong]:font-bold [&_em]:italic [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-2 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-2 [&_h3]:text-xs [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-2 [&_blockquote]:italic [&_code]:bg-zinc-100 [&_code]:dark:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_code]:font-mono [&_code]:text-xs"
-                dangerouslySetInnerHTML={{ __html: msg.content }}
-              />
-            ) : (
-              <span className="whitespace-pre-wrap">{msg.content}</span>
-            )}
+            <div
+              className="prose-mobile [&_p]:my-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_strong]:font-bold [&_em]:italic [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-2 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-2 [&_h3]:text-xs [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-2 [&_blockquote]:italic [&_code]:bg-zinc-100 [&_code]:dark:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_code]:font-mono [&_code]:text-xs"
+              dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(msg.content) }}
+            />
           </div>
         </div>
       </div>
@@ -956,7 +971,7 @@ export default function MobileChatView({
           <div className="flex justify-start px-4 mb-3">
             <div className="flex gap-2.5">
               <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+                <Bot className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 animate-pulse" />
               </div>
               <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl rounded-tl-md px-4 py-3 shadow-sm">
                 <div className="flex gap-1.5 items-center">
@@ -1023,6 +1038,59 @@ export default function MobileChatView({
         )}
 
         <div ref={messagesEndRef} />
+      </div>
+
+      {/* ━━━ Fixed Live File Action Bar (Positioned before Quick Actions & Input) ━━━ */}
+      <div className="px-3 py-2 bg-white dark:bg-zinc-900 border-t border-b border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between gap-2.5 flex-shrink-0 z-20 shadow-xs">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 font-bold">
+            {isSimulatingAI ? (
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-600 dark:text-indigo-400" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-zinc-800 dark:text-zinc-100 truncate max-w-[150px]">
+                {documentTitle || 'Untitled Document'}
+              </span>
+              {isSimulatingAI ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  AI Updating...
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+                  <Check className="w-2.5 h-2.5" />
+                  Ready
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+              {wordCount} words • {totalPages} page{totalPages > 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        {/* Eye (Preview) & Download (Export) Buttons */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => setShowPreview(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer"
+            title="Preview document pages"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Preview</span>
+          </button>
+          <button
+            onClick={() => setShowExportSheet(true)}
+            className="p-1.5 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-900 rounded-xl transition-all active:scale-95 cursor-pointer shadow-xs"
+            title="Export / Download document"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* ━━━ Bottom Input Bar ━━━ */}
