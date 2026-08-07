@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState } from 'react'
-import { Sparkles, Mail, Lock, X, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { User, Mail, Lock, X, AlertCircle, CheckCircle2 } from 'lucide-react'
 
 interface AuthModalProps {
   isOpen: boolean

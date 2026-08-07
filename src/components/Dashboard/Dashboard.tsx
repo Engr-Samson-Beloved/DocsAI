@@ -20,7 +20,7 @@ import {
   Settings,
   LogOut,
   HelpCircle,
-  Sparkles,
+  Crown,
   FileText,
   Grid
 } from 'lucide-react'
