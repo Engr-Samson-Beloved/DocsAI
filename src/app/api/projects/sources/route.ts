@@ -117,6 +117,7 @@ export async function POST(req: NextRequest) {
       const mappedSource = {
         id: source.id, // Primary key matches local IndexedDB auto-increment id
         project_id: source.projectId,
+        user_email: user.email,
         name: source.name,
         content: source.content,
         type: source.type,

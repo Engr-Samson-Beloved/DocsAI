@@ -38,10 +38,14 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseClient(token)
     
     if (supabase && token) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .order('updated_at', { ascending: false })
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      let query = supabase.from('projects').select('*').order('updated_at', { ascending: false })
+      if (user && user.email) {
+        query = query.or(`user_id.eq.${user.id},user_email.ilike.${user.email}`)
+      }
+
+      const { data, error } = await query
 
       if (error) {
         console.error('Supabase get projects error:', error)
@@ -131,7 +135,8 @@ export async function POST(req: NextRequest) {
         academic_tone: project.academicTone,
         doc_header: project.docHeader,
         doc_footer: project.docFooter,
-        user_id: user.id
+        user_id: user.id,
+        user_email: user.email
       }
 
       const { error } = await supabase

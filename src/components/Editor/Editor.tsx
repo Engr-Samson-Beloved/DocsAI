@@ -26,6 +26,7 @@ import {
   clearAllLocalData
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
+import { getSubscription } from '../../utils/subscription'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -1101,6 +1102,10 @@ export default function Editor() {
       const savedEmail = localStorage.getItem('wordpi-user-email')
       if (savedEmail) {
         setUserEmail(savedEmail)
+        syncProjects().then(list => {
+          if (list) setProjects(list)
+        })
+        getSubscription(savedEmail)
       }
     }
   }, [])
@@ -1108,6 +1113,7 @@ export default function Editor() {
   const handleSignOut = () => {
     localStorage.removeItem('wordpi-session-token')
     localStorage.removeItem('wordpi-user-email')
+    localStorage.removeItem('docuai_user_subscription')
     setUserEmail(null)
     setShowHeaderProfileDropdown(false)
   }
@@ -1117,6 +1123,7 @@ export default function Editor() {
     syncProjects().then(list => {
       setProjects(list || [])
     })
+    getSubscription(email)
   }
 
   // Import document and styling modal states

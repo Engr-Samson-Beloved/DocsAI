@@ -112,29 +112,34 @@ export async function getSubscription(userEmail?: string | null): Promise<UserSu
     updated_at: new Date().toISOString()
   }
 
-  if (typeof window !== 'undefined') {
-    const stored = localStorage.getItem(STORAGE_SUB_KEY)
-    if (stored) {
-      try {
-        const parsed: UserSubscription = JSON.parse(stored)
-        if (parsed.expiration_date && new Date(parsed.expiration_date) < new Date()) {
-          parsed.status = 'expired'
-          parsed.plan_tier = 'free'
-        }
-        return parsed
-      } catch (e) {}
-    }
-  }
-
   if (userEmail) {
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('wordpi-session-token') : null
+      const res = await fetch(`/api/pay/subscription?email=${encodeURIComponent(userEmail)}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data && data.subscription) {
+          const sub: UserSubscription = data.subscription
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_SUB_KEY, JSON.stringify(sub))
+          }
+          return sub
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch subscription from API, trying Supabase or local storage:', err)
+    }
+
     const supabase = getSupabaseClient()
     if (supabase) {
       try {
         const { data, error } = await supabase
           .from('subscriptions')
           .select('*')
-          .eq('email', userEmail)
-          .single()
+          .ilike('email', userEmail)
+          .maybeSingle()
 
         if (data && !error) {
           let status = data.status
@@ -162,8 +167,22 @@ export async function getSubscription(userEmail?: string | null): Promise<UserSu
           return sub
         }
       } catch (err) {
-        console.warn('Could not fetch subscription from Supabase, returning local default:', err)
+        console.warn('Could not fetch subscription from Supabase:', err)
       }
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem(STORAGE_SUB_KEY)
+    if (stored) {
+      try {
+        const parsed: UserSubscription = JSON.parse(stored)
+        if (parsed.expiration_date && new Date(parsed.expiration_date) < new Date()) {
+          parsed.status = 'expired'
+          parsed.plan_tier = 'free'
+        }
+        return parsed
+      } catch (e) {}
     }
   }
 
