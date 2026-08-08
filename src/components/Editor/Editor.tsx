@@ -1504,6 +1504,14 @@ export default function Editor() {
     setIsSaved(true)
   }
 
+  // Return to Dashboard / Landing Screen cleanly
+  const handleBackToDashboard = () => {
+    setShowDashboard(true)
+    setActiveProjectId(null)
+    localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+    window.history.pushState({}, '', '/')
+  }
+
   // Delete reference source from IndexedDB and state
   const deleteIngestedSourceAtIndex = async (index: number) => {
     const source = projectSources[index]
@@ -5446,7 +5454,7 @@ export default function Editor() {
             exportToDocx={exportToDocx}
             exportToPdfPrint={exportToPdfPrint}
             exportToPptx={exportToPptx}
-            onBackToDashboard={() => setShowDashboard(true)}
+            onBackToDashboard={handleBackToDashboard}
             projectSources={projectSources}
             handleWizardFileUpload={handleWizardFileUpload}
             userEmail={userEmail}

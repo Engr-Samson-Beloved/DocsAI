@@ -11,6 +11,7 @@ import {
   Moon,
   Sun,
   ChevronRight,
+  ChevronLeft,
   Menu,
   X,
   Eye,
@@ -1307,10 +1308,17 @@ export default function MobileChatView({
       <header className="flex items-center justify-between px-2.5 sm:px-4 py-2 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 z-30 flex-shrink-0 safe-area-top">
         <div className="flex items-center gap-1.5 min-w-0">
           <button
-            onClick={() => setShowDrawer(true)}
-            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors active:scale-95 shrink-0"
+            onClick={onBackToDashboard}
+            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors active:scale-95 shrink-0 text-zinc-600 dark:text-zinc-400 cursor-pointer"
+            title="Back to Dashboard"
           >
-            <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setShowDrawer(true)}
+            className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors active:scale-95 shrink-0 text-zinc-600 dark:text-zinc-400 cursor-pointer"
+          >
+            <Menu className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-1 min-w-0">
             <img src="/WordPI.png" alt="WordPiLot" className="w-5.5 h-5.5 object-contain rounded-md shrink-0" />
