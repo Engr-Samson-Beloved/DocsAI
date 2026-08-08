@@ -35,7 +35,8 @@ import {
   Redo2,
   Search,
   ExternalLink,
-  BookmarkPlus
+  BookmarkPlus,
+  Sparkles
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 import type { JournalPaper } from '@/app/api/journals/search/route'
@@ -79,7 +80,7 @@ export interface MobileChatViewProps {
   setAiEngine: (engine: 'gemini' | 'grok' | 'groq') => void
   
   // AI actions
-  handleAiAction: (action: string) => void
+  handleAiAction: (action: string, promptOverride?: string) => void
   setAiPrompt: (prompt: string) => void
   aiPrompt: string
   insertAiContent: () => void
@@ -154,6 +155,7 @@ export interface MobileChatViewProps {
   wizardLineSpacing?: string
   setWizardLineSpacing?: (spacing: string) => void
   setWizardAcademicLevel?: (level: string) => void
+  onApplyFormattingStyles?: (font: string, spacing: string, level?: string) => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -281,7 +283,8 @@ export default function MobileChatView({
   setWizardFontFamily,
   wizardLineSpacing,
   setWizardLineSpacing,
-  setWizardAcademicLevel
+  setWizardAcademicLevel,
+  onApplyFormattingStyles
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -296,12 +299,12 @@ export default function MobileChatView({
   const [showInfoForm, setShowInfoForm] = useState(false)
   const [showSourcesForm, setShowSourcesForm] = useState(false)
   const [formData, setFormData] = useState({
-    topic: '',
+    topic: documentTitle && documentTitle !== 'Untitled Document' ? documentTitle : '',
     department: '',
     studentName: '',
     matricNumber: '',
     supervisorName: '',
-    academicLevel: 'Undergraduate'
+    academicLevel: wizardAcademicLevel || 'Undergraduate'
   })
   const onboardingTemplateRef = useRef<string | null>(null)
   const hasProcessedTemplateRef = useRef<string | null>(null)
@@ -353,6 +356,26 @@ export default function MobileChatView({
 
   // Confirm formatting style and start blueprint generation
   const handleConfirmFormattingAndGenerate = useCallback(() => {
+    // Pre-generation validation
+    const title = documentTitle?.trim()
+    if (!title || title === 'Untitled Document' || title === 'Seminar Report Blueprint' || title === 'Research Proposal Outline' || title === 'Graduation Thesis Project') {
+      addBotMessage(`⚠️ Your document topic is still set to the default placeholder: **"${title || 'Untitled Document'}"**. Please set your actual topic first by filling in the cover page form or typing your topic in the title bar above.`)
+      setShowFormattingModal(false)
+      setShowInfoForm(true)
+      setMessages(prev => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'form-card' as const,
+          formType: 'seminar-info'
+        }
+      ])
+      return
+    }
+
     setWizardFontFamily?.(selectedFont)
     setWizardLineSpacing?.(selectedSpacing)
     setWizardAcademicLevel?.(selectedLevel)
@@ -381,7 +404,36 @@ export default function MobileChatView({
     setTimeout(() => {
       onGenerateBlueprint()
     }, 400)
-  }, [selectedFont, selectedSpacing, selectedLevel, setWizardFontFamily, setWizardLineSpacing, setWizardAcademicLevel, onGenerateBlueprint])
+  }, [selectedFont, selectedSpacing, selectedLevel, setWizardFontFamily, setWizardLineSpacing, setWizardAcademicLevel, onGenerateBlueprint, addBotMessage, documentTitle])
+
+  // Directly apply font, line spacing, and academic level to existing document
+  const handleApplyFormattingDirectly = useCallback(() => {
+    setWizardFontFamily?.(selectedFont)
+    setWizardLineSpacing?.(selectedSpacing)
+    setWizardAcademicLevel?.(selectedLevel)
+    onApplyFormattingStyles?.(selectedFont, selectedSpacing, selectedLevel)
+    setShowFormattingModal(false)
+
+    const fontNames: Record<string, string> = {
+      playfair: 'Times New Roman',
+      arial: 'Arial',
+      georgia: 'Georgia',
+      inter: 'Inter',
+      courier: 'Courier',
+      default: 'Standard'
+    }
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'system',
+        content: `✨ Applied **${fontNames[selectedFont] || selectedFont}** font & **${selectedSpacing}** line spacing directly to your document!`,
+        timestamp: Date.now(),
+        type: 'status'
+      }
+    ])
+  }, [selectedFont, selectedSpacing, selectedLevel, setWizardFontFamily, setWizardLineSpacing, setWizardAcademicLevel, onApplyFormattingStyles])
 
   // Trigger journal search
   const executeJournalSearch = useCallback(async (queryText?: string) => {
@@ -758,6 +810,23 @@ export default function MobileChatView({
   useEffect(() => {
     if (simulatedAiResult && !isSimulatingAI && simulatedAiResult !== lastAiResultRef.current) {
       lastAiResultRef.current = simulatedAiResult
+
+      // Detect API error responses and show friendly error message instead of raw HTML
+      if (simulatedAiResult.includes('API Error:') || simulatedAiResult.includes('Network Error:')) {
+        const errorText = simulatedAiResult.replace(/<[^>]*>/g, '').trim()
+        setMessages(prev => [
+          ...prev,
+          {
+            id: uid(),
+            role: 'ai',
+            content: `⚠️ ${errorText}\n\nThis might be a temporary issue. Try:\n- Sending your message again\n- Switching AI engine in the sidebar menu\n- Checking your internet connection`,
+            timestamp: Date.now(),
+            type: 'text'
+          }
+        ])
+        return
+      }
+
       setMessages(prev => [
         ...prev,
         {
@@ -826,7 +895,7 @@ export default function MobileChatView({
       return
     }
 
-    if (classified.action === 'blueprint') {
+    if (classified.action === 'blueprint' || classified.action === 'format') {
       setShowFormattingModal(true)
       return
     }
@@ -862,10 +931,26 @@ export default function MobileChatView({
       return
     }
 
-    // For all other intents, use the enriched prompt
-    setAiPrompt(classified.enrichedPrompt)
+    // Handle greeting intent locally without API call
+    if (classified.action === 'greeting') {
+      const hasCover = editorHtml.includes('data-cover="true"')
+      const hasContent = wordCount > 50
+      const hasSources = projectSources.length > 0
+      
+      let suggestions = ''
+      if (!hasCover && !hasContent) {
+        suggestions = `\n\nHere's what I can help you with:\n- 📋 **Set up your front cover page** — fill in your project details\n- 🔍 **Search online journals** — find and cite academic papers\n- ✨ **Generate your full document** — create all chapters at once\n- 📝 **Write a specific chapter** — e.g. "Write Chapter 1 Introduction"\n\nWhat would you like to do first?`
+      } else if (hasCover && !hasContent) {
+        suggestions = `\n\nYour cover page is set! Here's what's next:\n- 🔍 **Search journals** for references\n- ✨ **Generate full document** with all chapters\n- 📝 **Write a specific section** — just tell me which one`
+      } else {
+        suggestions = `\n\nYour document has ${wordCount} words across ${totalPages} page(s). I can:\n- 🧠 **Humanize** any section to bypass AI detection\n- ✏️ **Edit or improve** specific chapters\n- 📚 **Add references** from online journals\n- 📄 **Export** to Word, PDF, or PowerPoint`
+      }
+      
+      addBotMessage(`👋 Hey there! I'm **WordPI**, your intelligent academic writing assistant.${suggestions}`)
+      return
+    }
 
-    // Add a contextual status message so user knows what action was detected
+    // For all other intents, pass enriched prompt directly to avoid race condition
     const intentLabels: Record<string, string> = {
       'humanize': '🧠 Humanizing content...',
       'rephrase': '🔄 Rephrasing academically...',
@@ -882,10 +967,8 @@ export default function MobileChatView({
       { id: uid(), role: 'system', content: statusLabel, timestamp: Date.now(), type: 'status' }
     ])
 
-    // Trigger AI action after a tick so aiPrompt is set
-    setTimeout(() => {
-      handleAiAction('custom')
-    }, 50)
+    // Pass enrichedPrompt directly as promptOverride — eliminates the setState race condition
+    handleAiAction(classified.action === 'question' || classified.action === 'custom' ? 'custom' : classified.action, classified.enrichedPrompt)
   }
 
   // ─── Handle quick action chip tap (Intelligence-enhanced) ────
@@ -2067,20 +2150,31 @@ export default function MobileChatView({
             </div>
 
             {/* Modal Footer Confirm Button */}
-            <div className="p-3.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 flex items-center justify-between">
+            <div className="p-3.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 flex flex-wrap items-center justify-between gap-2">
               <button
                 onClick={() => setShowFormattingModal(false)}
                 className="px-3.5 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleConfirmFormattingAndGenerate}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95 shadow-xs"
-              >
-                <Check className="w-4 h-4" />
-                Confirm Style & Generate Full Document
-              </button>
+              <div className="flex items-center gap-2">
+                {wordCount > 50 && (
+                  <button
+                    onClick={handleApplyFormattingDirectly}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95 shadow-xs"
+                  >
+                    <Check className="w-4 h-4" />
+                    Apply Style to Current Document
+                  </button>
+                )}
+                <button
+                  onClick={handleConfirmFormattingAndGenerate}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95 shadow-xs"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {wordCount > 50 ? 'Re-generate Full Blueprint' : 'Confirm Style & Generate Full Document'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

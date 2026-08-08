@@ -19,6 +19,8 @@ export type ChatIntent =
   | 'edit-section'
   | 'question'
   | 'export'
+  | 'greeting'
+  | 'format'
   | 'custom'
 
 export interface ClassifiedIntent {
@@ -53,6 +55,16 @@ interface IntentRule {
 }
 
 const INTENT_RULES: IntentRule[] = [
+  // Greeting
+  {
+    intent: 'greeting' as ChatIntent,
+    patterns: [
+      /^(hi|hello|hey|good\s*(morning|afternoon|evening|day)|howdy|yo|sup|what'?s\s*up)[!.,?\s]*$/i,
+      /^(help|help\s*me|what\s*can\s*you\s*do|how\s*does\s*this\s*work|how\s*do\s*i\s*use|get\s*started|start)[!?,\s]*$/i,
+      /^(thanks|thank\s*you|ok|okay|cool|nice|great|awesome|perfect|got\s*it|alright)[!.,?\s]*$/i,
+    ],
+    priority: 95
+  },
   // Export / Download
   {
     intent: 'export',
@@ -65,8 +77,8 @@ const INTENT_RULES: IntentRule[] = [
   {
     intent: 'cover-page',
     patterns: [
-      /\b(generate|create|build|set\s*up|make|add|edit)\s+(the\s+)?(front\s*page|cover\s*page|title\s*page|frontpage|cover)\b/i,
-      /\b(front\s*page|cover\s*page|title\s*page)\s*(form|details|setup)?\b/i
+      /\b(generate|create|build|set\s*up|make|add|edit|design|do)\s+(a\s+|an\s+|the\s+|my\s+|our\s+)?(front\s*page|cover\s*page|title\s*page|frontpage|front\s*cover|cover)\b/i,
+      /\b(front\s*page|cover\s*page|title\s*page|front\s*cover)\s*(form|details|setup)?\b/i
     ],
     priority: 95
   },
@@ -121,6 +133,15 @@ const INTENT_RULES: IntentRule[] = [
       /\b(blueprint|full\s+document|generate\s+everything)\b/i
     ],
     priority: 75
+  },
+  // Document formatting / styling
+  {
+    intent: 'format',
+    patterns: [
+      /\b(format|style|typography|font|line\s*spacing|reformat|layout)\s+(the\s+)?(document|text|content|report|paper|page)?\b/i,
+      /\b(format\s+my\s+document|apply\s+formatting|just\s+format)\b/i
+    ],
+    priority: 85
   },
   // Edit a specific section
   {
@@ -411,6 +432,14 @@ export function classifyIntent(
         `Provide a helpful, concise answer. If they're asking about document structure, reference their ` +
         `${metadata.documentType} document type. If they need writing help, offer specific suggestions ` +
         `and offer to generate content for them. Be conversational and helpful.`
+      break
+
+    case 'greeting':
+      enrichedPrompt = '__GREETING__'
+      break
+
+    case 'format':
+      enrichedPrompt = '__FORMAT__'
       break
 
     default:

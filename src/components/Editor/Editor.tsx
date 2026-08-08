@@ -4119,7 +4119,7 @@ export default function Editor() {
   }
 
   // Phase 2 AI Prompt execution (Streams response from WordPI AI route proxy)
-  const handleAiAction = async (action: string) => {
+  const handleAiAction = async (action: string, promptOverride?: string) => {
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
     setActiveAiModel('')
@@ -4165,7 +4165,7 @@ export default function Editor() {
     } else if (action === 'outline') {
       promptText = 'Generate a comprehensive academic thesis outline (Chapters 1 to 5). Start with a <h2>Thesis Project Outline</h2> heading, and return the subheadings formatted in structured HTML lists (<ul>/<li>) or nested headings.'
     } else {
-      promptText = aiPrompt
+      promptText = promptOverride || aiPrompt
     }
 
     try {
@@ -4743,6 +4743,25 @@ export default function Editor() {
     setProjectSources(updatedSources)
   }
 
+  const applyFormattingStyles = (font: string, spacing: string, level?: string) => {
+    setWizardFontFamily(font as any)
+    setWizardLineSpacing(spacing)
+    if (level) setWizardAcademicLevel(level)
+    if (editor) {
+      setTimeout(() => {
+        let chain = editor.chain().focus().selectAll()
+        if (font === 'default') {
+          chain = chain.unsetFontFamily()
+        } else {
+          chain = chain.setFontFamily(font as any)
+        }
+        chain.setLineHeight(spacing).run()
+        runPagination(editor)
+        setIsSaved(false)
+      }, 100)
+    }
+  }
+
   const applyOnboardingStyles = (editorInstance: any) => {
     if (!editorInstance) return
     setTimeout(() => {
@@ -5222,7 +5241,7 @@ export default function Editor() {
           For each section, do NOT just put placeholders or comments. Generate actual introductory text, structured paragraphs, explanations, and realistic outlines. Write at least 1500 words of rich content.
           Use standard HTML tags like <h1>, <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, and <blockquote>. Use <div data-type="page">...</div> to separate the content into logical sections/pages.
           The very first page MUST start with a <h1> heading containing the exact topic: "${finalTitle}".
-          Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.`,
+          Keep the tone highly ${wizardAcademicTone || 'scholarly'}, fitting for an ${wizardAcademicLevel} level project.${projectSources.length > 0 ? `\n\nIMPORTANT: The user has ingested ${projectSources.length} reference source(s). You MUST include a final "References" section at the end of the document with properly formatted APA 7th edition citations for all referenced works. Use the source names and content provided in the context to format accurate bibliographic entries.` : ''}`,
           context: contextText,
           academicLevel: wizardAcademicLevel || 'Undergraduate',
           academicTone: wizardAcademicTone || 'Analytical',
@@ -5456,6 +5475,7 @@ export default function Editor() {
             wizardLineSpacing={wizardLineSpacing}
             setWizardLineSpacing={setWizardLineSpacing}
             setWizardAcademicLevel={setWizardAcademicLevel}
+            onApplyFormattingStyles={applyFormattingStyles}
           />
         ) : (
         <>
