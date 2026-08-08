@@ -180,7 +180,7 @@ const SECTION_PATTERNS = [
   /\b(introduction|intro|abstract|background|literature\s+review|methodology|method|results?|findings?|discussion|conclusion|recommendation|reference|bibliography|appendix)\b/i
 ]
 
-function extractSectionTarget(message: string): { section?: string; page?: number } {
+export function extractSectionTarget(message: string): { section?: string; page?: number } {
   for (const pattern of SECTION_PATTERNS) {
     const match = message.match(pattern)
     if (match) {
@@ -200,21 +200,21 @@ function extractSectionTarget(message: string): { section?: string; page?: numbe
 }
 
 // ─── Extract relevant document section from HTML ───────────────
-function extractSectionFromHtml(html: string, sectionTarget: string): string {
+export function extractSectionFromHtml(html: string, sectionTarget: string): string {
   if (!html || !sectionTarget) return ''
 
-  // Create a virtual DOM parser
   const target = sectionTarget.toLowerCase().trim()
-  
-  // Split HTML by heading tags to find relevant sections
-  const headingRegex = /<h[1-4][^>]*>(.*?)<\/h[1-4]>/gi
-  const headings: { text: string; index: number }[] = []
+  const headingRegex = /<h([1-6])[^>]*>(.*?)<\/h\1>/gi
+  const headings: { level: number; text: string; index: number }[] = []
   let match
 
   while ((match = headingRegex.exec(html)) !== null) {
-    const cleanText = match[1].replace(/<[^>]*>/g, '').trim()
-    headings.push({ text: cleanText, index: match.index })
+    const level = parseInt(match[1], 10)
+    const cleanText = match[2].replace(/<[^>]*>/g, '').trim()
+    headings.push({ level, text: cleanText, index: match.index })
   }
+
+  if (headings.length === 0) return ''
 
   // Find the best matching heading
   let bestIdx = -1
@@ -233,13 +233,71 @@ function extractSectionFromHtml(html: string, sectionTarget: string): string {
 
   if (bestIdx === -1) return ''
 
-  // Extract from matched heading to next heading (or end)
   const startIdx = headings[bestIdx].index
-  const endIdx = bestIdx + 1 < headings.length ? headings[bestIdx + 1].index : html.length
-  const sectionHtml = html.slice(startIdx, Math.min(endIdx, startIdx + 5000))
+  const matchedLevel = headings[bestIdx].level
 
-  // Strip HTML tags for clean text context
+  // Find next heading of equal or higher rank (level <= matchedLevel)
+  let endIdx = html.length
+  for (let i = bestIdx + 1; i < headings.length; i++) {
+    if (headings[i].level <= matchedLevel) {
+      endIdx = headings[i].index
+      break
+    }
+  }
+
+  const sectionHtml = html.slice(startIdx, Math.min(endIdx, startIdx + 8000))
   return sectionHtml.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// ─── Replace a section in HTML in-place ─────────────────────────
+export function replaceSectionInHtml(fullHtml: string, sectionTarget: string, newSectionHtml: string): string {
+  if (!fullHtml || !sectionTarget || !newSectionHtml) return fullHtml
+
+  const target = sectionTarget.toLowerCase().trim()
+  const headingRegex = /<h([1-6])[^>]*>(.*?)<\/h\1>/gi
+  const headings: { level: number; text: string; index: number }[] = []
+  let match
+
+  while ((match = headingRegex.exec(fullHtml)) !== null) {
+    const level = parseInt(match[1], 10)
+    const cleanText = match[2].replace(/<[^>]*>/g, '').trim()
+    headings.push({ level, text: cleanText, index: match.index })
+  }
+
+  if (headings.length === 0) return fullHtml
+
+  // Find best matching heading
+  let bestIdx = -1
+  for (let i = 0; i < headings.length; i++) {
+    const hText = headings[i].text.toLowerCase()
+    if (
+      hText.includes(target) ||
+      target.includes(hText) ||
+      (target.match(/chapter\s*(\d+)/i) && hText.match(/chapter\s*(\d+)/i) &&
+        target.match(/chapter\s*(\d+)/i)![1] === hText.match(/chapter\s*(\d+)/i)![1])
+    ) {
+      bestIdx = i
+      break
+    }
+  }
+
+  if (bestIdx === -1) return fullHtml
+
+  const startIdx = headings[bestIdx].index
+  const matchedLevel = headings[bestIdx].level
+
+  // Find next heading of equal or higher rank
+  let endIdx = fullHtml.length
+  for (let i = bestIdx + 1; i < headings.length; i++) {
+    if (headings[i].level <= matchedLevel) {
+      endIdx = headings[i].index
+      break
+    }
+  }
+
+  const before = fullHtml.slice(0, startIdx)
+  const after = fullHtml.slice(endIdx)
+  return before + newSectionHtml.trim() + '\n' + after
 }
 
 // ─── Build Conversation Context String ─────────────────────────
@@ -340,31 +398,33 @@ export function classifyIntent(
 
       if (sectionCtx) {
         enrichedPrompt =
-          `Rephrase the following section to sound highly academic, formal, and authoritative.\n\n` +
+          `Rephrase and polish the following section to sound highly academic, formal, and authoritative.\n\n` +
           `${docMeta}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `Section to rephrase:\n"""\n${sectionCtx.slice(0, 3000)}\n"""\n\n` +
-          `Return the rephrased content in clean HTML tags.`
+          `Section content to rephrase:\n"""\n${sectionCtx.slice(0, 3000)}\n"""\n\n` +
+          `Return the rephrased content in clean HTML.`
       } else {
         enrichedPrompt =
-          `The user wants to rephrase content but didn't specify which part.\n\n` +
+          `The user wants to rephrase content in their document.\n\n` +
           `${docMeta}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `Ask the user which section, chapter, or paragraph they'd like rephrased.`
+          `Ask the user which section they want rephrased.`
       }
       break
     }
 
     case 'intro':
       enrichedPrompt =
-        `Generate a detailed academic introductory segment (Chapter 1) for this ${metadata.documentType} document.\n\n` +
+        `Generate a comprehensive, robust Chapter 1 (Introduction) for this ${metadata.documentType} document on topic "${metadata.title}".\n\n` +
         `${docMeta}\n\n` +
         `${conversationCtx}` +
         `User request: "${trimmed}"\n\n` +
-        `Start with a <h2>Chapter 1: Introduction</h2> heading. Include background, problem statement, ` +
-        `objectives, significance, and scope. Return content in clean HTML.`
+        `Requirements:\n` +
+        `- Write an extensive, 1200-2000 word Chapter 1.\n` +
+        `- Include 1.1 Background of the Study, 1.2 Problem Statement, 1.3 Objectives, 1.4 Research Questions, and 1.5 Significance of the Study.\n` +
+        `- Return formatted HTML with <h2>, <h3>, <p>, <ul>/<li> tags.`
       break
 
     case 'outline':
@@ -387,20 +447,24 @@ export function classifyIntent(
 
       if (sectionCtx) {
         enrichedPrompt =
-          `The user wants to edit/improve a specific section of their ${metadata.documentType} document.\n\n` +
+          `You are an expert academic research writer. The user wants to expand and make a specific section of their ${metadata.documentType} document thoroughly robust and comprehensive.\n\n` +
           `${docMeta}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `Current content of the targeted section:\n"""\n${sectionCtx.slice(0, 4000)}\n"""\n\n` +
-          `Apply the user's requested changes. Return the improved content in clean HTML. ` +
-          `Maintain the academic tone, expand where needed, and ensure zero plagiarism.`
+          `CURRENT SECTION CONTENT TO EXPAND:\n"""\n${sectionCtx.slice(0, 6000)}\n"""\n\n` +
+          `REQUIREMENTS:\n` +
+          `- Produce a robust, highly detailed academic section (aim for 1500–2500 words of rich content).\n` +
+          `- Retain all existing sub-headings (e.g., 1.1, 1.2, 1.3, 1.4) and add new detailed subsections as appropriate.\n` +
+          `- Expand every paragraph with deep theoretical context, empirical analysis, technical mechanisms, and APA citations.\n` +
+          `- Return the complete expanded section in clean HTML (<h2/h3>, <p>, <ul>/<li>).`
       } else {
         enrichedPrompt =
-          `The user wants to edit a section but the exact section wasn't found in the document.\n\n` +
+          `The user wants to edit/expand a section but the exact section wasn't found in the document.\n\n` +
           `${docMeta}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `Ask the user to clarify which section they want to edit, or describe what changes they need.`
+          `Current Document Full Structure Context:\n"""\n${metadata.editorHtml.replace(/<[^>]*>/g, ' ').slice(0, 3000)}\n"""\n\n` +
+          `Generate a comprehensive, robust version of the section requested by the user. Write 1500-2500 words in clean HTML with clear sub-headings.`
       }
       break
     }
@@ -411,12 +475,12 @@ export function classifyIntent(
         : ''
 
       enrichedPrompt =
-        `Generate a comprehensive, well-researched section for this ${metadata.documentType} document.\n\n` +
+        `Generate a comprehensive, robust section for this ${metadata.documentType} document.\n\n` +
         `${docMeta}\n\n` +
         `${conversationCtx}` +
         `User request: "${trimmed}"\n\n` +
         (sectionCtx
-          ? `Existing content in the target area for reference:\n"""\n${sectionCtx.slice(0, 2000)}\n"""\n\n`
+          ? `Existing content in the target area for reference:\n"""\n${sectionCtx.slice(0, 3000)}\n"""\n\n`
           : '') +
         `Write at least 500 words of rich, original academic content. Use HTML tags (<h2>, <h3>, <p>). ` +
         `Include analysis, citations (APA format), and critical evaluation.`

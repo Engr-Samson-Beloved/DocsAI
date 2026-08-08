@@ -29,6 +29,7 @@ import {
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
+import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml } from '../../utils/chatIntelligence'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -1082,6 +1083,7 @@ export default function Editor() {
   const layoutSettingsRef = useRef<HTMLDivElement | null>(null)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const lastTargetSectionRef = useRef<string>('')
 
   // Auth, Mobile Menu, Subscription & Cloud Sync States
   const [userEmail, setUserEmail] = useState<string | null>(null)
@@ -4286,40 +4288,22 @@ export default function Editor() {
           documentContext = state.doc.textBetween(startPos, endPos, ' ')
           contextLocationText = `Cursor Sliding Window (Page ${pageNum} not found)`
         }
-      } else if (sectionMatch) {
-        const sectionNum = sectionMatch[1]
-        let headingText = ''
-        let sectionText = ''
-        let capture = false
-        
-        editor.state.doc.descendants((node) => {
-          if (node.type.name === 'heading') {
-            const hText = node.textContent
-            if (hText.toLowerCase().includes(sectionNum.toLowerCase()) || 
-                hText.toLowerCase().replace(/[^a-z0-9]/g, '').includes(sectionNum.toLowerCase().replace(/[^a-z0-9]/g, ''))) {
-              headingText = hText
-              capture = true
-              sectionText = '' // Reset and capture from here
-            } else if (capture) {
-              capture = false // Stop capturing on next heading
-            }
-          } else if (capture && node.isTextblock) {
-            sectionText += node.textContent + '\n'
+      } else if (sectionMatch || extractSectionTarget(promptText).section) {
+        const targetSec = extractSectionTarget(promptText).section || (sectionMatch ? `Chapter ${sectionMatch[1]}` : '')
+        if (targetSec) {
+          lastTargetSectionRef.current = targetSec
+          const extracted = extractSectionFromHtml(editor.getHTML(), targetSec)
+          if (extracted) {
+            documentContext = extracted
+            contextLocationText = `Target Section (${targetSec})`
+          } else {
+            const { state } = editor
+            const { from } = state.selection
+            const startPos = Math.max(0, from - 2000)
+            const endPos = Math.min(state.doc.content.size, from + 1000)
+            documentContext = state.doc.textBetween(startPos, endPos, ' ')
+            contextLocationText = `Cursor Sliding Window (Target ${targetSec})`
           }
-          return true
-        })
-
-        if (sectionText.trim()) {
-          documentContext = `Heading: ${headingText}\nContent:\n${sectionText}`
-          contextLocationText = `Section ${sectionNum}`
-        } else {
-          // Fallback to cursor sliding window
-          const { state } = editor
-          const { from } = state.selection
-          const startPos = Math.max(0, from - 2000)
-          const endPos = Math.min(state.doc.content.size, from + 1000)
-          documentContext = state.doc.textBetween(startPos, endPos, ' ')
-          contextLocationText = `Cursor Sliding Window (Section ${sectionNum} not found)`
         }
       } else {
         // Extract cursor-centered sliding window: 2000 chars before, 1000 chars after cursor position
@@ -4442,18 +4426,42 @@ export default function Editor() {
     }
   }
 
-  const insertAiContent = () => {
+  const insertAiContent = (targetOverride?: string | React.MouseEvent) => {
     if (simulatedAiResult) {
       const formatted = formatAiResponseToHtml(simulatedAiResult)
-      // Append at the END of the document to avoid overwriting existing content
-      // (e.g., front cover, TOC, existing chapters). This is critical for mobile
-      // where cursor position is unpredictable.
-      const endPos = editor.state.doc.content.size
-      editor.chain().focus().setTextSelection(endPos).insertContent(formatted).run()
+      const currentHtml = editor.getHTML()
+      const explicitTarget = typeof targetOverride === 'string' ? targetOverride : undefined
+      const targetSec = explicitTarget || lastTargetSectionRef.current
+
+      let updatedHtml = ''
+      if (targetSec && currentHtml.toLowerCase().includes(targetSec.toLowerCase())) {
+        updatedHtml = replaceSectionInHtml(currentHtml, targetSec, formatted)
+      } else {
+        // Try to match heading in formatted to existing section in currentHtml
+        const headingMatch = formatted.match(/<h[1-4][^>]*>(.*?)<\/h[1-4]>/i)
+        if (headingMatch) {
+          const headingText = headingMatch[1].replace(/<[^>]*>/g, '').trim()
+          if (headingText && currentHtml.toLowerCase().includes(headingText.toLowerCase())) {
+            updatedHtml = replaceSectionInHtml(currentHtml, headingText, formatted)
+          }
+        }
+      }
+
+      if (updatedHtml && updatedHtml !== currentHtml) {
+        editor.commands.setContent(updatedHtml)
+        runPagination(editor)
+        setIsSaved(false)
+      } else {
+        // Append at the END of the document fallback
+        const endPos = editor.state.doc.content.size
+        editor.chain().focus().setTextSelection(endPos).insertContent(formatted).run()
+      }
+
       setSimulatedAiResult('')
       setAiPrompt('')
       setAiSelectedText('')
       setAiSelectionRange(null)
+      lastTargetSectionRef.current = ''
     }
   }
 
