@@ -1,6 +1,7 @@
 "use client"
 
 import { classifyIntent, type ConversationMessage, type DocumentMetadata } from '@/utils/chatIntelligence'
+import { planChatAction, type ToolCall } from '@/utils/chatPlanner'
 import { paginateDocumentForPrint, printSheetCss, renderSheetHtml, type PrintPage, SHEET_WIDTH_MM, SHEET_HEIGHT_MM } from '@/utils/printPagination'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -273,6 +274,8 @@ export default function MobileChatView({
   const previewContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  // Guards against double-send while the Stage 2 planner request is in flight.
+  const planningRef = useRef(false)
   const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>('idle')
   const [showInfoForm, setShowInfoForm] = useState(false)
   const [showSourcesForm, setShowSourcesForm] = useState(false)
@@ -900,9 +903,106 @@ export default function MobileChatView({
   }, [simulatedAiResult, isSimulatingAI, onRemoveSection])
 
   // ─── Send user message (Intelligence-enhanced) ──────────────
-  const handleSend = () => {
+  // Stage 2 dispatcher: execute a planner-chosen tool by calling the matching
+  // app callback. Returns true if handled; false → fall back to keyword routing.
+  const pushStatus = (label: string) => {
+    setMessages(prev => [
+      ...prev,
+      { id: uid(), role: 'system', content: label, timestamp: Date.now(), type: 'status' }
+    ])
+  }
+
+  const dispatchToolCall = (call: ToolCall, originalText: string): boolean => {
+    const args = (call.args || {}) as Record<string, unknown>
+    const say = (call.say || '').trim()
+    const section = typeof args.section === 'string' ? args.section : ''
+    const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+
+    switch (call.tool) {
+      case 'write_or_edit': {
+        const instruction = str(args.instruction) || originalText
+        const prompt = section ? `${instruction}\n\n(Target section: ${section})` : instruction
+        pushStatus(say || '✍️ Working on your document…')
+        handleAiAction('custom', prompt)
+        return true
+      }
+      case 'answer_question': {
+        const q = str(args.question) || originalText
+        pushStatus(say || '💬 Thinking…')
+        handleAiAction('custom', q)
+        return true
+      }
+      case 'remove_section': {
+        if (!section || !onRemoveSection) return false
+        onRemoveSection(section)
+        addBotMessage(say || `🗑️ Removing "${section}"…`)
+        return true
+      }
+      case 'format_document': {
+        if (!onApplyFormattingStyles) return false
+        const fontMap: Record<string, string> = {
+          'times new roman': 'playfair', times: 'playfair', arial: 'arial', georgia: 'georgia',
+          courier: 'courier', helvetica: 'inter', calibri: 'inter', verdana: 'inter', default: 'default',
+        }
+        const spacingMap: Record<string, string> = { single: '1', '1': '1', '1.5': '1.5', double: '2', '2': '2' }
+        const fontKey = fontMap[str(args.font).toLowerCase()]
+        const spacingKey = spacingMap[str(args.spacing).toLowerCase()]
+        if (!fontKey && !spacingKey) { setShowFormattingModal(true); return true }
+        const finalFont = (fontKey || wizardFontFamily || 'default') as 'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'
+        const finalSpacing = spacingKey || wizardLineSpacing || '1.5'
+        setWizardFontFamily?.(finalFont)
+        setWizardLineSpacing?.(finalSpacing)
+        onApplyFormattingStyles(finalFont, finalSpacing)
+        addBotMessage(say || '✅ Reformatted your document.')
+        return true
+      }
+      case 'apply_cover_page': {
+        if (!onApplyCoverPage) return false
+        const details: Record<string, string> = {}
+        for (const k of ['studentName', 'matricNo', 'department', 'faculty', 'institution', 'supervisorName', 'title', 'academicSession', 'submissionDate']) {
+          const v = str(args[k])
+          if (v) details[k] = v
+        }
+        if (Object.keys(details).length > 0) {
+          onApplyCoverPage(details)
+          addBotMessage(say || '📋 Cover page applied.')
+        } else {
+          setShowInfoForm(true)
+          setMessages(prev => [
+            ...prev,
+            { id: uid(), role: 'system', content: '', timestamp: Date.now(), type: 'form-card', formType: wizardDocType === 'Seminar' ? 'seminar-info' : wizardDocType === 'Proposal' ? 'proposal-info' : 'project-info' }
+          ])
+        }
+        return true
+      }
+      case 'search_journals': {
+        executeJournalSearch(str(args.query) || documentTitle || originalText)
+        return true
+      }
+      case 'generate_full_document': {
+        setShowFormattingModal(true)
+        return true
+      }
+      case 'export_document': {
+        const fmt = str(args.format).toLowerCase()
+        if (fmt.includes('pdf')) { addBotMessage(say || '📄 Generating PDF…'); exportToPdfPrint('full'); return true }
+        if (fmt.includes('word') || fmt.includes('docx') || fmt.includes('doc')) { addBotMessage(say || '📄 Exporting Word…'); exportToDocx('full'); return true }
+        if (fmt.includes('power') || fmt.includes('ppt') || fmt.includes('slide')) { addBotMessage(say || '📊 Exporting PowerPoint…'); exportToPptx(); return true }
+        setShowExportSheet(true)
+        return true
+      }
+      case 'undo': triggerUndo?.(); addBotMessage(say || '↩️ Reverted the last change.'); return true
+      case 'redo': triggerRedo?.(); addBotMessage(say || '↪️ Reapplied the change.'); return true
+      case 'apply_changes': insertAiContent?.(); addBotMessage(say || '✅ Applied the changes.'); return true
+      case 'discard_changes': discardAiContent?.(); addBotMessage(say || '🗑️ Discarded the pending draft.'); return true
+      default:
+        return false
+    }
+  }
+
+  const handleSend = async () => {
     const text = inputText.trim()
-    if (!text || isSimulatingAI) return
+    if (!text || isSimulatingAI || planningRef.current) return
 
     // Add user message to chat
     setMessages(prev => [
@@ -917,11 +1017,10 @@ export default function MobileChatView({
     ])
     setInputText('')
 
-    // ── Build conversation history for intent classifier ──
+    // ── Build conversation history ──
     const conversationHistory: ConversationMessage[] = messages
       .filter(m => (m.role === 'user' || m.role === 'ai') && m.content?.trim())
       .map(m => ({ role: m.role as 'user' | 'ai', content: m.content }))
-    // Add the current message to history
     conversationHistory.push({ role: 'user', content: text })
 
     // ── Build document metadata ──
@@ -934,20 +1033,100 @@ export default function MobileChatView({
       editorHtml: editorHtml || ''
     }
 
-    // ── Classify intent ──
+    // ── Stage 2: tool-calling planner (LLM decides which feature to invoke) ──
+    // Falls back to the Stage 1 keyword classifier below on any failure or
+    // when the planner can't map the request to an executable tool.
+    planningRef.current = true
+    try {
+      const plan = await planChatAction(text, conversationHistory, docMetadata)
+      // Only take over for concrete, executable tools. For 'chat' (greeting/
+      // small talk/unclear) or any failure, fall through to the keyword router
+      // below, which has richer greeting/onboarding handling.
+      if (plan && plan.tool !== 'chat' && dispatchToolCall(plan, text)) {
+        return
+      }
+    } catch {
+      /* fall through to keyword routing */
+    } finally {
+      planningRef.current = false
+    }
+
+    // ── Stage 1 fallback: keyword classifier routing ──
     const classified = classifyIntent(text, conversationHistory, docMetadata)
 
+    const lowerText = text.toLowerCase()
+
     // ── Route by classified intent ──
-    if (classified.action === 'export') {
-      setShowExportSheet(true)
-      setMessages(prev => [
-        ...prev,
-        { id: uid(), role: 'ai', content: 'Opening export options for you...', timestamp: Date.now(), type: 'text' }
-      ])
+
+    // Undo / Redo — direct actions.
+    if (classified.action === 'undo') {
+      triggerUndo?.()
+      addBotMessage('↩️ Reverted the last change.')
+      return
+    }
+    if (classified.action === 'redo') {
+      triggerRedo?.()
+      addBotMessage('↪️ Reapplied the change.')
       return
     }
 
-    if (classified.action === 'blueprint' || classified.action === 'format') {
+    // Export — run the requested format directly; only open the sheet if the
+    // user didn't say which format.
+    if (classified.action === 'export') {
+      if (/\bpdf\b/.test(lowerText)) {
+        addBotMessage('📄 Generating your PDF…')
+        exportToPdfPrint('full')
+        return
+      }
+      if (/\b(word|docx|\.doc)\b/.test(lowerText)) {
+        addBotMessage('📄 Exporting to Word (.docx)…')
+        exportToDocx('full')
+        return
+      }
+      if (/\b(powerpoint|pptx|ppt|slides?|presentation)\b/.test(lowerText)) {
+        addBotMessage('📊 Exporting to PowerPoint…')
+        exportToPptx()
+        return
+      }
+      setShowExportSheet(true)
+      addBotMessage('Which format would you like? Opening export options…')
+      return
+    }
+
+    // Blueprint — full-document generation goes through the formatting modal.
+    if (classified.action === 'blueprint') {
+      setShowFormattingModal(true)
+      return
+    }
+
+    // Format — apply font/spacing directly when the user specifies them;
+    // otherwise open the formatting modal.
+    if (classified.action === 'format') {
+      let spacing: string | null = null
+      if (/\bdouble\b/.test(lowerText)) spacing = '2'
+      else if (/\bsingle\b/.test(lowerText)) spacing = '1'
+      else if (/1\.5|one\s+and\s+a\s+half/.test(lowerText)) spacing = '1.5'
+
+      let font: string | null = null
+      let fontLabel = ''
+      if (/times\s+new\s+roman/.test(lowerText)) { font = 'playfair'; fontLabel = 'Times New Roman' }
+      else if (/\barial\b/.test(lowerText)) { font = 'arial'; fontLabel = 'Arial' }
+      else if (/\bgeorgia\b/.test(lowerText)) { font = 'georgia'; fontLabel = 'Georgia' }
+      else if (/\bcourier\b/.test(lowerText)) { font = 'courier'; fontLabel = 'Courier' }
+      else if (/helvetica|calibri|verdana/.test(lowerText)) { font = 'inter'; fontLabel = 'a sans-serif font' }
+
+      if ((spacing || font) && onApplyFormattingStyles) {
+        const finalFont = (font || wizardFontFamily || 'default') as 'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'
+        const finalSpacing = spacing || wizardLineSpacing || '1.5'
+        setWizardFontFamily?.(finalFont)
+        setWizardLineSpacing?.(finalSpacing)
+        onApplyFormattingStyles(finalFont, finalSpacing)
+        const parts: string[] = []
+        if (fontLabel) parts.push(`font to **${fontLabel}**`)
+        if (spacing) parts.push(`line spacing to **${spacing === '2' ? 'double' : spacing === '1' ? 'single' : '1.5'}**`)
+        addBotMessage(`✅ Set ${parts.join(' and ')}. Your document has been reformatted.`)
+        return
+      }
       setShowFormattingModal(true)
       return
     }

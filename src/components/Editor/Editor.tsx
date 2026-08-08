@@ -4024,7 +4024,14 @@ export default function Editor() {
     }
 
     let promptText = ''
-    if (action === 'intro') {
+    // Context-aware / mobile-chat path: when the caller supplies an enriched
+    // prompt (built by classifyIntent with the document outline, target
+    // section text, and conversation history), use it directly. This makes
+    // "humanize my conclusion", "rewrite the intro", etc. work from chat with
+    // NO text selection, and lets intro/outline honor the built context.
+    if (promptOverride) {
+      promptText = promptOverride
+    } else if (action === 'intro') {
       promptText = 'Generate a detailed academic introductory segment (Chapter 1) for a research project on this topic. Start with a <h2>Chapter 1: Introduction</h2> heading, and return the content styled with standard HTML tags like <h2>, <h3>, and <p>.'
     } else if (action === 'rephrase') {
       if (!selectedText) {
@@ -4039,7 +4046,7 @@ export default function Editor() {
         setIsSimulatingAI(false)
         return
       }
-      promptText = 
+      promptText =
         `You are a professional academic copyeditor specializing in bypassing AI detection. ` +
         `Rewrite the highlighted text below to look 100% human-written, ensuring it easily passes Turnitin AI, GPTZero, and other AI detectors.\n\n` +
         `Follow these strict rules:\n` +

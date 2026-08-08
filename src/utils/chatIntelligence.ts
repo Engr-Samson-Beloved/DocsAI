@@ -23,6 +23,8 @@ export type ChatIntent =
   | 'export'
   | 'greeting'
   | 'format'
+  | 'undo'
+  | 'redo'
   | 'custom'
 
 export interface ClassifiedIntent {
@@ -89,9 +91,29 @@ const INTENT_RULES: IntentRule[] = [
     intent: 'journal-search',
     patterns: [
       /\b(search|find|get|look\s*up|fetch)\s+(journals?|references?|papers?|articles?|citations?|sources?)\s*(online)?\b/i,
-      /\b(online\s+journals?|academic\s+papers?|cite\s+journals?)\b/i
+      /\b(online\s+journals?|academic\s+papers?|cite\s+journals?)\b/i,
+      // "add/insert/include references (about|on|for|related to) <topic>" →
+      // this is a real reference search, not writing a references section.
+      /\b(add|insert|include|pull|bring)\s+(some\s+|more\s+|real\s+|actual\s+|relevant\s+)?(references?|citations?|sources?|journals?|papers?)\s+(about|on|for|related\s+to|regarding)\b/i
     ],
-    priority: 95
+    priority: 96
+  },
+  // Undo / Redo
+  {
+    intent: 'undo' as ChatIntent,
+    patterns: [
+      /^(undo|revert|go\s*back|undo\s+that|undo\s+last)[!.\s]*$/i,
+      /\b(undo\s+(the\s+)?(last|that|change|edit))\b/i
+    ],
+    priority: 97
+  },
+  {
+    intent: 'redo' as ChatIntent,
+    patterns: [
+      /^(redo|redo\s+that|redo\s+last)[!.\s]*$/i,
+      /\b(redo\s+(the\s+)?(last|that|change|edit))\b/i
+    ],
+    priority: 97
   },
   // Humanize
   {
@@ -141,7 +163,11 @@ const INTENT_RULES: IntentRule[] = [
     intent: 'format',
     patterns: [
       /\b(format|style|typography|font|line\s*spacing|reformat|layout)\s+(the\s+)?(document|text|content|report|paper|page)?\b/i,
-      /\b(format\s+my\s+document|apply\s+formatting|just\s+format)\b/i
+      /\b(format\s+my\s+document|apply\s+formatting|just\s+format)\b/i,
+      // Specific typography requests: spacing and named fonts.
+      /\b(single|double|1\.5|one\s+and\s+a\s+half)[\s-]*(line[\s-]*)?spac(ing|ed)\b/i,
+      /\b(make|set|change|use)\s+(it|the\s+(text|document|font|spacing))?\s*(to\s+)?(double|single|1\.5)[\s-]*spac/i,
+      /\b(use|change\s+to|set\s+(the\s+)?font\s+to|make\s+it)\s+(times\s+new\s+roman|arial|georgia|calibri|helvetica|courier|verdana)\b/i
     ],
     priority: 85
   },
