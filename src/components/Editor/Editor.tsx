@@ -4725,6 +4725,24 @@ export default function Editor() {
     e.target.value = ''
   }
 
+  const addJournalSources = async (sources: { name: string; content: string; type: string }[]) => {
+    const updatedSources = [...projectSources]
+    for (const src of sources) {
+      if (activeProjectIdRef.current) {
+        try {
+          const saved = await saveSource(activeProjectIdRef.current, src.name, src.content, src.type)
+          updatedSources.push({ id: saved.id, name: saved.name, content: saved.content, type: saved.type })
+        } catch (e) {
+          console.error("Failed to save journal source to IndexedDB:", e)
+          updatedSources.push(src)
+        }
+      } else {
+        updatedSources.push(src)
+      }
+    }
+    setProjectSources(updatedSources)
+  }
+
   const applyOnboardingStyles = (editorInstance: any) => {
     if (!editorInstance) return
     setTimeout(() => {
@@ -5243,7 +5261,27 @@ export default function Editor() {
       }
 
       if (editor && accumulatedText.trim()) {
-        const formattedHtml = ensurePaginatedHtml(accumulatedText, finalTitle)
+        // Extract & preserve existing front cover page if present
+        const currentContent = editor.getHTML()
+        let coverPageMarkup = ''
+        if (currentContent.includes('data-cover="true"')) {
+          try {
+            const parser = new DOMParser()
+            const doc = parser.parseFromString(currentContent, 'text/html')
+            const coverNode = doc.querySelector('div[data-type="page"][data-cover="true"]')
+            if (coverNode) {
+              coverPageMarkup = coverNode.outerHTML
+            }
+          } catch (e) {
+            console.warn('Failed to extract cover page markup:', e)
+          }
+        }
+
+        let formattedHtml = ensurePaginatedHtml(accumulatedText, finalTitle)
+        if (coverPageMarkup) {
+          formattedHtml = coverPageMarkup + formattedHtml
+        }
+
         editor.commands.setContent(formattedHtml)
         setIsSaved(false)
         applyOnboardingStyles(editor)
@@ -5412,6 +5450,12 @@ export default function Editor() {
             triggerUndo={triggerUndo}
             triggerRedo={triggerRedo}
             onApplyCoverPage={applyCoverPage}
+            onAddJournalSources={addJournalSources}
+            wizardFontFamily={wizardFontFamily}
+            setWizardFontFamily={setWizardFontFamily}
+            wizardLineSpacing={wizardLineSpacing}
+            setWizardLineSpacing={setWizardLineSpacing}
+            setWizardAcademicLevel={setWizardAcademicLevel}
           />
         ) : (
         <>

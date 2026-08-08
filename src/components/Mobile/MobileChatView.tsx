@@ -32,9 +32,13 @@ import {
   Loader2,
   Bot,
   Undo2,
-  Redo2
+  Redo2,
+  Search,
+  ExternalLink,
+  BookmarkPlus
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
+import type { JournalPaper } from '@/app/api/journals/search/route'
 
 // ─── Chat Message Types ────────────────────────────────────────────
 interface ChatMessage {
@@ -140,6 +144,16 @@ export interface MobileChatViewProps {
     academicSession?: string
     submissionDate?: string
   }) => void
+
+  // Journal Search callback
+  onAddJournalSources?: (sources: { name: string; content: string; type: string }[]) => Promise<void> | void
+
+  // Formatting Style Callbacks
+  wizardFontFamily?: string
+  setWizardFontFamily?: (font: 'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier') => void
+  wizardLineSpacing?: string
+  setWizardLineSpacing?: (spacing: string) => void
+  setWizardAcademicLevel?: (level: string) => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -261,7 +275,13 @@ export default function MobileChatView({
   onClearInitialTemplate,
   triggerUndo,
   triggerRedo,
-  onApplyCoverPage
+  onApplyCoverPage,
+  onAddJournalSources,
+  wizardFontFamily,
+  setWizardFontFamily,
+  wizardLineSpacing,
+  setWizardLineSpacing,
+  setWizardAcademicLevel
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -285,6 +305,158 @@ export default function MobileChatView({
   })
   const onboardingTemplateRef = useRef<string | null>(null)
   const hasProcessedTemplateRef = useRef<string | null>(null)
+
+  const templateLabels: Record<string, string> = {
+    Seminar: 'Seminar Report',
+    Proposal: 'Research Proposal',
+    Project: 'Graduation Thesis Project',
+    Custom: 'Custom Document'
+  }
+
+  const addBotMessage = useCallback((content: string, extras?: Partial<ChatMessage>) => {
+    setMessages(prev => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'ai' as const,
+        content,
+        timestamp: Date.now(),
+        type: 'text' as const,
+        ...extras
+      }
+    ])
+  }, [])
+
+  const addBotMessageDelayed = useCallback((content: string, delayMs: number, extras?: Partial<ChatMessage>) => {
+    return new Promise<void>(resolve => {
+      setTimeout(() => {
+        addBotMessage(content, extras)
+        resolve()
+      }, delayMs)
+    })
+  }, [addBotMessage])
+
+  // ─── Online Journal Search State ──────────────────────────────
+  const [showJournalModal, setShowJournalModal] = useState(false)
+  const [journalSearchQuery, setJournalSearchQuery] = useState('')
+  const [isSearchingJournals, setIsSearchingJournals] = useState(false)
+  const [journalPapers, setJournalPapers] = useState<JournalPaper[]>([])
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set())
+
+  // ─── Formatting Style Preview Modal State ─────────────────────
+  const [showFormattingModal, setShowFormattingModal] = useState(false)
+  const [selectedFont, setSelectedFont] = useState<'default' | 'arial' | 'georgia' | 'playfair' | 'inter' | 'courier'>(
+    (wizardFontFamily as any) || 'playfair'
+  )
+  const [selectedSpacing, setSelectedSpacing] = useState(wizardLineSpacing || '1.5')
+  const [selectedLevel, setSelectedLevel] = useState(wizardAcademicLevel || 'Undergraduate')
+
+  // Confirm formatting style and start blueprint generation
+  const handleConfirmFormattingAndGenerate = useCallback(() => {
+    setWizardFontFamily?.(selectedFont)
+    setWizardLineSpacing?.(selectedSpacing)
+    setWizardAcademicLevel?.(selectedLevel)
+    setShowFormattingModal(false)
+
+    const fontNames: Record<string, string> = {
+      playfair: 'Times New Roman',
+      arial: 'Arial',
+      georgia: 'Georgia',
+      inter: 'Inter',
+      courier: 'Courier',
+      default: 'Standard'
+    }
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'system',
+        content: `✨ Formatting style set to **${fontNames[selectedFont] || selectedFont}** (${selectedSpacing} line spacing). Generating full document blueprint...`,
+        timestamp: Date.now(),
+        type: 'status'
+      }
+    ])
+
+    setTimeout(() => {
+      onGenerateBlueprint()
+    }, 400)
+  }, [selectedFont, selectedSpacing, selectedLevel, setWizardFontFamily, setWizardLineSpacing, setWizardAcademicLevel, onGenerateBlueprint])
+
+  // Trigger journal search
+  const executeJournalSearch = useCallback(async (queryText?: string) => {
+    const term = (queryText || journalSearchQuery || documentTitle || 'Academic Research').trim()
+    if (!term) return
+
+    setJournalSearchQuery(term)
+    setIsSearchingJournals(true)
+    setShowJournalModal(true)
+
+    try {
+      const res = await fetch(`/api/journals/search?query=${encodeURIComponent(term)}`)
+      if (res.ok) {
+        const data = await res.json()
+        const papers: JournalPaper[] = data.papers || []
+        setJournalPapers(papers)
+        // Select top 3 papers by default
+        const defaultSelected = new Set(papers.slice(0, 3).map(p => p.id))
+        setSelectedPaperIds(defaultSelected)
+      } else {
+        alert('Could not search online journals. Please try again.')
+      }
+    } catch (err) {
+      console.error('Journal search error:', err)
+    } finally {
+      setIsSearchingJournals(false)
+    }
+  }, [journalSearchQuery, documentTitle])
+
+  // Handle importing selected papers into project sources
+  const handleImportSelectedJournals = useCallback(async () => {
+    const selected = journalPapers.filter(p => selectedPaperIds.has(p.id))
+    if (selected.length === 0) return
+
+    const sourcesToAdd = selected.map(p => ({
+      name: `${p.authors.split(',')[0].replace(/[^a-zA-Z0-9]/g, '')}_${p.year}.pdf`,
+      content: `Title: ${p.title}\nAuthors: ${p.authors}\nJournal: ${p.journal} (${p.year})\nDOI: ${p.doi}\n\nAbstract:\n${p.abstract}\n\nAPA 7 Citation:\n${p.citationApa}`,
+      type: 'journal'
+    }))
+
+    await onAddJournalSources?.(sourcesToAdd)
+    setShowJournalModal(false)
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'system',
+        content: `📎 Loaded **${selected.length} online journal paper(s)** into project reference sources.`,
+        timestamp: Date.now(),
+        type: 'status'
+      }
+    ])
+
+    setTimeout(() => {
+      addBotMessage(`Awesome! I've added **${selected.length} journal paper(s)** to your reference materials. I'll cite them accurately in your content. Ready to generate your document?`)
+    }, 500)
+
+    setTimeout(() => {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'choice-card',
+          choices: [
+            { id: 'generate-now', label: 'Generate Full Document Now', icon: '✨', description: 'AI-powered chapter-by-chapter generation with citations' },
+            { id: 'search-journals', label: 'Search More Online Journals', icon: '🔍', description: 'Find additional peer-reviewed papers' }
+          ]
+        }
+      ])
+    }, 1500)
+  }, [journalPapers, selectedPaperIds, onAddJournalSources, addBotMessage])
 
   useEffect(() => {
     if (showPreview && previewContainerRef.current) {
@@ -355,34 +527,6 @@ export default function MobileChatView({
   // ─── Guided Template Onboarding Flow ─────────────────────────
   const templateLabels: Record<string, string> = {
     Seminar: 'Seminar Report',
-    Proposal: 'Research Proposal',
-    Project: 'Graduation Thesis Project',
-    Custom: 'Custom Document'
-  }
-
-  const addBotMessage = useCallback((content: string, extras?: Partial<ChatMessage>) => {
-    setMessages(prev => [
-      ...prev,
-      {
-        id: uid(),
-        role: 'ai' as const,
-        content,
-        timestamp: Date.now(),
-        type: 'text' as const,
-        ...extras
-      }
-    ])
-  }, [])
-
-  const addBotMessageDelayed = useCallback((content: string, delayMs: number, extras?: Partial<ChatMessage>) => {
-    return new Promise<void>(resolve => {
-      setTimeout(() => {
-        addBotMessage(content, extras)
-        resolve()
-      }, delayMs)
-    })
-  }, [addBotMessage])
-
   // Handle initial template selection from MobileDashboard
   useEffect(() => {
     if (!initialTemplate || hasProcessedTemplateRef.current === initialTemplate) return
@@ -466,10 +610,16 @@ export default function MobileChatView({
         { id: uid(), role: 'user', content: '⚡ Skip to Generating Chapters', timestamp: Date.now(), type: 'text' }
       ])
       promptForSources()
+    } else if (choiceId === 'search-journals') {
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'user', content: '🔍 Search Online Journals & Citations', timestamp: Date.now(), type: 'text' }
+      ])
+      executeJournalSearch(documentTitle || 'Academic Research')
     } else if (choiceId === 'add-sources') {
       setMessages(prev => [
         ...prev,
-        { id: uid(), role: 'user', content: '📎 Add Reference Materials', timestamp: Date.now(), type: 'text' }
+        { id: uid(), role: 'user', content: '📎 Upload Local Files', timestamp: Date.now(), type: 'text' }
       ])
       setTimeout(() => {
         addBotMessage('Upload your reference journals, PDFs, or DOCX files below. These will help me generate more accurate and cited content.')
@@ -492,21 +642,17 @@ export default function MobileChatView({
     } else if (choiceId === 'generate-now') {
       setMessages(prev => [
         ...prev,
-        { id: uid(), role: 'user', content: '✨ Generate Full Document Now', timestamp: Date.now(), type: 'text' }
+        { id: uid(), role: 'user', content: '✨ Preview Style & Generate Document', timestamp: Date.now(), type: 'text' }
       ])
-      setTimeout(() => {
-        addBotMessage(`🚀 Starting AI generation for your **${templateLabels[template] || 'document'}**... This may take a moment.`)
-        setOnboardingStage('generating')
-        // Trigger the actual blueprint generation
-        setTimeout(() => onGenerateBlueprint(), 600)
-      }, 500)
+      // Open formatting style preview modal before generating full document!
+      setShowFormattingModal(true)
     }
-  }, [wizardDocType, addBotMessage, onGenerateBlueprint]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wizardDocType, addBotMessage, onGenerateBlueprint, executeJournalSearch, documentTitle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const promptForSources = useCallback(() => {
     const template = onboardingTemplateRef.current || wizardDocType
     setTimeout(() => {
-      addBotMessage(`Now, to generate high-quality chapters for your **${templateLabels[template] || 'document'}**, I can use reference materials. Would you like to add journals/references, or generate directly?`)
+      addBotMessage(`Now, to generate high-quality chapters for your **${templateLabels[template] || 'document'}**, I can use reference materials. Would you like to search online journals, upload reference PDFs, or generate directly?`)
     }, 500)
     setTimeout(() => {
       setMessages(prev => [
@@ -518,7 +664,8 @@ export default function MobileChatView({
           timestamp: Date.now(),
           type: 'choice-card',
           choices: [
-            { id: 'add-sources', label: 'Add Reference Materials (PDF/DOCX)', icon: '📎', description: 'Upload journals, papers, or templates' },
+            { id: 'search-journals', label: 'Search Online Journals & Citations', icon: '🔍', description: 'Find & select peer-reviewed papers online' },
+            { id: 'add-sources', label: 'Upload Local PDF / DOCX Files', icon: '📎', description: 'Upload local research documents' },
             { id: 'generate-now', label: 'Generate Chapters Now', icon: '✨', description: 'Use AI to create content directly' }
           ]
         }
@@ -682,11 +829,38 @@ export default function MobileChatView({
     }
 
     if (classified.action === 'blueprint') {
-      onGenerateBlueprint()
+      setShowFormattingModal(true)
+      return
+    }
+
+    if (classified.action === 'cover-page') {
+      const hasCover = editorHtml.includes('data-cover="true"')
+      setShowInfoForm(true)
       setMessages(prev => [
         ...prev,
-        { id: uid(), role: 'system', content: `Generating full document blueprint for **"${documentTitle}"**...`, timestamp: Date.now(), type: 'status' }
+        {
+          id: uid(),
+          role: 'ai',
+          content: hasCover
+            ? '📋 Here is the front cover page form to update your details:'
+            : '📋 No front cover page set yet! Fill in your details below to generate your official cover page:',
+          timestamp: Date.now(),
+          type: 'text'
+        },
+        {
+          id: uid(),
+          role: 'system',
+          content: '',
+          timestamp: Date.now(),
+          type: 'form-card',
+          formType: wizardDocType === 'Seminar' ? 'seminar-info' : wizardDocType === 'Proposal' ? 'proposal-info' : 'project-info'
+        }
       ])
+      return
+    }
+
+    if (classified.action === 'journal-search') {
+      executeJournalSearch(text)
       return
     }
 
@@ -1609,6 +1783,309 @@ export default function MobileChatView({
             </div>
           </div>
         </>
+      )}
+
+      {/* ━━━ Online Journal Search & Citation Picker Modal ━━━ */}
+      {showJournalModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end sm:justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl max-h-[88vh] flex flex-col shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Search Academic Journals</h3>
+                  <p className="text-[10px] text-zinc-400">Select peer-reviewed papers to cite in your document</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowJournalModal(false)}
+                className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Search Bar Input */}
+            <div className="p-4 border-b border-zinc-150 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  executeJournalSearch(journalSearchQuery)
+                }}
+                className="flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={journalSearchQuery}
+                    onChange={(e) => setJournalSearchQuery(e.target.value)}
+                    placeholder="Search by topic, keyword, or journal..."
+                    className="w-full pl-9 pr-3 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs text-zinc-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSearchingJournals}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {isSearchingJournals ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Search'}
+                </button>
+              </form>
+            </div>
+
+            {/* Journal Results List with Checkboxes */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {isSearchingJournals ? (
+                <div className="py-12 text-center space-y-3">
+                  <Loader2 className="w-7 h-7 animate-spin text-indigo-600 mx-auto" />
+                  <p className="text-xs text-zinc-500 font-medium">Searching Crossref academic database...</p>
+                </div>
+              ) : journalPapers.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <BookOpen className="w-8 h-8 text-zinc-300 dark:text-zinc-600 mx-auto" />
+                  <p className="text-xs font-semibold text-zinc-500">No journals found</p>
+                  <p className="text-[11px] text-zinc-400">Try searching for key topics like "{documentTitle || 'Artificial Intelligence'}"</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">
+                      Found {journalPapers.length} peer-reviewed papers
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedPaperIds.size === journalPapers.length) {
+                          setSelectedPaperIds(new Set())
+                        } else {
+                          setSelectedPaperIds(new Set(journalPapers.map(p => p.id)))
+                        }
+                      }}
+                      className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                    >
+                      {selectedPaperIds.size === journalPapers.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
+
+                  {journalPapers.map((paper) => {
+                    const isChecked = selectedPaperIds.has(paper.id)
+                    return (
+                      <div
+                        key={paper.id}
+                        onClick={() => {
+                          const next = new Set(selectedPaperIds)
+                          if (isChecked) next.delete(paper.id)
+                          else next.add(paper.id)
+                          setSelectedPaperIds(next)
+                        }}
+                        className={`p-3.5 border rounded-2xl cursor-pointer transition-all ${
+                          isChecked
+                            ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700 shadow-xs'
+                            : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}}
+                            className="mt-1 w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 flex-shrink-0 cursor-pointer"
+                          />
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <h4 className="text-xs font-bold text-zinc-900 dark:text-white leading-snug">
+                              {paper.title}
+                            </h4>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500 dark:text-zinc-400">
+                              <span className="font-semibold text-indigo-700 dark:text-indigo-300">{paper.authors}</span>
+                              <span>•</span>
+                              <span>{paper.journal}</span>
+                              <span>•</span>
+                              <span className="font-mono bg-zinc-100 dark:bg-zinc-800 px-1 py-0.2 rounded text-zinc-600 dark:text-zinc-300">{paper.year}</span>
+                            </div>
+                            <p className="text-[11px] text-zinc-600 dark:text-zinc-400 line-clamp-2 leading-relaxed mt-1">
+                              {paper.abstract}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
+            </div>
+
+            {/* Footer Action */}
+            <div className="p-3.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 flex items-center justify-between">
+              <span className="text-xs text-zinc-500 font-medium">
+                {selectedPaperIds.size} paper{selectedPaperIds.size !== 1 ? 's' : ''} selected
+              </span>
+              <button
+                onClick={handleImportSelectedJournals}
+                disabled={selectedPaperIds.size === 0}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-transform active:scale-95 shadow-xs"
+              >
+                <BookmarkPlus className="w-4 h-4" />
+                Import Selected Citations
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ━━━ Document Formatting Style Preview Modal ━━━ */}
+      {showFormattingModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex flex-col justify-end sm:justify-center p-0 sm:p-4 animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-xl rounded-t-3xl sm:rounded-2xl max-h-[90vh] flex flex-col shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Document Formatting Style</h3>
+                  <p className="text-[10px] text-zinc-400">Preview & customize typography before generating</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowFormattingModal(false)}
+                className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-zinc-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Live Preview Box */}
+              <div>
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block mb-1.5">
+                  Live Style Preview
+                </span>
+                <div
+                  className="p-4 rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-inner transition-all space-y-1.5"
+                  style={{
+                    fontFamily: selectedFont === 'playfair' ? "'Times New Roman', serif" : selectedFont === 'arial' ? 'Arial, sans-serif' : selectedFont === 'georgia' ? 'Georgia, serif' : selectedFont === 'inter' ? 'Inter, sans-serif' : 'inherit',
+                    lineHeight: selectedSpacing
+                  }}
+                >
+                  <h4 className="text-xs font-bold text-zinc-900 dark:text-white tracking-wide">
+                    CHAPTER 1: INTRODUCTION
+                  </h4>
+                  <p className="text-[11px] text-zinc-700 dark:text-zinc-300">
+                    This academic document investigates the foundational principles of <strong>{documentTitle || 'Research Project'}</strong>. Synthesized at the <strong>{selectedLevel}</strong> level using APA 7th edition citation style.
+                  </p>
+                </div>
+              </div>
+
+              {/* Font Family Selection */}
+              <div>
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block mb-2">
+                  Typography / Font Family
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'playfair', label: 'Times New Roman', desc: 'APA Standard Serif', fontCss: "'Times New Roman', serif" },
+                    { id: 'arial', label: 'Arial', desc: 'Clean Sans-Serif', fontCss: 'Arial, sans-serif' },
+                    { id: 'georgia', label: 'Georgia', desc: 'Classic Academic Serif', fontCss: 'Georgia, serif' },
+                    { id: 'inter', label: 'Inter', desc: 'Modern Clean Sans', fontCss: 'Inter, sans-serif' }
+                  ].map(font => (
+                    <button
+                      key={font.id}
+                      type="button"
+                      onClick={() => setSelectedFont(font.id as any)}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        selectedFont === font.id
+                          ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500 ring-2 ring-indigo-500/20'
+                          : 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-zinc-900 dark:text-white block" style={{ fontFamily: font.fontCss }}>
+                        {font.label}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 block mt-0.5">{font.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Line Spacing Selection */}
+              <div>
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block mb-2">
+                  Line Spacing
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: '1.5', label: '1.5 Spacing', desc: 'Standard Academic' },
+                    { id: '2.0', label: '2.0 Double', desc: 'APA Thesis Standard' },
+                    { id: '1.15', label: '1.15 Compact', desc: 'Tight Reading' }
+                  ].map(spacing => (
+                    <button
+                      key={spacing.id}
+                      type="button"
+                      onClick={() => setSelectedSpacing(spacing.id)}
+                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                        selectedSpacing === spacing.id
+                          ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500 ring-2 ring-indigo-500/20'
+                          : 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-zinc-900 dark:text-white block">
+                        {spacing.label}
+                      </span>
+                      <span className="text-[9px] text-zinc-400 block mt-0.5">{spacing.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Academic Level Selection */}
+              <div>
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider block mb-2">
+                  Academic Level
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {['Undergraduate', "Master's", 'Ph.D. / Researcher'].map(level => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setSelectedLevel(level)}
+                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                        selectedLevel === level
+                          ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500 ring-2 ring-indigo-500/20'
+                          : 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                      }`}
+                    >
+                      <span className="text-xs font-bold text-zinc-900 dark:text-white block truncate">
+                        {level}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Confirm Button */}
+            <div className="p-3.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60 flex items-center justify-between">
+              <button
+                onClick={() => setShowFormattingModal(false)}
+                className="px-3.5 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmFormattingAndGenerate}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95 shadow-xs"
+              >
+                <Check className="w-4 h-4" />
+                Confirm Style & Generate Full Document
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

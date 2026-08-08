@@ -8,6 +8,8 @@
 
 // ─── Intent Types ──────────────────────────────────────────────
 export type ChatIntent =
+  | 'cover-page'
+  | 'journal-search'
   | 'humanize'
   | 'rephrase'
   | 'intro'
@@ -58,6 +60,24 @@ const INTENT_RULES: IntentRule[] = [
       /\b(export|download|save\s+as|get\s+the\s+file|docx|pdf|pptx)\b/i
     ],
     priority: 100
+  },
+  // Front cover page
+  {
+    intent: 'cover-page',
+    patterns: [
+      /\b(generate|create|build|set\s*up|make|add|edit)\s+(the\s+)?(front\s*page|cover\s*page|title\s*page|frontpage|cover)\b/i,
+      /\b(front\s*page|cover\s*page|title\s*page)\s*(form|details|setup)?\b/i
+    ],
+    priority: 95
+  },
+  // Online journal search
+  {
+    intent: 'journal-search',
+    patterns: [
+      /\b(search|find|get|look\s*up|fetch)\s+(journals?|references?|papers?|articles?|citations?|sources?)\s*(online)?\b/i,
+      /\b(online\s+journals?|academic\s+papers?|cite\s+journals?)\b/i
+    ],
+    priority: 95
   },
   // Humanize
   {
