@@ -30,7 +30,7 @@ import {
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
-import { exportPdfClient } from '../../utils/clientPdf'
+import { exportPdfReact } from '../../utils/reactPdf'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -2696,11 +2696,11 @@ export default function Editor() {
   }
 
 
-  // Export to PDF. Generated entirely in the browser (html2pdf.js →
-  // html2canvas + jsPDF) — NOT the browser Print dialog — so there is no
-  // automatic URL/date header/footer, nothing to fail at deploy time, and
-  // formatting (fonts, spacing, page breaks, page numbers) is controlled by
-  // our shared academic stylesheet.
+  // Export to PDF. Generated entirely in the browser with @react-pdf/renderer
+  // — NOT the browser Print dialog — producing a TRUE VECTOR, selectable-text
+  // PDF. No server, no headless Chromium, nothing to fail at deploy time, and
+  // no automatic URL/date header/footer. Formatting is controlled by our
+  // HTML→react-pdf converter (Times-Roman, spacing, page breaks, page numbers).
   const exportToPdfPrint = async (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     if (!editor) return
 
@@ -2709,13 +2709,12 @@ export default function Editor() {
     setLoadingMessage('Generating your PDF…')
     setIsExporting(true)
     try {
-      await exportPdfClient(editor.getHTML(), {
+      await exportPdfReact(editor.getHTML(), {
         filename: `${safeName}.pdf`,
         docHeader,
         docFooter,
         lineHeight: wizardLineSpacing || '2',
         scope,
-        marginMm: 25.4,
       })
     } catch (err) {
       console.error('PDF export failed:', err)
