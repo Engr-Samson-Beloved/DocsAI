@@ -395,7 +395,7 @@ export default function Dashboard({
             </div>
 
             {/* Template Gallery Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
               
               {/* Blank document Card */}
               <div className="flex flex-col gap-1.5">
@@ -413,88 +413,15 @@ export default function Dashboard({
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Blank document</span>
               </div>
 
-              {/* Brochure geometric Card */}
-              <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Custom')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
-                >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="h-4 bg-pink-500 rounded-xs w-full flex items-center justify-between p-1 flex-shrink-0">
-                      <div className="w-2.5 h-1 bg-white/40 rounded-xs"></div>
-                    </div>
-                    <div className="flex gap-1.5 flex-1 mt-1 overflow-hidden">
-                      <div className="w-1/3 bg-zinc-105 dark:bg-zinc-800 rounded-xs h-full p-1 flex flex-col gap-1 flex-shrink-0">
-                        <div className="h-1 bg-pink-300 w-full rounded-xs"></div>
-                        <div className="h-0.5 bg-zinc-200 dark:bg-zinc-700 w-3/4 rounded-xs"></div>
-                      </div>
-                      <div className="w-2/3 flex flex-col gap-1.5">
-                        <div className="h-1.5 bg-zinc-300 dark:bg-zinc-700 w-full rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-11/12 rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-5/6 rounded-xs"></div>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Brochure</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Geometric</span>
-              </div>
-              {/* Research Proposal Card */}
-              <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Proposal')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
-                >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="h-3 bg-indigo-650 rounded-xs w-full flex items-center justify-between p-1 flex-shrink-0">
-                      <div className="w-4 h-1 bg-white/40 rounded-xs"></div>
-                    </div>
-                    <div className="space-y-1.5 mt-2">
-                      <div className="h-1.5 bg-zinc-700 dark:bg-zinc-300 w-2/3 rounded-xs"></div>
-                      <div className="h-1 bg-zinc-350 dark:bg-zinc-650 w-full rounded-xs"></div>
-                      <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-11/12 rounded-xs"></div>
-                      <div className="h-1 bg-zinc-200 dark:bg-zinc-755 w-5/6 rounded-xs"></div>
-                    </div>
-                  </div>
-                </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Research Proposal</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Proposal</span>
-              </div>
-
-              {/* Graduation Thesis Card */}
-              <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Project')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
-                >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="flex flex-col items-center gap-1 border-b border-zinc-200 dark:border-zinc-700 pb-1 flex-shrink-0">
-                      <div className="h-1.5 bg-zinc-850 dark:bg-zinc-100 w-2/3 rounded-xs"></div>
-                      <div className="h-0.5 bg-zinc-400 dark:bg-zinc-500 w-1/2 rounded-xs"></div>
-                    </div>
-                    <div className="flex gap-2 flex-1 mt-1 overflow-hidden">
-                      <div className="w-full flex flex-col gap-1">
-                        <div className="h-1 bg-zinc-500 w-1/3 rounded-xs"></div>
-                        <div className="h-1 bg-zinc-200 dark:bg-zinc-750 w-full rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
-                        <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-5/6 rounded-xs"></div>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Graduation Thesis</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Project</span>
-              </div>
-
               {/* Seminar Report Card */}
               <div className="flex flex-col gap-1.5">
                 <button 
                   onClick={() => onCreateProjectWithTemplate('Seminar')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
                 >
                   <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
                     <div className="flex flex-col items-center gap-1 mt-3 flex-shrink-0">
-                      <div className="h-1.5 bg-zinc-800 dark:bg-zinc-100 w-1/2 rounded-xs"></div>
+                      <div className="h-1.5 bg-emerald-600 dark:bg-emerald-400 w-1/2 rounded-xs"></div>
                       <div className="h-1 bg-zinc-400 dark:bg-zinc-500 w-1/3 rounded-xs"></div>
                     </div>
                     <div className="space-y-1.5 mt-4">
@@ -505,50 +432,49 @@ export default function Dashboard({
                   </div>
                 </button>
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Seminar Report</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Seminar</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Academic Template</span>
               </div>
 
-              {/* Project proposal tropic Card */}
+              {/* Import Doc Card */}
               <div className="flex flex-col gap-1.5">
                 <button 
-                  onClick={() => onCreateProjectWithTemplate('Proposal')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
+                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
                 >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 border border-zinc-100 dark:border-zinc-800/80 relative overflow-hidden flex flex-col justify-end p-2">
-                    <div className="absolute top-0 right-0 left-0 h-10 bg-indigo-950 flex overflow-hidden flex-shrink-0">
-                      <div className="w-1/2 bg-teal-500 transform -skew-x-20 origin-top"></div>
-                      <div className="w-1/2 bg-orange-500 transform -skew-x-20 origin-top"></div>
-                    </div>
-                    <div className="space-y-1.5 z-10">
-                      <div className="h-1.5 bg-zinc-800 dark:bg-zinc-200 w-2/3 rounded-xs"></div>
-                      <div className="h-1 bg-zinc-400 dark:bg-zinc-500 w-1/2 rounded-xs"></div>
-                    </div>
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xl">
+                    📥
                   </div>
                 </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Project proposal</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Tropic</span>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Import Doc</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Upload File</span>
               </div>
 
-              {/* Report luxe Card */}
+              {/* Generate PPTX Card */}
               <div className="flex flex-col gap-1.5">
                 <button 
-                  onClick={() => onCreateProjectWithTemplate('Project')}
-                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-700 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col shadow-sm hover:shadow-md group"
+                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-amber-500 dark:hover:border-amber-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
                 >
-                  <div className="w-full h-full bg-white dark:bg-zinc-900/50 p-2 flex flex-col gap-1.5 border border-zinc-100 dark:border-zinc-800/80 overflow-hidden">
-                    <div className="h-8 bg-zinc-200 dark:bg-zinc-700 rounded-xs w-full relative overflow-hidden flex items-center justify-center flex-shrink-0">
-                      <div className="w-full h-full bg-zinc-300 dark:bg-zinc-655 opacity-40"></div>
-                      <div className="absolute w-2.5 h-2.5 rounded-full bg-white"></div>
-                    </div>
-                    <div className="space-y-1.5 mt-1.5">
-                      <div className="h-1.5 bg-yellow-600 dark:bg-yellow-500 w-1/3 rounded-xs"></div>
-                      <div className="h-1 bg-zinc-100 dark:bg-zinc-850 w-full rounded-xs"></div>
-                      <div className="h-1 bg-zinc-100 dark:bg-zinc-855 w-11/12 rounded-xs"></div>
-                    </div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold text-xl">
+                    📊
                   </div>
                 </button>
-                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Report</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Luxe</span>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Generate PPTX</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Presentation</span>
+              </div>
+
+              {/* Humanize Text Card */}
+              <div className="flex flex-col gap-1.5">
+                <button 
+                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                  className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-purple-500 dark:hover:border-purple-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xl">
+                    🧠
+                  </div>
+                </button>
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Humanize Text</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Bypass AI Detector</span>
               </div>
 
             </div>

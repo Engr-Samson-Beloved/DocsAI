@@ -197,7 +197,7 @@ export default function MobileDashboard({
           />
         </div>
 
-        {/* Quick Suggestion templates */}
+        {/* Quick Suggestion templates & tools */}
         <div>
           <h3 className="text-[10px] font-bold text-zinc-450 dark:text-zinc-500 uppercase tracking-wider mb-2">
             Start a new document
@@ -205,42 +205,42 @@ export default function MobileDashboard({
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => onCreateProjectWithTemplate('Seminar')}
-              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-indigo-500 text-left active:scale-[0.98] transition-all shadow-xs"
+              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-emerald-500 text-left active:scale-[0.98] transition-all shadow-xs"
             >
-              <span className="w-6 h-6 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600">📝</span>
+              <span className="w-6.5 h-6.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600 font-bold text-sm">📝</span>
               <div className="min-w-0">
-                <p className="text-xs font-bold truncate">Seminar Report</p>
-                <p className="text-[8px] text-zinc-450">Template</p>
+                <p className="text-xs font-bold truncate text-zinc-900 dark:text-zinc-100">Seminar Report</p>
+                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Academic Template</p>
               </div>
             </button>
             <button
-              onClick={() => onCreateProjectWithTemplate('Proposal')}
-              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-indigo-500 text-left active:scale-[0.98] transition-all shadow-xs"
+              onClick={() => onCreateProjectWithTemplate('Custom')}
+              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-blue-500 text-left active:scale-[0.98] transition-all shadow-xs"
             >
-              <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-indigo-650">📋</span>
+              <span className="w-6.5 h-6.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-blue-600 font-bold text-sm">📥</span>
               <div className="min-w-0">
-                <p className="text-xs font-bold truncate">Proposal Blueprint</p>
-                <p className="text-[8px] text-zinc-450">Template</p>
-              </div>
-            </button>
-            <button
-              onClick={() => onCreateProjectWithTemplate('Project')}
-              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-purple-500 text-left active:scale-[0.98] transition-all shadow-xs"
-            >
-              <span className="w-6 h-6 rounded-lg bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center text-purple-600">🎓</span>
-              <div className="min-w-0">
-                <p className="text-xs font-bold truncate">Graduation Project</p>
-                <p className="text-[8px] text-zinc-450">Thesis</p>
+                <p className="text-xs font-bold truncate text-zinc-900 dark:text-zinc-100">Import Doc</p>
+                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Upload File</p>
               </div>
             </button>
             <button
               onClick={() => onCreateProjectWithTemplate('Custom')}
               className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-amber-500 text-left active:scale-[0.98] transition-all shadow-xs"
             >
-              <span className="w-6 h-6 rounded-lg bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-600">✍️</span>
+              <span className="w-6.5 h-6.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-600 font-bold text-sm">📊</span>
               <div className="min-w-0">
-                <p className="text-xs font-bold truncate">Custom Document</p>
-                <p className="text-[8px] text-zinc-450">Blank</p>
+                <p className="text-xs font-bold truncate text-zinc-900 dark:text-zinc-100">Generate PPTX</p>
+                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Slide Presentation</p>
+              </div>
+            </button>
+            <button
+              onClick={() => onCreateProjectWithTemplate('Custom')}
+              className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-purple-500 text-left active:scale-[0.98] transition-all shadow-xs"
+            >
+              <span className="w-6.5 h-6.5 rounded-lg bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center text-purple-600 font-bold text-sm">🧠</span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate text-zinc-900 dark:text-zinc-100">Humanize Text</p>
+                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Bypass AI Detector</p>
               </div>
             </button>
           </div>
