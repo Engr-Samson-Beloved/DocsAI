@@ -80,8 +80,8 @@ export async function POST(req: NextRequest) {
     // Make sure web fonts (Tinos) are loaded before rendering.
     try {
       await page.evaluate(async () => {
-        // @ts-expect-error document.fonts exists in the page context
-        if (document.fonts && document.fonts.ready) await document.fonts.ready
+        const d = document as Document & { fonts?: { ready?: Promise<unknown> } }
+        if (d.fonts && d.fonts.ready) await d.fonts.ready
       })
     } catch {
       /* non-fatal */
