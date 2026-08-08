@@ -296,27 +296,35 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
   }
 
   if (/^h[1-6]$/.test(tag)) {
-    const size = headingSize(tag)
+    const hs = parseInlineStyle(el.getAttribute('style'))
     return (
       <Text
         key={`b${blockKey++}`}
         wrap={false}
         style={{
           fontFamily: 'Times-Bold',
-          fontSize: size,
+          fontSize: hs.fontSize || headingSize(tag),
           lineHeight: 1.3,
           marginTop: 8,
           marginBottom: 4,
           textAlign: alignOf(el, ctx),
         }}
       >
-        {renderInline(el, { bold: true, upper: parseInlineStyle(el.getAttribute('style')).upper })}
+        {renderInline(el, { bold: true, upper: hs.upper })}
       </Text>
     )
   }
 
   if (tag === 'p') {
-    const inline = renderInline(el, { upper: parseInlineStyle(el.getAttribute('style')).upper })
+    const ps = parseInlineStyle(el.getAttribute('style'))
+    const inline = renderInline(el, {
+      bold: ps.bold,
+      italic: ps.italic,
+      underline: ps.underline,
+      color: ps.color,
+      fontSize: ps.fontSize,
+      upper: ps.upper,
+    })
     if (inline.length === 0) {
       return <View key={`b${blockKey++}`} style={{ height: 12 }} />
     }
@@ -325,13 +333,14 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
       <Text
         key={`b${blockKey++}`}
         style={{
-          fontFamily: 'Times-Roman',
-          fontSize: 12,
+          fontFamily: fontFamilyFor(ps.bold, ps.italic),
+          fontSize: ps.fontSize || 12,
           lineHeight: ctx.lineHeight,
           marginBottom: 2,
           textAlign: align,
-          // First-line indent only for normal left/justified body text.
-          ...(align === 'center' || align === 'right' ? {} : { textIndent: INDENT_PT }),
+          // First-line indent only for normal left/justified body text
+          // (not for centered cover/heading-like lines).
+          ...(align === 'center' || align === 'right' || ctx.forceAlign ? {} : { textIndent: INDENT_PT }),
         }}
       >
         {inline}
@@ -451,7 +460,10 @@ function buildDocument(fullHtml: string, opts: ReactPdfOptions): React.ReactElem
     }
   }
 
-  const pageStyle = {
+  // Typed loosely: @react-pdf's Style unions reject inferred string types
+  // from a standalone object; inline literal styles elsewhere are fine.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pageStyle: any = {
     paddingTop: MARGIN_PT,
     paddingBottom: MARGIN_PT,
     paddingLeft: MARGIN_PT,
@@ -459,7 +471,7 @@ function buildDocument(fullHtml: string, opts: ReactPdfOptions): React.ReactElem
     fontFamily: 'Times-Roman',
     fontSize: 12,
     color: '#000',
-  } as const
+  }
 
   const pages: React.ReactNode[] = []
 
@@ -521,7 +533,8 @@ function buildDocument(fullHtml: string, opts: ReactPdfOptions): React.ReactElem
         <Text
           fixed
           style={{ position: 'absolute', bottom: MARGIN_PT * 0.5, left: 0, right: 0, textAlign: 'center', fontSize: 10, color: '#000' }}
-          render={({ subPageNumber }: { subPageNumber: number }) => String(subPageNumber)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          render={({ subPageNumber }: any) => String(subPageNumber)}
         />
       </Page>
     )
