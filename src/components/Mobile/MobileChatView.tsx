@@ -525,8 +525,6 @@ export default function MobileChatView({
   }, [messages, activeProjectId])
 
   // ─── Guided Template Onboarding Flow ─────────────────────────
-  const templateLabels: Record<string, string> = {
-    Seminar: 'Seminar Report',
   // Handle initial template selection from MobileDashboard
   useEffect(() => {
     if (!initialTemplate || hasProcessedTemplateRef.current === initialTemplate) return
