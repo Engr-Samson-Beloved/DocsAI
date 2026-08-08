@@ -287,20 +287,56 @@ export default function MobileChatView({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, simulatedAiResult])
 
-  // ─── Initialize with welcome message ─────────────────────────
+  // ─── Per-Project Chat History Persistence ────────────────────
+  const prevProjectIdRef = useRef<string | null>(null)
+
+  // 1. Load chat history when activeProjectId changes
   useEffect(() => {
-    if (messages.length === 0 && !initialTemplate) {
-      setMessages([
-        {
-          id: uid(),
-          role: 'system',
-          content: `Welcome to **WordPIlot**! 👋\n\nI'm your AI academic writing assistant. Describe what you'd like to write, or tap a quick action below to get started.`,
-          timestamp: Date.now(),
-          type: 'text'
+    if (!activeProjectId) return
+
+    // Avoid duplicate re-loads if project ID didn't change
+    if (prevProjectIdRef.current === activeProjectId) return
+    prevProjectIdRef.current = activeProjectId
+
+    // If starting fresh template onboarding, skip loading saved history
+    if (initialTemplate) return
+
+    const storageKey = `wordpi-chat-history-${activeProjectId}`
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed)
+          return
         }
-      ])
+      }
+    } catch (e) {
+      console.warn('Failed to load chat history for project:', activeProjectId, e)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Default welcome if no history exists for this project
+    setMessages([
+      {
+        id: uid(),
+        role: 'system',
+        content: `Welcome to **${documentTitle || 'WordPIlot'}**! 👋\n\nI'm your AI academic writing assistant. Describe what you'd like to write, or tap a quick action below to get started.`,
+        timestamp: Date.now(),
+        type: 'text'
+      }
+    ])
+  }, [activeProjectId, documentTitle, initialTemplate])
+
+  // 2. Auto-save chat history to localStorage whenever messages state changes
+  useEffect(() => {
+    if (!activeProjectId || messages.length === 0) return
+    const storageKey = `wordpi-chat-history-${activeProjectId}`
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(messages))
+    } catch (e) {
+      console.warn('Failed to save chat history for project:', activeProjectId, e)
+    }
+  }, [messages, activeProjectId])
 
   // ─── Guided Template Onboarding Flow ─────────────────────────
   const templateLabels: Record<string, string> = {

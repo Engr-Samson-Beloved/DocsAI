@@ -1411,6 +1411,7 @@ export default function Editor() {
       
       // Async IndexedDB delete (which deletes project and its sources)
       dbDeleteProject(id).catch(e => console.error("Failed to delete project from IndexedDB", e))
+      localStorage.removeItem(`wordpi-chat-history-${id}`)
       
       // If deleted project is active, reset active project ID
       if (activeProjectId === id) {
