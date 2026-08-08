@@ -92,7 +92,7 @@ const DEFAULT_CONTENT = `
 `
 
 const SEMINAR_TEMPLATE = `
-<div data-type="page">
+<div data-type="page" data-cover="true">
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <h1 style="text-align: center; line-height: 1.5; font-size: 1.5rem; text-transform: uppercase;"><strong>[Insert Seminar Topic Here]</strong></h1>
@@ -2732,88 +2732,103 @@ export default function Editor() {
       return
     }
 
-    pagesToPrint.forEach((pageNode, index) => {
+    // Track actual content page number (excluding cover)
+    let contentPageNum = 0
+
+    pagesToPrint.forEach((pageNode) => {
       const isCover = pageNode.getAttribute('data-cover') === 'true' || pageNode.querySelector('div[data-cover="true"]') !== null
 
       // Create page container
       const pageSheet = document.createElement('div')
       pageSheet.className = 'page-sheet'
-      pageSheet.style.width = '210mm'
-      pageSheet.style.height = '297mm'
-      pageSheet.style.position = 'relative'
-      pageSheet.style.pageBreakAfter = 'always'
-      pageSheet.style.breakAfter = 'page'
-      pageSheet.style.boxSizing = 'border-box'
-      pageSheet.style.backgroundColor = 'white'
-      pageSheet.style.color = 'black'
-      pageSheet.style.overflow = 'hidden'
 
-      const hasReferences = pageNode.textContent?.trim().toLowerCase().includes('references') || 
-                            pageNode.textContent?.trim().toLowerCase().includes('bibliography')
+      if (isCover) {
+        // Cover page: render as-is with its own styling, no header/footer
+        pageSheet.style.width = '210mm'
+        pageSheet.style.minHeight = '297mm'
+        pageSheet.style.position = 'relative'
+        pageSheet.style.pageBreakAfter = 'always'
+        pageSheet.style.breakAfter = 'page'
+        pageSheet.style.boxSizing = 'border-box'
+        pageSheet.style.backgroundColor = 'white'
+        pageSheet.style.color = 'black'
+        pageSheet.style.overflow = 'hidden'
+        pageSheet.style.display = 'flex'
+        pageSheet.style.flexDirection = 'column'
+        pageSheet.style.justifyContent = 'space-between'
+        pageSheet.style.padding = '20mm'
+        pageSheet.style.textAlign = 'center'
 
-      // Create header
-      if (!isCover) {
-        const headerEl = document.createElement('div')
-        headerEl.className = 'absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-150 pb-2 select-none pointer-events-none text-xs text-zinc-400 font-sans'
-        headerEl.innerHTML = `<span>${docHeader}</span>`
-        headerEl.style.position = 'absolute'
-        headerEl.style.top = '0'
-        headerEl.style.left = '0'
-        headerEl.style.right = '0'
-        headerEl.style.height = '96px'
-        headerEl.style.padding = '0 72px'
-        headerEl.style.display = 'flex'
-        headerEl.style.alignItems = 'flex-end'
-        headerEl.style.justifyContent = 'space-between'
-        headerEl.style.borderBottom = '1px dashed #e4e4e7'
-        headerEl.style.paddingBottom = '8px'
-        pageSheet.appendChild(headerEl)
-      }
+        // Use the cover page HTML as-is (preserves logo, layout, styling)
+        let coverHtml = pageNode.innerHTML || ''
+        coverHtml = coverHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        pageSheet.innerHTML = coverHtml
 
-      // Create content
-      const contentEl = document.createElement('div')
-      contentEl.className = 'page-content'
-      contentEl.style.position = 'absolute'
-      contentEl.style.top = '96px'
-      contentEl.style.left = '0'
-      contentEl.style.right = '0'
-      contentEl.style.height = '931px'
-      contentEl.style.padding = '0 72px'
-      contentEl.style.overflow = 'hidden'
-      contentEl.style.textAlign = 'left'
-      contentEl.style.fontFamily = "'Times New Roman', Times, serif"
-      contentEl.style.fontSize = '12pt'
-      contentEl.style.lineHeight = '1.5'
-      // Replace markdown bold asterisks in innerHTML with strong tags
-      let cleanHtml = pageNode.innerHTML || ''
-      cleanHtml = cleanHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      contentEl.innerHTML = cleanHtml
+        // Ensure all text inside cover is black
+        pageSheet.querySelectorAll('*').forEach(el => {
+          ;(el as HTMLElement).style.color = 'black'
+        })
+      } else {
+        contentPageNum++
+        // Content pages: structured layout with padding and page number
+        pageSheet.style.width = '210mm'
+        pageSheet.style.minHeight = '297mm'
+        pageSheet.style.position = 'relative'
+        pageSheet.style.pageBreakAfter = 'always'
+        pageSheet.style.breakAfter = 'page'
+        pageSheet.style.boxSizing = 'border-box'
+        pageSheet.style.backgroundColor = 'white'
+        pageSheet.style.color = 'black'
+        pageSheet.style.overflow = 'hidden'
 
-      // Capitalize headings to Title Case
-      const headings = contentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
-      headings.forEach((h) => {
-        const htmlH = h as HTMLElement
-        htmlH.innerText = toTitleCase(htmlH.innerText)
-        htmlH.style.fontFamily = "'Times New Roman', Times, serif"
-        htmlH.style.color = 'black'
-        htmlH.style.fontWeight = 'bold'
-      })
+        // Create content area with proper academic margins (1 inch = 25.4mm)
+        const contentEl = document.createElement('div')
+        contentEl.className = 'page-content'
+        contentEl.style.padding = '25mm 25mm 20mm 25mm'
+        contentEl.style.fontFamily = "'Times New Roman', Times, serif"
+        contentEl.style.fontSize = '12pt'
+        contentEl.style.lineHeight = wizardLineSpacing || '2.0'
+        contentEl.style.color = 'black'
+        contentEl.style.textAlign = 'justify'
 
-      if (hasReferences) {
+        let cleanHtml = pageNode.innerHTML || ''
+        cleanHtml = cleanHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        contentEl.innerHTML = cleanHtml
+
+        // Style headings
+        const headings = contentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        headings.forEach((h) => {
+          const htmlH = h as HTMLElement
+          htmlH.innerText = toTitleCase(htmlH.innerText)
+          htmlH.style.fontFamily = "'Times New Roman', Times, serif"
+          htmlH.style.color = 'black'
+          htmlH.style.fontWeight = 'bold'
+          htmlH.style.textAlign = 'left'
+        })
+
+        // Style paragraphs
         const paragraphs = contentEl.querySelectorAll('p')
         paragraphs.forEach((p) => {
-          p.classList.add('apa-reference-entry')
+          p.style.color = 'black'
+          p.style.fontFamily = "'Times New Roman', Times, serif"
         })
-      }
 
-      pageSheet.appendChild(contentEl)
+        // Handle APA reference formatting
+        const hasReferences = pageNode.textContent?.trim().toLowerCase().includes('references') ||
+                              pageNode.textContent?.trim().toLowerCase().includes('bibliography')
+        if (hasReferences) {
+          paragraphs.forEach((p) => {
+            p.classList.add('apa-reference-entry')
+          })
+        }
 
-      // Create clean academic footer — centered page number only
-      if (!isCover) {
+        pageSheet.appendChild(contentEl)
+
+        // Page number footer — centered, academic style
         const footerEl = document.createElement('div')
-        footerEl.innerHTML = `<span style="font-family: 'Times New Roman', Times, serif; font-size: 10pt; color: black;">${index + 1}</span>`
+        footerEl.innerHTML = `<span style="font-family: 'Times New Roman', Times, serif; font-size: 10pt; color: black;">${contentPageNum}</span>`
         footerEl.style.position = 'absolute'
-        footerEl.style.bottom = '24px'
+        footerEl.style.bottom = '15mm'
         footerEl.style.left = '0'
         footerEl.style.right = '0'
         footerEl.style.textAlign = 'center'
@@ -2823,14 +2838,24 @@ export default function Editor() {
       printMount.appendChild(pageSheet)
     })
 
-    // Add print styles to hide everything except print-mount
+    // Add print styles
     const styleEl = document.createElement('style')
     styleEl.id = 'print-mount-styles'
     styleEl.innerHTML = `
       #print-mount {
         display: none;
       }
+      @page {
+        size: A4;
+        margin: 0;
+      }
       @media print {
+        html, body {
+          width: 210mm !important;
+          height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
         body > *:not(#print-mount) {
           display: none !important;
         }
@@ -2838,27 +2863,41 @@ export default function Editor() {
           display: block !important;
           width: 210mm !important;
           height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
           background: white !important;
           color: black !important;
         }
         .page-sheet {
           display: block !important;
           width: 210mm !important;
-          height: 297mm !important;
+          min-height: 297mm !important;
           background: white !important;
           color: black !important;
           page-break-after: always !important;
           break-after: page !important;
+          margin: 0 !important;
+          padding-top: 0 !important;
+        }
+        .page-sheet:last-child {
+          page-break-after: avoid !important;
+          break-after: avoid !important;
         }
         .page-sheet * {
           color: black !important;
-          background: transparent !important;
         }
         .page-content p {
           text-align: justify !important;
           text-indent: 0.5in !important;
         }
-        .page-content h1, .page-content h2, .page-content h3 {
+        .page-content h1, .page-content h2, .page-content h3, .page-content h4 {
+          text-indent: 0 !important;
+          text-align: left !important;
+        }
+        .page-content ul, .page-content ol {
+          text-indent: 0 !important;
+        }
+        .page-content li {
           text-indent: 0 !important;
         }
         .apa-reference-entry {
@@ -2886,25 +2925,57 @@ export default function Editor() {
     const titleText = details.title || documentTitle || 'UNTITLED PROJECT'
     const studentNameText = details.studentName || 'STUDENT NAME'
     const matricNoText = details.matricNo || 'MATRIC NO'
-    const departmentText = details.department || 'COMPUTER SCIENCE'
-    const facultyText = details.faculty || 'SCIENCE'
-    const institutionText = details.institution || 'UNIVERSITY'
+    const departmentText = details.department || 'COMPUTER ENGINEERING'
+    const facultyText = details.faculty || 'ENGINEERING'
+    const institutionText = details.institution || 'YABA COLLEGE OF TECHNOLOGY, YABA'
     const supervisorNameText = details.supervisorName || 'SUPERVISOR NAME'
     const academicSessionText = details.academicSession || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`
     const submissionDateText = details.submissionDate || `${new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase()} ${new Date().getFullYear()}`
 
+    const docTypeName = wizardDocType === 'Seminar' ? 'SEMINAR REPORT' 
+                      : wizardDocType === 'Proposal' ? 'RESEARCH PROPOSAL' 
+                      : wizardDocType === 'Project' ? 'FINAL YEAR PROJECT REPORT' 
+                      : 'PROJECT REPORT'
+
+    const awardName = wizardDocType === 'Seminar' ? 'HIGHER NATIONAL DIPLOMA (HND)'
+                    : wizardAcademicLevel === "Master's" ? 'MASTER OF SCIENCE (M.Sc.)'
+                    : wizardAcademicLevel === 'Ph.D.' ? 'DOCTOR OF PHILOSOPHY (Ph.D.)'
+                    : 'BACHELOR OF SCIENCE (B.Sc.)'
+
+    const schoolLogoSrc = (typeof window !== 'undefined' && localStorage.getItem('custom_school_logo')) || '/yabatech_logo.png'
+
     const coverPageHtml = `
-<div data-type="page" data-cover="true" style="page-break-after: always; break-after: page; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; text-align: center; padding: 40mm 20mm 40mm 20mm;">
-  <h1 style="font-size: 24pt; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; line-height: 1.3; font-family: 'Times New Roman', Times, serif; text-align: center;">${titleText}</h1>
-  <p style="font-size: 14pt; margin-top: 60px; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">BY</p>
-  <p style="font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">${studentNameText}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">(${matricNoText})</p>
-  <p style="font-size: 12pt; text-transform: uppercase; line-height: 1.6; max-width: 550px; margin: 60px auto; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">
-    A PROJECT REPORT SUBMITTED TO THE DEPARTMENT OF ${departmentText}, FACULTY OF ${facultyText}, ${institutionText} IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE AWARD OF THE DEGREE OF BACHELOR OF SCIENCE.
-  </p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold; margin-top: 60px;">SUPERVISOR: ${supervisorNameText}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; margin-top: 30px; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SESSION: ${academicSessionText}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SUBMISSION DATE: ${submissionDateText}</p>
+<div data-type="page" data-cover="true" style="page-break-after: always; break-after: page; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; text-align: center; padding: 25mm 20mm 25mm 20mm;">
+  <div>
+    <p style="text-align: center; margin: 0;"><strong>&nbsp;</strong></p>
+    <h1 style="font-size: 18pt; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; line-height: 1.3; font-family: 'Times New Roman', Times, serif; text-align: center;">${titleText}</h1>
+    <div data-type="yabatech-logo" data-src="${schoolLogoSrc}" style="text-align: center; margin: 15px 0;">
+      <img src="${schoolLogoSrc}" alt="School Logo" style="width: 90px; height: 90px; object-fit: contain; display: inline-block;" />
+    </div>
+    <p style="font-size: 11pt; font-weight: bold; text-transform: uppercase; margin-top: 15px; font-family: 'Times New Roman', Times, serif; text-align: center;">A ${docTypeName}</p>
+    <p style="font-size: 10pt; text-transform: uppercase; margin-top: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">PRESENTED TO</p>
+    <p style="font-size: 11pt; font-weight: bold; text-transform: uppercase; margin-top: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">
+      THE DEPARTMENT OF ${departmentText}<br>FACULTY OF ${facultyText}<br>${institutionText}
+    </p>
+  </div>
+
+  <div>
+    <p style="font-size: 10pt; text-transform: uppercase; margin-top: 20px; font-family: 'Times New Roman', Times, serif; text-align: center;">BY</p>
+    <p style="font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; font-family: 'Times New Roman', Times, serif; text-align: center;">${studentNameText}</p>
+    <p style="font-size: 11pt; font-weight: bold; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center;">(${matricNoText})</p>
+  </div>
+
+  <div>
+    <p style="font-size: 9.5pt; text-transform: uppercase; line-height: 1.5; max-width: 550px; margin: 20px auto; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">
+      A ${docTypeName} SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE AWARD OF THE ${awardName} IN ${departmentText}.
+    </p>
+  </div>
+
+  <div>
+    <p style="font-size: 11pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold; margin-top: 15px;">SUPERVISOR: ${supervisorNameText}</p>
+    <p style="font-size: 11pt; text-transform: uppercase; margin-top: 10px; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SESSION: ${academicSessionText}</p>
+    <p style="font-size: 11pt; text-transform: uppercase; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">DATE: ${submissionDateText}</p>
+  </div>
 </div>
 `
     const currentContent = editor.getHTML()
