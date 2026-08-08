@@ -31,6 +31,8 @@ import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
 import { exportPdfReact } from '../../utils/reactPdf'
+import { mapHeadingsToContentPages } from '../../utils/printPagination'
+import { buildTocPageHtml } from '../../utils/documentAudit'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -2835,89 +2837,48 @@ export default function Editor() {
   const generateTableOfContents = () => {
     if (!editor) return
 
-    const pageSheets = document.querySelectorAll('.page-sheet')
-    const items: { text: string; level: number; page: number }[] = []
+    const currentHtml = editor.getHTML()
 
-    pageSheets.forEach((pageSheet) => {
-      const pageIndexAttr = pageSheet.getAttribute('data-page-index')
-      let pageNum = 1
-      if (pageIndexAttr !== null) {
-        pageNum = parseInt(pageIndexAttr) + 1
-      }
-
-      const headings = pageSheet.querySelectorAll('.page-content h1, .page-content h2, .page-content h3, .page-content h4, .page-content h5, .page-content h6')
-      headings.forEach((h) => {
-        const text = h.textContent?.trim() || ''
-        const level = parseInt(h.tagName.substring(1))
-        
-        if (text.toLowerCase() === 'table of contents') return
-
-        items.push({
-          text,
-          level,
-          page: pageNum
-        })
-      })
-    })
-
-    if (items.length === 0) {
+    // Accurate page numbers come from the SAME paginator as the PDF export,
+    // so the TOC matches the exported document's footer (content pages are
+    // numbered from 1, excluding the cover/TOC front matter).
+    const headings = mapHeadingsToContentPages(currentHtml, { lineHeight: wizardLineSpacing || '2' })
+    if (headings.length === 0) {
       alert('No headings found in the document to generate a Table of Contents.')
       return
     }
 
-    let tocItemsHtml = ''
-    items.forEach((item) => {
-      const title = toTitleCase(item.text)
-      const pageStr = item.page.toString()
-      const indentPadding = (item.level - 1) * 4
-      const dotsCount = Math.max(10, 85 - title.length - pageStr.length - indentPadding)
-      const dots = '.'.repeat(dotsCount)
-      const spacePrefix = ' '.repeat(indentPadding)
+    // Structured tocItem rows (data-type="toc-item") that round-trip into
+    // TocItemNode with real page numbers.
+    const tocPageHtml = buildTocPageHtml(currentHtml, { lineHeight: wizardLineSpacing || '2' })
 
-      tocItemsHtml += `
-<p class="toc-item-row" data-type="toc-item-text" style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; margin-bottom: 8px; text-align: left; white-space: pre-wrap;">${spacePrefix}${title} ${dots} ${pageStr}</p>
-`
-    })
-
-    const tocPageHtml = `
-<div data-type="page" data-toc="true" style="page-break-after: always; break-after: page;">
-  <h2 style="text-align: center; font-weight: bold; font-size: 18pt; margin-bottom: 30px; font-family: 'Times New Roman', Times, serif; text-transform: uppercase;">Table of Contents</h2>
-  ${tocItemsHtml}
-</div>
-`
-
-    const currentHtml = editor.getHTML()
     const parser = new DOMParser()
     const doc = parser.parseFromString(currentHtml, 'text/html')
-    
+
+    const tempDiv = doc.createElement('div')
+    tempDiv.innerHTML = tocPageHtml.trim()
+    const newTocElement = tempDiv.firstElementChild
+    if (!newTocElement) return
+
     const existingToc = doc.body.querySelector('div[data-toc="true"]')
     if (existingToc) {
-      const tempDiv = doc.createElement('div')
-      tempDiv.innerHTML = tocPageHtml.trim()
-      const newTocElement = tempDiv.firstElementChild
-      if (newTocElement) {
-        doc.body.replaceChild(newTocElement, existingToc)
-      }
+      // Replace in place.
+      doc.body.replaceChild(newTocElement, existingToc)
     } else {
+      // Insert immediately AFTER the front cover (or first, if no cover).
       const existingCover = doc.body.querySelector('div[data-cover="true"]')
-      const tempDiv = doc.createElement('div')
-      tempDiv.innerHTML = tocPageHtml.trim()
-      const newTocElement = tempDiv.firstElementChild
-      
-      if (newTocElement) {
-        if (existingCover && existingCover.nextElementSibling) {
-          doc.body.insertBefore(newTocElement, existingCover.nextElementSibling)
-        } else if (existingCover) {
-          doc.body.appendChild(newTocElement)
-        } else {
-          doc.body.insertBefore(newTocElement, doc.body.firstElementChild)
-        }
+      if (existingCover && existingCover.nextElementSibling) {
+        doc.body.insertBefore(newTocElement, existingCover.nextElementSibling)
+      } else if (existingCover) {
+        doc.body.appendChild(newTocElement)
+      } else {
+        doc.body.insertBefore(newTocElement, doc.body.firstElementChild)
       }
     }
 
     editor.commands.setContent(doc.body.innerHTML)
     setIsSaved(false)
-    
+
     setTimeout(() => {
       runPagination(editor)
       updateOutline()

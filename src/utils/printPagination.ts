@@ -177,6 +177,41 @@ function splitOversizedBlock(
   return [cloneWith(words.slice(0, best)), cloneWith(words.slice(best))]
 }
 
+export interface HeadingLocation {
+  title: string
+  level: number // 1..6
+  /** content-page number (1-based, cover/TOC excluded) — matches the PDF footer */
+  page: number
+}
+
+/**
+ * Map every heading in the document to the REAL content-page number it lands
+ * on, using the exact same pagination engine as the PDF export. This is the
+ * single source of truth for an accurate Table of Contents: the numbers here
+ * equal the numbers printed in the exported PDF's footer (content pages are
+ * numbered from 1, excluding the cover and TOC front matter).
+ *
+ * Implementation: paginate, then read the headings out of each rendered
+ * content page's HTML — so it needs no duplicate flow logic and can't drift
+ * from paginateDocumentForPrint.
+ */
+export function mapHeadingsToContentPages(fullHtml: string, opts: PaginateOptions = {}): HeadingLocation[] {
+  if (typeof document === 'undefined') return []
+  const pages = paginateDocumentForPrint(fullHtml, opts)
+  const parser = new DOMParser()
+  const out: HeadingLocation[] = []
+  for (const p of pages) {
+    if (p.kind !== 'content' || !p.pageNumber) continue
+    const doc = parser.parseFromString(p.html, 'text/html')
+    doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+      const title = (h.textContent || '').trim()
+      if (!title) return
+      out.push({ title, level: parseInt(h.tagName.charAt(1), 10) || 1, page: p.pageNumber as number })
+    })
+  }
+  return out
+}
+
 /**
  * Re-flow the full document HTML into print pages.
  *
