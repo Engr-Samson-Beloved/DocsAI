@@ -29,7 +29,7 @@ import {
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
-import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml } from '../../utils/chatIntelligence'
+import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -4465,6 +4465,19 @@ export default function Editor() {
     }
   }
 
+  // ─── Remove a section from the document (called by WordPilot AI) ───
+  const removeSectionFromDocument = (sectionName: string) => {
+    if (!editor) return
+    const currentHtml = editor.getHTML()
+    // Use replaceSectionInHtml with empty string to remove the section
+    const updatedHtml = replaceSectionInHtml(currentHtml, sectionName, '')
+    if (updatedHtml && updatedHtml !== currentHtml) {
+      editor.commands.setContent(updatedHtml)
+      runPagination(editor)
+      setIsSaved(false)
+    }
+  }
+
   const replaceSelectionContent = () => {
     if (simulatedAiResult) {
       const formatted = formatAiResponseToHtml(simulatedAiResult)
@@ -5563,6 +5576,7 @@ export default function Editor() {
             setWizardLineSpacing={setWizardLineSpacing}
             setWizardAcademicLevel={setWizardAcademicLevel}
             onApplyFormattingStyles={applyFormattingStyles}
+            onRemoveSection={removeSectionFromDocument}
           />
         ) : (
         <>

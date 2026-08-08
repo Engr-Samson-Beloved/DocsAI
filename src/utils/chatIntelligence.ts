@@ -17,6 +17,8 @@ export type ChatIntent =
   | 'blueprint'
   | 'generate-section'
   | 'edit-section'
+  | 'remove-section'
+  | 'move-section'
   | 'question'
   | 'export'
   | 'greeting'
@@ -143,6 +145,24 @@ const INTENT_RULES: IntentRule[] = [
     ],
     priority: 85
   },
+  // Remove / Delete a section
+  {
+    intent: 'remove-section' as ChatIntent,
+    patterns: [
+      /\b(remove|delete|drop|get\s*rid\s*of|take\s*out|cut|strip|clear)\s+(the\s+)?(chapter|section|page|paragraph|duplicate|extra|repeated|redundant|that\s+part|this\s+part|it|that|this)/i,
+      /\b(remove|delete|drop)\s+(it|that|this|the\s+last|the\s+duplicate)/i
+    ],
+    priority: 88
+  },
+  // Move / Reorder a section
+  {
+    intent: 'move-section' as ChatIntent,
+    patterns: [
+      /\b(move|swap|reorder|rearrange|put|place|shift)\s+(the\s+)?(chapter|section|page)/i,
+      /\b(before|after|above|below)\s+(chapter|section)/i
+    ],
+    priority: 87
+  },
   // Edit a specific section
   {
     intent: 'edit-section',
@@ -197,6 +217,40 @@ export function extractSectionTarget(message: string): { section?: string; page?
     }
   }
   return {}
+}
+
+// ─── Build Document Structure Outline for AI Context ────────────
+export function buildDocumentOutline(editorHtml: string): string {
+  if (!editorHtml) return 'Document is empty.'
+
+  const headingRegex = /<h([1-6])[^>]*>(.*?)<\/h\1>/gi
+  const entries: { level: number; text: string; charsBefore: number }[] = []
+  let match
+
+  while ((match = headingRegex.exec(editorHtml)) !== null) {
+    const level = parseInt(match[1], 10)
+    const cleanText = match[2].replace(/<[^>]*>/g, '').trim()
+    if (cleanText) {
+      entries.push({ level, text: cleanText, charsBefore: match.index })
+    }
+  }
+
+  if (entries.length === 0) {
+    const plainText = editorHtml.replace(/<[^>]*>/g, ' ').trim()
+    const wordCount = plainText.split(/\s+/).filter(Boolean).length
+    return `Document has no headings. Total content: ~${wordCount} words of unstructured text.`
+  }
+
+  // Build a tree-like outline string
+  const lines = entries.map((e, i) => {
+    const indent = '  '.repeat(Math.max(0, e.level - 1))
+    const nextStart = i + 1 < entries.length ? entries[i + 1].charsBefore : editorHtml.length
+    const sectionChars = nextStart - e.charsBefore
+    const approxWords = Math.round(sectionChars / 6) // rough chars-to-words
+    return `${indent}${'h' + e.level}: ${e.text} (~${approxWords} words)`
+  })
+
+  return `DOCUMENT STRUCTURE:\n${lines.join('\n')}`
 }
 
 // ─── Extract relevant document section from HTML ───────────────
@@ -441,14 +495,16 @@ export function classifyIntent(
       break
 
     case 'edit-section': {
+      const outline = buildDocumentOutline(metadata.editorHtml)
       const sectionCtx = section
         ? extractSectionFromHtml(metadata.editorHtml, section)
         : ''
 
       if (sectionCtx) {
         enrichedPrompt =
-          `You are an expert academic research writer. The user wants to expand and make a specific section of their ${metadata.documentType} document thoroughly robust and comprehensive.\n\n` +
+          `You are WordPilot, an expert academic research writing co-pilot. The user wants to expand and improve a specific section of their ${metadata.documentType} document.\n\n` +
           `${docMeta}\n\n` +
+          `${outline}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
           `CURRENT SECTION CONTENT TO EXPAND:\n"""\n${sectionCtx.slice(0, 6000)}\n"""\n\n` +
@@ -459,44 +515,96 @@ export function classifyIntent(
           `- Return the complete expanded section in clean HTML (<h2/h3>, <p>, <ul>/<li>).`
       } else {
         enrichedPrompt =
-          `The user wants to edit/expand a section but the exact section wasn't found in the document.\n\n` +
+          `You are WordPilot, an expert academic writing co-pilot. The user wants to edit a section.\n\n` +
           `${docMeta}\n\n` +
+          `${outline}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `Current Document Full Structure Context:\n"""\n${metadata.editorHtml.replace(/<[^>]*>/g, ' ').slice(0, 3000)}\n"""\n\n` +
-          `Generate a comprehensive, robust version of the section requested by the user. Write 1500-2500 words in clean HTML with clear sub-headings.`
+          `The exact target section wasn't found by name. Look at the DOCUMENT STRUCTURE above and the conversation history to determine what the user wants to edit.\n` +
+          `If you can determine the target, generate a comprehensive, robust version (1500-2500 words) in clean HTML.\n` +
+          `If you're unsure, ask a brief clarification and provide clickable suggestions:\n` +
+          `<<<SUGGESTIONS>>>\n` +
+          `- Expand Chapter 1: Introduction\n` +
+          `- Expand Chapter 2: Literature Review\n` +
+          `- Expand Chapter 3: Methodology\n` +
+          `<<<END>>>`
       }
       break
     }
 
     case 'generate-section': {
+      const outline = buildDocumentOutline(metadata.editorHtml)
       const sectionCtx = section
         ? extractSectionFromHtml(metadata.editorHtml, section)
         : ''
 
       enrichedPrompt =
-        `Generate a comprehensive, robust section for this ${metadata.documentType} document.\n\n` +
+        `You are WordPilot. Generate a comprehensive, robust section for this ${metadata.documentType} document.\n\n` +
         `${docMeta}\n\n` +
+        `${outline}\n\n` +
         `${conversationCtx}` +
         `User request: "${trimmed}"\n\n` +
         (sectionCtx
           ? `Existing content in the target area for reference:\n"""\n${sectionCtx.slice(0, 3000)}\n"""\n\n`
           : '') +
-        `Write at least 500 words of rich, original academic content. Use HTML tags (<h2>, <h3>, <p>). ` +
-        `Include analysis, citations (APA format), and critical evaluation.`
+        `Write at least 1500 words of rich, original academic content. Use HTML tags (<h2>, <h3>, <p>, <ul>/<li>). ` +
+        `Include deep analysis, citations (APA format), and critical evaluation.`
       break
     }
 
-    case 'question':
+    case 'remove-section': {
+      const outline = buildDocumentOutline(metadata.editorHtml)
       enrichedPrompt =
-        `The user has a question about their document or needs guidance.\n\n` +
+        `You are WordPilot. The user wants to REMOVE/DELETE a section from their document.\n\n` +
         `${docMeta}\n\n` +
+        `${outline}\n\n` +
+        `${conversationCtx}` +
+        `User request: "${trimmed}"\n\n` +
+        `RULES:\n` +
+        `1. Look at the document structure and conversation history to identify EXACTLY which section the user wants removed.\n` +
+        `2. If you can identify the target, respond with ONLY: <<<REMOVE_SECTION>>>exact heading text<<<END>>>\n` +
+        `3. If the user says "remove that", "delete it", "get rid of that part" — look at what was most recently discussed in the conversation.\n` +
+        `4. If you're genuinely unsure, ask briefly and provide suggestions:\n` +
+        `<<<SUGGESTIONS>>>\n` +
+        `- Remove the duplicate Chapter 1 at the end\n` +
+        `- Remove Chapter 4: Conclusion\n` +
+        `- Remove the References section\n` +
+        `<<<END>>>`
+      break
+    }
+
+    case 'move-section': {
+      const outline = buildDocumentOutline(metadata.editorHtml)
+      enrichedPrompt =
+        `You are WordPilot. The user wants to MOVE or REORDER sections in their document.\n\n` +
+        `${docMeta}\n\n` +
+        `${outline}\n\n` +
+        `${conversationCtx}` +
+        `User request: "${trimmed}"\n\n` +
+        `Explain what reordering you'd recommend based on the document structure, and provide clickable options:\n` +
+        `<<<SUGGESTIONS>>>\n` +
+        `- Move Chapter 2 before Chapter 1\n` +
+        `- Swap Chapter 3 and Chapter 4\n` +
+        `<<<END>>>`
+      break
+    }
+
+    case 'question': {
+      const outline = buildDocumentOutline(metadata.editorHtml)
+      enrichedPrompt =
+        `You are WordPilot — an intelligent document co-pilot. The user has a question.\n\n` +
+        `${docMeta}\n\n` +
+        `${outline}\n\n` +
         `${conversationCtx}` +
         `User question: "${trimmed}"\n\n` +
-        `Provide a helpful, concise answer. If they're asking about document structure, reference their ` +
-        `${metadata.documentType} document type. If they need writing help, offer specific suggestions ` +
-        `and offer to generate content for them. Be conversational and helpful.`
+        `Answer concisely and helpfully. Reference the document structure above when relevant. ` +
+        `If they need action, provide clickable suggestions:\n` +
+        `<<<SUGGESTIONS>>>\n` +
+        `- Suggestion 1\n` +
+        `- Suggestion 2\n` +
+        `<<<END>>>`
       break
+    }
 
     case 'greeting':
       enrichedPrompt = '__GREETING__'
@@ -506,16 +614,30 @@ export function classifyIntent(
       enrichedPrompt = '__FORMAT__'
       break
 
-    default:
-      // Custom / general message - still enrich with context
+    default: {
+      // Smart custom handler: always inject full document outline for maximum context
+      const outline = buildDocumentOutline(metadata.editorHtml)
       enrichedPrompt =
+        `You are WordPilot — an intelligent, action-oriented academic document co-pilot. You have full awareness of the user's document.\n\n` +
         `${docMeta}\n\n` +
+        `${outline}\n\n` +
         `${conversationCtx}` +
         `User message: "${trimmed}"\n\n` +
-        `Respond helpfully. If the user is asking you to write or generate content, produce high-quality ` +
-        `academic content in HTML. If they're asking a question, answer concisely. ` +
-        `Always maintain awareness of the document context and previous conversation.`
+        `RULES:\n` +
+        `1. If the user asks to REMOVE, DELETE, or GET RID OF content, respond with ONLY: <<<REMOVE_SECTION>>>section_name<<<END>>> where section_name matches a heading from the document outline above.\n` +
+        `2. If the user asks to REPLACE one section with another, respond with the replacement HTML content directly.\n` +
+        `3. If the user asks to WRITE, GENERATE, or EXPAND content, produce high-quality academic HTML content.\n` +
+        `4. If the user's request is AMBIGUOUS or you're UNSURE what they mean, respond with a SHORT clarification question (1-2 sentences) followed by 2-4 clickable suggestion options formatted as:\n` +
+        `<<<SUGGESTIONS>>>\n` +
+        `- Suggestion text 1\n` +
+        `- Suggestion text 2\n` +
+        `- Suggestion text 3\n` +
+        `<<<END>>>\n` +
+        `5. Always consider the DOCUMENT STRUCTURE above. If the user says "remove that part" or "delete it", look at the conversation history to understand WHAT they're referring to.\n` +
+        `6. Never apologize excessively. Be direct, confident, and action-oriented like a co-pilot.\n` +
+        `7. If you generate content, return clean HTML (<h2>, <h3>, <p>, <ul>/<li>).`
       break
+    }
   }
 
   return {

@@ -157,6 +157,7 @@ export interface MobileChatViewProps {
   setWizardLineSpacing?: (spacing: string) => void
   setWizardAcademicLevel?: (level: string) => void
   onApplyFormattingStyles?: (font: string, spacing: string, level?: string) => void
+  onRemoveSection?: (sectionName: string) => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -285,7 +286,8 @@ export default function MobileChatView({
   wizardLineSpacing,
   setWizardLineSpacing,
   setWizardAcademicLevel,
-  onApplyFormattingStyles
+  onApplyFormattingStyles,
+  onRemoveSection
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -828,25 +830,72 @@ export default function MobileChatView({
         return
       }
 
-      setMessages(prev => [
-        ...prev,
-        {
+      let finalContent = simulatedAiResult
+      let choices: { id: string; label: string; icon: string; description?: string }[] | undefined
+
+      // Parse <<<SUGGESTIONS>>>...<<<END>>>
+      const suggestionsMatch = finalContent.match(/<<<SUGGESTIONS>>>([\s\S]*?)<<<END>>>/)
+      if (suggestionsMatch) {
+        finalContent = finalContent.replace(suggestionsMatch[0], '').trim()
+        const suggestionsLines = suggestionsMatch[1].trim().split('\n').filter(l => l.startsWith('-'))
+        if (suggestionsLines.length > 0) {
+          choices = suggestionsLines.map((l, i) => {
+            const text = l.replace(/^- /, '').trim()
+            return { id: `suggestion-${i}`, label: text, icon: '💡' }
+          })
+        }
+      }
+
+      // Parse <<<REMOVE_SECTION>>>section_name<<<END>>>
+      const removeMatch = finalContent.match(/<<<REMOVE_SECTION>>>(.*?)<<<END>>>/)
+      if (removeMatch) {
+        const sectionName = removeMatch[1].trim()
+        finalContent = finalContent.replace(removeMatch[0], '').trim()
+        if (onRemoveSection) {
+          onRemoveSection(sectionName)
+        }
+      }
+
+      const newMessages: ChatMessage[] = []
+
+      if (finalContent) {
+        newMessages.push({
           id: uid(),
           role: 'ai',
-          content: simulatedAiResult,
+          content: finalContent,
           timestamp: Date.now(),
           type: 'text'
-        },
-        {
+        })
+      }
+
+      if (choices && choices.length > 0) {
+        newMessages.push({
           id: uid(),
           role: 'system',
           content: '',
           timestamp: Date.now(),
-          type: 'export-card'
-        }
-      ])
+          type: 'choice-card',
+          choices,
+          onChoice: (choiceId: string) => {
+            const choice = choices!.find(c => c.id === choiceId)
+            if (choice) {
+              setInputText(choice.label)
+            }
+          }
+        })
+      }
+
+      newMessages.push({
+        id: uid(),
+        role: 'system',
+        content: '',
+        timestamp: Date.now(),
+        type: 'export-card'
+      })
+
+      setMessages(prev => [...prev, ...newMessages])
     }
-  }, [simulatedAiResult, isSimulatingAI])
+  }, [simulatedAiResult, isSimulatingAI, onRemoveSection])
 
   // ─── Send user message (Intelligence-enhanced) ──────────────
   const handleSend = () => {
@@ -959,6 +1008,8 @@ export default function MobileChatView({
       'outline': '📋 Drafting thesis outline...',
       'generate-section': '✍️ Generating section content...',
       'edit-section': '✏️ Editing section...',
+      'remove-section': '🗑️ Identifying section to remove...',
+      'move-section': '🔀 Analyzing section order...',
       'question': '💬 Analyzing your question...',
       'custom': '🤖 Processing your request...'
     }
@@ -1108,7 +1159,7 @@ export default function MobileChatView({
             {msg.choices.map(choice => (
               <button
                 key={choice.id}
-                onClick={() => handleOnboardingChoice(choice.id)}
+                onClick={() => msg.onChoice ? msg.onChoice(choice.id) : handleOnboardingChoice(choice.id)}
                 className="w-full flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-800/60 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 border border-zinc-200/60 dark:border-zinc-700/40 hover:border-indigo-300 dark:hover:border-indigo-700 rounded-xl text-left transition-all active:scale-[0.97] cursor-pointer group"
               >
                 <span className="text-lg flex-shrink-0">{choice.icon}</span>
