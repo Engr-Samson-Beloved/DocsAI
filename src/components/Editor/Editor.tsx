@@ -30,6 +30,7 @@ import {
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
+import { mountPrintDom, unmountPrintDom } from '../../utils/printPagination'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -1045,6 +1046,13 @@ interface OutlineItem {
 const STORAGE_KEY_PROJECTS = 'wordpi-writings';
 const STORAGE_KEY_ACTIVE_ID = 'wordpi-active-id';
 
+// Vertical footprint of a single on-screen page sheet: 1123px tall +
+// my-4 (16px top + 16px bottom) = 1155px. Used to size the scroll spacer
+// so the bottom of the document is never clipped by the container's
+// overflow:hidden (previously hard-coded to 1139px, which under-shot and
+// cut off the last page).
+const PAGE_SHEET_FOOTPRINT_PX = 1155;
+
 export default function Editor() {
   // Dashboard & Multi-Project Storage States
   const [showDashboard, setShowDashboard] = useState(true)
@@ -1813,7 +1821,8 @@ export default function Editor() {
     // Calculate active page mathematically to avoid forced synchronous layout thrashing
     const scrollTop = container.scrollTop
     const containerHeight = container.clientHeight
-    const pageHeightWithGap = 1139 * zoomScale
+    // Each page sheet is 1123px tall + my-4 (16px top + 16px bottom) = 1155px footprint.
+    const pageHeightWithGap = PAGE_SHEET_FOOTPRINT_PX * zoomScale
     const midScroll = scrollTop + containerHeight / 2
 
     let activePage = Math.floor(midScroll / pageHeightWithGap) + 1
@@ -2515,13 +2524,39 @@ export default function Editor() {
     if (editor && editor.storage && (editor.storage as any).page) {
       (editor.storage as any).page.docHeader = docHeader;
       (editor.storage as any).page.docFooter = docFooter;
-      
+
       // Trigger a dummy ProseMirror transaction to force all page node views to update labels
       const { state, view } = editor
       const tr = state.tr.setMeta('paginating', true)
       view.dispatch(tr)
     }
   }, [docHeader, docFooter, editor])
+
+  // Route the browser's native print (Ctrl/Cmd+P) through the same
+  // geometry-accurate print engine as the Export→PDF action, so a manual
+  // print produces identical, correctly paginated output. The handler skips
+  // rebuilding when the explicit export has already mounted its content.
+  const printStateRef = useRef({ editor, docHeader, docFooter, wizardLineSpacing })
+  printStateRef.current = { editor, docHeader, docFooter, wizardLineSpacing }
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      const mount = document.getElementById('print-mount')
+      // Only build if the explicit export path hasn't already mounted content.
+      if (mount && mount.innerHTML.trim().length > 0) return
+      const { editor: ed, docHeader: dh, docFooter: df, wizardLineSpacing: lh } = printStateRef.current
+      if (!ed) return
+      mountPrintDom(ed.getHTML(), { docHeader: dh, docFooter: df, lineHeight: lh || '2', scope: 'full' })
+    }
+    const handleAfterPrint = () => {
+      unmountPrintDom()
+    }
+    window.addEventListener('beforeprint', handleBeforePrint)
+    window.addEventListener('afterprint', handleAfterPrint)
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint)
+      window.removeEventListener('afterprint', handleAfterPrint)
+    }
+  }, [])
 
   // Load editor content on mount (multi-project active document loading)
   useEffect(() => {
@@ -2687,238 +2722,29 @@ export default function Editor() {
   }
 
 
-  // Export to PDF using browser native print engine (Fast, Searchable Vector format)
-  // Export to PDF using browser native print engine (Fast, Searchable Vector format)
+  // Export to PDF using the browser's native print engine (fast, searchable,
+  // vector output). Pagination is computed by the shared print engine so the
+  // exported PDF matches the Preview exactly: correct page count, real
+  // academic formatting, no clipped content, and no blank pages.
   const exportToPdfPrint = (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     if (!editor) return
 
-    // Create print mount point in the DOM if it doesn't exist
-    let printMount = document.getElementById('print-mount')
-    if (!printMount) {
-      printMount = document.createElement('div')
-      printMount.id = 'print-mount'
-      document.body.appendChild(printMount)
-    }
-    printMount.innerHTML = ''
-    printMount.style.display = 'none'
-
-    // Parse pages from editor HTML
-    const htmlContent = editor.getHTML()
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(htmlContent, 'text/html')
-    const pageNodes = doc.querySelectorAll('div[data-type="page"]')
-
-    // Fallback if no page nodes exist
-    let pagesToProcess: Element[] = []
-    if (pageNodes.length > 0) {
-      pagesToProcess = Array.from(pageNodes)
-    } else {
-      const tempPage = doc.createElement('div')
-      tempPage.setAttribute('data-type', 'page')
-      tempPage.innerHTML = htmlContent
-      pagesToProcess = [tempPage]
-    }
-
-    const pagesToPrint = pagesToProcess.filter((pageNode) => {
-      const isCover = pageNode.getAttribute('data-cover') === 'true' || pageNode.querySelector('div[data-cover="true"]') !== null
-      const isToc = pageNode.getAttribute('data-toc') === 'true' || pageNode.querySelector('div[data-toc="true"]') !== null
-
-      if (scope === 'cover' && !isCover) return false
-      if (scope === 'toc' && !isToc) return false
-      if (scope === 'content' && (isCover || isToc)) return false
-      return true
+    const ok = mountPrintDom(editor.getHTML(), {
+      docHeader,
+      docFooter,
+      lineHeight: wizardLineSpacing || '2',
+      scope,
     })
 
-    if (pagesToPrint.length === 0) {
+    if (!ok) {
       alert('No pages to export in the selected scope.')
       return
     }
 
-    // Track actual content page number (excluding cover)
-    let contentPageNum = 0
-
-    pagesToPrint.forEach((pageNode) => {
-      const isCover = pageNode.getAttribute('data-cover') === 'true' || pageNode.querySelector('div[data-cover="true"]') !== null
-
-      // Create page container
-      const pageSheet = document.createElement('div')
-      pageSheet.className = 'page-sheet'
-
-      if (isCover) {
-        // Cover page: render as-is with its own styling, no header/footer
-        pageSheet.style.width = '210mm'
-        pageSheet.style.minHeight = '297mm'
-        pageSheet.style.position = 'relative'
-        pageSheet.style.pageBreakAfter = 'always'
-        pageSheet.style.breakAfter = 'page'
-        pageSheet.style.boxSizing = 'border-box'
-        pageSheet.style.backgroundColor = 'white'
-        pageSheet.style.color = 'black'
-        pageSheet.style.overflow = 'hidden'
-        pageSheet.style.display = 'flex'
-        pageSheet.style.flexDirection = 'column'
-        pageSheet.style.justifyContent = 'space-between'
-        pageSheet.style.padding = '20mm'
-        pageSheet.style.textAlign = 'center'
-
-        // Use the cover page HTML as-is (preserves logo, layout, styling)
-        let coverHtml = pageNode.innerHTML || ''
-        coverHtml = coverHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        pageSheet.innerHTML = coverHtml
-
-        // Ensure all text inside cover is black
-        pageSheet.querySelectorAll('*').forEach(el => {
-          ;(el as HTMLElement).style.color = 'black'
-        })
-      } else {
-        contentPageNum++
-        // Content pages: structured layout with padding and page number
-        pageSheet.style.width = '210mm'
-        pageSheet.style.minHeight = '297mm'
-        pageSheet.style.position = 'relative'
-        pageSheet.style.pageBreakAfter = 'always'
-        pageSheet.style.breakAfter = 'page'
-        pageSheet.style.boxSizing = 'border-box'
-        pageSheet.style.backgroundColor = 'white'
-        pageSheet.style.color = 'black'
-        pageSheet.style.overflow = 'hidden'
-
-        // Create content area with proper academic margins (1 inch = 25.4mm)
-        const contentEl = document.createElement('div')
-        contentEl.className = 'page-content'
-        contentEl.style.padding = '25mm 25mm 20mm 25mm'
-        contentEl.style.fontFamily = "'Times New Roman', Times, serif"
-        contentEl.style.fontSize = '12pt'
-        contentEl.style.lineHeight = wizardLineSpacing || '2.0'
-        contentEl.style.color = 'black'
-        contentEl.style.textAlign = 'justify'
-
-        let cleanHtml = pageNode.innerHTML || ''
-        cleanHtml = cleanHtml.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        contentEl.innerHTML = cleanHtml
-
-        // Style headings
-        const headings = contentEl.querySelectorAll('h1, h2, h3, h4, h5, h6')
-        headings.forEach((h) => {
-          const htmlH = h as HTMLElement
-          htmlH.innerText = toTitleCase(htmlH.innerText)
-          htmlH.style.fontFamily = "'Times New Roman', Times, serif"
-          htmlH.style.color = 'black'
-          htmlH.style.fontWeight = 'bold'
-          htmlH.style.textAlign = 'left'
-        })
-
-        // Style paragraphs
-        const paragraphs = contentEl.querySelectorAll('p')
-        paragraphs.forEach((p) => {
-          p.style.color = 'black'
-          p.style.fontFamily = "'Times New Roman', Times, serif"
-        })
-
-        // Handle APA reference formatting
-        const hasReferences = pageNode.textContent?.trim().toLowerCase().includes('references') ||
-                              pageNode.textContent?.trim().toLowerCase().includes('bibliography')
-        if (hasReferences) {
-          paragraphs.forEach((p) => {
-            p.classList.add('apa-reference-entry')
-          })
-        }
-
-        pageSheet.appendChild(contentEl)
-
-        // Page number footer — centered, academic style
-        const footerEl = document.createElement('div')
-        footerEl.innerHTML = `<span style="font-family: 'Times New Roman', Times, serif; font-size: 10pt; color: black;">${contentPageNum}</span>`
-        footerEl.style.position = 'absolute'
-        footerEl.style.bottom = '15mm'
-        footerEl.style.left = '0'
-        footerEl.style.right = '0'
-        footerEl.style.textAlign = 'center'
-        pageSheet.appendChild(footerEl)
-      }
-
-      printMount.appendChild(pageSheet)
-    })
-
-    // Add print styles
-    const styleEl = document.createElement('style')
-    styleEl.id = 'print-mount-styles'
-    styleEl.innerHTML = `
-      #print-mount {
-        display: none;
-      }
-      @page {
-        size: A4;
-        margin: 0;
-      }
-      @media print {
-        html, body {
-          width: 210mm !important;
-          height: auto !important;
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-        body > *:not(#print-mount) {
-          display: none !important;
-        }
-        #print-mount {
-          display: block !important;
-          width: 210mm !important;
-          height: auto !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          background: white !important;
-          color: black !important;
-        }
-        .page-sheet {
-          display: block !important;
-          width: 210mm !important;
-          min-height: 297mm !important;
-          background: white !important;
-          color: black !important;
-          page-break-after: always !important;
-          break-after: page !important;
-          margin: 0 !important;
-          padding-top: 0 !important;
-        }
-        .page-sheet:last-child {
-          page-break-after: avoid !important;
-          break-after: avoid !important;
-        }
-        .page-sheet * {
-          color: black !important;
-        }
-        .page-content p {
-          text-align: justify !important;
-          text-indent: 0.5in !important;
-        }
-        .page-content h1, .page-content h2, .page-content h3, .page-content h4 {
-          text-indent: 0 !important;
-          text-align: left !important;
-        }
-        .page-content ul, .page-content ol {
-          text-indent: 0 !important;
-        }
-        .page-content li {
-          text-indent: 0 !important;
-        }
-        .apa-reference-entry {
-          padding-left: 0.5in !important;
-          text-indent: -0.5in !important;
-          margin-bottom: 0.5em !important;
-        }
-      }
-    `
-    document.head.appendChild(styleEl)
-
     window.print()
 
-    // Clean up after print dialog opens
-    setTimeout(() => {
-      if (printMount) printMount.innerHTML = ''
-      const styleElement = document.getElementById('print-mount-styles')
-      if (styleElement) styleElement.remove()
-    }, 1500)
+    // Fallback cleanup in case the afterprint event does not fire.
+    setTimeout(unmountPrintDom, 2000)
   }
 
   const applyCoverPage = (details: Partial<typeof coverDetails>) => {
@@ -6307,9 +6133,9 @@ export default function Editor() {
           {/* Document Sheet Container */}
           <div 
             onClick={() => editor.commands.focus()}
-            style={{ 
-              width: `${794 * zoomScale}px`, 
-              height: `${totalPages * 1139 * zoomScale}px`,
+            style={{
+              width: `${794 * zoomScale}px`,
+              height: `${totalPages * PAGE_SHEET_FOOTPRINT_PX * zoomScale + 8}px`,
               overflow: 'hidden'
             }}
             className="cursor-text transition-all duration-300 flex flex-col items-center justify-start relative print:w-full print:h-auto print:overflow-visible print:scale-100"

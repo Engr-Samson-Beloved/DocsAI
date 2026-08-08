@@ -1,6 +1,7 @@
 "use client"
 
 import { classifyIntent, type ConversationMessage, type DocumentMetadata } from '@/utils/chatIntelligence'
+import { paginateDocumentForPrint, printSheetCss, renderSheetHtml, type PrintPage, SHEET_WIDTH_MM, SHEET_HEIGHT_MM } from '@/utils/printPagination'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
@@ -170,34 +171,6 @@ const QUICK_ACTIONS = [
   { id: 'export', label: 'Export Document', icon: '📤', color: 'amber', action: 'export' },
 ]
 
-// ─── Helper to parse pages from stringified HTML ───────────────────
-const parsePagesFromHtml = (htmlStr: string): string[] => {
-  if (!htmlStr) return []
-  try {
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(htmlStr, 'text/html')
-    const pages = doc.querySelectorAll('div[data-type="page"]')
-    if (pages.length > 0) {
-      return Array.from(pages).map(p => p.innerHTML)
-    }
-  } catch (e) {
-    console.warn("DOMParser failed to parse preview pages:", e)
-  }
-
-  // Regex fallback: split by data-type="page" div tags
-  const pageRegex = /<div[^>]*data-type="page"[^>]*>([\s\S]*?)<\/div>/gi
-  const pages: string[] = []
-  let match
-  while ((match = pageRegex.exec(htmlStr)) !== null) {
-    pages.push(match[1])
-  }
-
-  if (pages.length === 0) {
-    return [htmlStr]
-  }
-  return pages
-}
-
 // ─── Helper to generate unique IDs ────────────────────────────────
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 
@@ -295,6 +268,8 @@ export default function MobileChatView({
   const [showPreview, setShowPreview] = useState(false)
   const [showExportSheet, setShowExportSheet] = useState(false)
   const [previewZoom, setPreviewZoom] = useState(0.4)
+  const [previewPages, setPreviewPages] = useState<PrintPage[]>([])
+  const [isPaginatingPreview, setIsPaginatingPreview] = useState(false)
   const previewContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -513,14 +488,41 @@ export default function MobileChatView({
     }, 1500)
   }, [journalPapers, selectedPaperIds, onAddJournalSources, addBotMessage])
 
+  // A4 sheet dimensions in CSS px @96dpi (matches printPagination geometry).
+  const A4_PX_WIDTH = (SHEET_WIDTH_MM * 96) / 25.4
+  const A4_PX_HEIGHT = (SHEET_HEIGHT_MM * 96) / 25.4
+
   useEffect(() => {
     if (showPreview && previewContainerRef.current) {
       const containerWidth = previewContainerRef.current.clientWidth
       const targetWidth = containerWidth - 32
-      const scale = targetWidth / 794
+      const scale = targetWidth / A4_PX_WIDTH
       setPreviewZoom(Math.max(0.2, Math.min(1.2, scale)))
     }
-  }, [showPreview])
+  }, [showPreview, A4_PX_WIDTH])
+
+  // Compute geometry-accurate print pages whenever the preview is open.
+  // This uses the SAME engine as the PDF export, so the previewed page
+  // count and formatting exactly match the exported PDF.
+  useEffect(() => {
+    if (!showPreview) return
+    setIsPaginatingPreview(true)
+    // Defer to the next frame so the modal is mounted before we measure.
+    const raf = requestAnimationFrame(() => {
+      try {
+        const pages = paginateDocumentForPrint(editorHtml || '', {
+          lineHeight: wizardLineSpacing || '2',
+        })
+        setPreviewPages(pages)
+      } catch (e) {
+        console.warn('Preview pagination failed:', e)
+        setPreviewPages([])
+      } finally {
+        setIsPaginatingPreview(false)
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [showPreview, editorHtml, wizardLineSpacing])
 
 
   // ─── Auto-scroll chat to bottom ──────────────────────────────
@@ -1843,53 +1845,54 @@ export default function MobileChatView({
               />
             </div>
 
+            {/* Page count indicator — reflects the real (exported) pagination */}
+            <div className="bg-white dark:bg-zinc-900 px-4 py-1.5 border-b border-zinc-200 dark:border-zinc-800 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 flex-shrink-0 flex items-center justify-between select-none">
+              <span>{wordCount} words</span>
+              <span>
+                {isPaginatingPreview
+                  ? 'Calculating pages…'
+                  : `${previewPages.filter(p => p.kind === 'content').length} page${previewPages.filter(p => p.kind === 'content').length !== 1 ? 's' : ''}${previewPages.some(p => p.kind === 'cover' || p.kind === 'toc') ? ' + front matter' : ''}`}
+              </span>
+            </div>
+
+            {/* Shared print-sheet styles (identical to the exported PDF) */}
+            <style dangerouslySetInnerHTML={{ __html: printSheetCss(wizardLineSpacing || '2') }} />
+
             {/* Scrollable Pages Stack Canvas */}
-            <div 
+            <div
               ref={previewContainerRef}
               className="flex-1 overflow-y-auto p-4 flex flex-col items-center gap-4 bg-zinc-100 dark:bg-zinc-950"
             >
-              {parsePagesFromHtml(editorHtml).length === 0 || !editorHtml ? (
+              {isPaginatingPreview && previewPages.length === 0 ? (
+                <div className="text-center py-20">
+                  <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                  <p className="text-xs text-zinc-550 dark:text-zinc-400 italic">Laying out pages…</p>
+                </div>
+              ) : previewPages.length === 0 || !editorHtml ? (
                 <div className="text-center py-20">
                   <FileText className="w-12 h-12 text-zinc-300 dark:text-zinc-700 mx-auto mb-2" />
                   <p className="text-xs text-zinc-550 dark:text-zinc-400 italic">No content yet. Use the chat to generate document pages.</p>
                 </div>
               ) : (
-                parsePagesFromHtml(editorHtml).map((pageHtml, index, allPages) => (
+                previewPages.map((page, index) => (
                   <div
                     key={index}
                     style={{
-                      width: `${794 * previewZoom}px`,
-                      height: `${1123 * previewZoom}px`,
+                      width: `${A4_PX_WIDTH * previewZoom}px`,
+                      height: `${A4_PX_HEIGHT * previewZoom}px`,
                       overflow: 'hidden'
                     }}
-                    className="mb-4 mx-auto relative flex-shrink-0 bg-white dark:bg-zinc-900 shadow-md border border-zinc-200 dark:border-zinc-800 rounded-sm"
+                    className="mb-1 mx-auto relative flex-shrink-0 shadow-lg rounded-sm"
                   >
                     <div
-                      className="relative bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 overflow-hidden box-border"
                       style={{
-                        width: '794px',
-                        height: '1123px',
+                        width: `${A4_PX_WIDTH}px`,
+                        height: `${A4_PX_HEIGHT}px`,
                         transform: `scale(${previewZoom})`,
                         transformOrigin: 'top left',
                       }}
-                    >
-                      {/* Page Header */}
-                      <div className="absolute top-0 left-0 right-0 h-[96px] px-[72px] flex items-end justify-between border-b border-dashed border-zinc-150 dark:border-zinc-850 pb-2 text-xs text-zinc-400 dark:text-zinc-500 font-sans pointer-events-none select-none">
-                        <span className="truncate max-w-[400px]">{docHeader}</span>
-                      </div>
-
-                      {/* Page Content Area (rendered to look like actual print sheets) */}
-                      <div
-                        className="absolute top-[96px] left-0 right-0 h-[931px] px-[72px] overflow-hidden text-left font-serif prose prose-sm max-w-none text-zinc-850 dark:text-zinc-200 [&_p]:my-1.5 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-4 [&_h1]:mb-2 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_blockquote]:border-l-3 [&_blockquote]:border-indigo-400 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-zinc-500 [&_blockquote]:my-2"
-                        dangerouslySetInnerHTML={{ __html: pageHtml }}
-                      />
-
-                      {/* Page Footer */}
-                      <div className="absolute bottom-0 left-0 right-0 h-[96px] px-[72px] flex items-start justify-between border-t border-dashed border-zinc-150 dark:border-zinc-850 pt-2 text-xs text-zinc-400 dark:text-zinc-500 font-sans pointer-events-none select-none">
-                        <span className="truncate max-w-[450px]">{docFooter}</span>
-                        <span>Page {index + 1} of {allPages.length}</span>
-                      </div>
-                    </div>
+                      dangerouslySetInnerHTML={{ __html: renderSheetHtml(page, { docHeader, docFooter }) }}
+                    />
                   </div>
                 ))
               )}

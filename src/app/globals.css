@@ -301,115 +301,44 @@ body {
   color: #6366f1;
 }
 
-/* Printing styles — consistent A4 output matching the editor canvas */
+/* ─── Printing ────────────────────────────────────────────────────
+   All PDF/print output is produced by utils/printPagination.ts, which
+   re-flows the document into geometry-accurate A4 sheets (`.wp-sheet`)
+   inside an off-screen `#print-mount` and injects its own sheet styles
+   at export time. The rules here only make sure that, at print time,
+   the live app is hidden and ONLY that generated mount is printed —
+   this is what prevents the old blank-page / clipped-content / wrong
+   page-count problems that came from printing the live editor canvas. */
 @page {
   size: A4 portrait;   /* 210mm × 297mm */
-  margin: 0;           /* Zero browser margins — our page-sheet handles its own padding */
+  margin: 0;           /* Zero browser margins — sheets own their padding */
 }
 
 @media print {
-
-  /* Hide headers, sidebars, outline, wizard, print-action controls, and legacy logo */
-  header,
-  aside,
-  button,
-  .print\:hidden,
-  .print-hidden,
-  .delete-page-btn,
-  .add-page-btn,
-  .print-hidden-override {
-    display: none !important;
-  }
-
-  /* Make sure the main layout occupies the full print space and allows overflow */
-  body, 
-  html, 
-  main, 
-  #__next,
-  .scroll-container,
-  .document-container {
+  html,
+  body {
     width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
     overflow: visible !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    background: white !important;
-    color: black !important;
-    box-shadow: none !important;
-    border: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Override fixed dimensions on container sheets */
-  .cursor-text[style] {
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-    transform: none !important;
-  }
-
-  /* Override fixed dimensions and transforms on the inner scaled container sheet */
-  .cursor-text > div[style] {
-    width: 100% !important;
-    transform: none !important;
-  }
-
-  .tiptap .page-break {
-    border-top: none !important;
-    color: transparent !important;
-    height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    font-size: 0 !important;
-    line-height: 0 !important;
-  }
-
-  /* Each page-sheet = one A4 printed page. */
-  .page-sheet {
-    width: 210mm !important;
-    height: 297mm !important;
-    position: relative !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    page-break-after: always !important;
-    break-after: page !important;
-    box-shadow: none !important;
-    border: none !important;
-    box-sizing: border-box !important;
-    background: white !important;
-    color: black !important;
-    overflow: hidden !important;
-  }
-
-  /* Hide decorative header/footer elements to avoid overlap with static content */
-  .page-sheet > div:not(.page-content) {
+  /* Hide the entire live app; show only the generated print mount. */
+  body > *:not(#print-mount) {
     display: none !important;
   }
 
-  .page-sheet * {
-    font-family: 'Times New Roman', Times, serif !important;
-    font-size: 12pt !important;
-    line-height: 1.5 !important;
-    color: black !important;
-    background-color: transparent !important;
-    box-shadow: none !important;
-  }
-
-  .page-sheet h1,
-  .page-sheet h2,
-  .page-sheet h3,
-  .page-sheet h4,
-  .page-sheet h5,
-  .page-sheet h6 {
-    font-size: 12pt !important;
-    font-weight: bold !important;
-    color: black !important;
-  }
-
-  .apa-reference-entry {
-    padding-left: 0.5in !important;
-    text-indent: -0.5in !important;
-    margin-bottom: 0.5em !important;
+  #print-mount {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
   }
 }
 
