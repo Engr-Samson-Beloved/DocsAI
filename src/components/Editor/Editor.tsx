@@ -30,7 +30,7 @@ import {
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
-import { mountPrintDom, unmountPrintDom } from '../../utils/printPagination'
+import { buildStandalonePrintDocument } from '../../utils/pdfDocument'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -2532,32 +2532,6 @@ export default function Editor() {
     }
   }, [docHeader, docFooter, editor])
 
-  // Route the browser's native print (Ctrl/Cmd+P) through the same
-  // geometry-accurate print engine as the Export→PDF action, so a manual
-  // print produces identical, correctly paginated output. The handler skips
-  // rebuilding when the explicit export has already mounted its content.
-  const printStateRef = useRef({ editor, docHeader, docFooter, wizardLineSpacing })
-  printStateRef.current = { editor, docHeader, docFooter, wizardLineSpacing }
-  useEffect(() => {
-    const handleBeforePrint = () => {
-      const mount = document.getElementById('print-mount')
-      // Only build if the explicit export path hasn't already mounted content.
-      if (mount && mount.innerHTML.trim().length > 0) return
-      const { editor: ed, docHeader: dh, docFooter: df, wizardLineSpacing: lh } = printStateRef.current
-      if (!ed) return
-      mountPrintDom(ed.getHTML(), { docHeader: dh, docFooter: df, lineHeight: lh || '2', scope: 'full' })
-    }
-    const handleAfterPrint = () => {
-      unmountPrintDom()
-    }
-    window.addEventListener('beforeprint', handleBeforePrint)
-    window.addEventListener('afterprint', handleAfterPrint)
-    return () => {
-      window.removeEventListener('beforeprint', handleBeforePrint)
-      window.removeEventListener('afterprint', handleAfterPrint)
-    }
-  }, [])
-
   // Load editor content on mount (multi-project active document loading)
   useEffect(() => {
     if (!editor) return
@@ -2722,29 +2696,63 @@ export default function Editor() {
   }
 
 
-  // Export to PDF using the browser's native print engine (fast, searchable,
-  // vector output). Pagination is computed by the shared print engine so the
-  // exported PDF matches the Preview exactly: correct page count, real
-  // academic formatting, no clipped content, and no blank pages.
-  const exportToPdfPrint = (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
+  // Export to PDF. The app generates the PDF itself via a server-side
+  // Chromium renderer (/api/export/pdf) — it does NOT use the browser's
+  // Print dialog, so there is no automatic URL/date header/footer, and the
+  // output (fonts, spacing, page breaks, page numbers) is fully controlled
+  // by our HTML/CSS and identical for every user. Chromium paginates the
+  // document natively, which handles long docs, tables, and images cleanly.
+  const exportToPdfPrint = async (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     if (!editor) return
 
-    const ok = mountPrintDom(editor.getHTML(), {
-      docHeader,
-      docFooter,
-      lineHeight: wizardLineSpacing || '2',
-      scope,
-    })
+    const safeName = (documentTitle || 'document').replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'document'
 
-    if (!ok) {
-      alert('No pages to export in the selected scope.')
-      return
+    setLoadingMessage('Generating your PDF…')
+    setIsExporting(true)
+    try {
+      const html = buildStandalonePrintDocument(editor.getHTML(), {
+        docHeader,
+        docFooter,
+        lineHeight: wizardLineSpacing || '2',
+        scope,
+        marginMm: 25.4,
+      })
+
+      const res = await fetch('/api/export/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html,
+          filename: `${safeName}.pdf`,
+          docHeader,
+          docFooter,
+          marginMm: 25.4,
+        }),
+      })
+
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(detail || `Server responded ${res.status}`)
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${safeName}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+    } catch (err) {
+      console.error('PDF export failed:', err)
+      alert(
+        'PDF export failed. Please try again.\n\n' +
+          (err instanceof Error ? err.message : String(err))
+      )
+    } finally {
+      setIsExporting(false)
     }
-
-    window.print()
-
-    // Fallback cleanup in case the afterprint event does not fire.
-    setTimeout(unmountPrintDom, 2000)
   }
 
   const applyCoverPage = (details: Partial<typeof coverDetails>) => {
