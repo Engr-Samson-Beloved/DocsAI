@@ -38,11 +38,23 @@ async function launchBrowser() {
   const onServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_VERSION)
 
   if (onServerless) {
-    const chromium = (await import('@sparticuz/chromium')).default
+    const chromium = (await import('@sparticuz/chromium-min')).default
+    // Disable WebGL/graphics stack — not needed for PDF and avoids pulling
+    // extra native graphics libraries.
+    chromium.setGraphicsMode = false
+
+    // chromium-min ships NO binary; it downloads a self-contained pack
+    // (Chromium + ALL shared libs incl. libnss3) to /tmp at runtime. The
+    // pack version MUST match the installed @sparticuz/chromium-min version.
+    // Override with CHROMIUM_PACK_URL (e.g. a self-hosted copy) for speed.
+    const packUrl =
+      process.env.CHROMIUM_PACK_URL ||
+      'https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar'
+
     return puppeteer.launch({
       args: [...chromium.args, '--font-render-hinting=none'],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(packUrl),
       headless: true,
     })
   }

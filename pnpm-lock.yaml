@@ -11,9 +11,9 @@ importers:
       '@google/generative-ai':
         specifier: ^0.24.1
         version: 0.24.1
-      '@sparticuz/chromium':
-        specifier: ^131.0.1
-        version: 131.0.1
+      '@sparticuz/chromium-min':
+        specifier: 131.0.0
+        version: 131.0.0
       '@supabase/supabase-js':
         specifier: ^2.110.1
         version: 2.110.1
@@ -592,8 +592,8 @@ packages:
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
 
-  '@sparticuz/chromium@131.0.1':
-    resolution: {integrity: sha512-VfmHkQmb/Px0zjwdSQwjRMwFw63Qfj+g4Giumz4jiAGEpXHgIZk6xEwlUz6yiUHVDveK2TEgMR2MR6I3okOE7w==}
+  '@sparticuz/chromium-min@131.0.0':
+    resolution: {integrity: sha512-Ko5JDnWYPM95jZTV9A8lGF0uF3pgZIVLQMpBBDEMiKV9jVJYh53l4DqxzpZuHPL1BXT2NlWjthOr10xeDQDnCQ==}
     engines: {node: '>= 16'}
 
   '@supabase/auth-js@2.110.1':
@@ -3371,7 +3371,7 @@ snapshots:
 
   '@rtsao/scc@1.1.0': {}
 
-  '@sparticuz/chromium@131.0.1':
+  '@sparticuz/chromium-min@131.0.0':
     dependencies:
       follow-redirects: 1.16.0
       tar-fs: 3.1.3
