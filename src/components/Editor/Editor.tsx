@@ -2872,21 +2872,31 @@ export default function Editor() {
     }, 1500)
   }
 
-  const applyCoverPage = (details: typeof coverDetails) => {
+  const applyCoverPage = (details: Partial<typeof coverDetails>) => {
     if (!editor) return
     
+    const titleText = details.title || documentTitle || 'UNTITLED PROJECT'
+    const studentNameText = details.studentName || 'STUDENT NAME'
+    const matricNoText = details.matricNo || 'MATRIC NO'
+    const departmentText = details.department || 'COMPUTER SCIENCE'
+    const facultyText = details.faculty || 'SCIENCE'
+    const institutionText = details.institution || 'UNIVERSITY'
+    const supervisorNameText = details.supervisorName || 'SUPERVISOR NAME'
+    const academicSessionText = details.academicSession || `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`
+    const submissionDateText = details.submissionDate || `${new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase()} ${new Date().getFullYear()}`
+
     const coverPageHtml = `
 <div data-type="page" data-cover="true" style="page-break-after: always; break-after: page; display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; text-align: center; padding: 40mm 20mm 40mm 20mm;">
-  <h1 style="font-size: 24pt; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; line-height: 1.3; font-family: 'Times New Roman', Times, serif; text-align: center;">${details.title}</h1>
+  <h1 style="font-size: 24pt; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; line-height: 1.3; font-family: 'Times New Roman', Times, serif; text-align: center;">${titleText}</h1>
   <p style="font-size: 14pt; margin-top: 60px; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">BY</p>
-  <p style="font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">${details.studentName}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">(${details.matricNo})</p>
+  <p style="font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; font-family: 'Times New Roman', Times, serif; text-align: center;">${studentNameText}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">(${matricNoText})</p>
   <p style="font-size: 12pt; text-transform: uppercase; line-height: 1.6; max-width: 550px; margin: 60px auto; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold;">
-    A PROJECT REPORT SUBMITTED TO THE DEPARTMENT OF ${details.department}, FACULTY OF ${details.faculty}, ${details.institution} IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE AWARD OF THE DEGREE OF BACHELOR OF SCIENCE.
+    A PROJECT REPORT SUBMITTED TO THE DEPARTMENT OF ${departmentText}, FACULTY OF ${facultyText}, ${institutionText} IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE AWARD OF THE DEGREE OF BACHELOR OF SCIENCE.
   </p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold; margin-top: 60px;">SUPERVISOR: ${details.supervisorName}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; margin-top: 30px; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SESSION: ${details.academicSession}</p>
-  <p style="font-size: 14pt; text-transform: uppercase; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SUBMISSION DATE: ${details.submissionDate}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-family: 'Times New Roman', Times, serif; text-align: center; font-weight: bold; margin-top: 60px;">SUPERVISOR: ${supervisorNameText}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; margin-top: 30px; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SESSION: ${academicSessionText}</p>
+  <p style="font-size: 14pt; text-transform: uppercase; font-weight: bold; font-family: 'Times New Roman', Times, serif; text-align: center;">SUBMISSION DATE: ${submissionDateText}</p>
 </div>
 `
     const currentContent = editor.getHTML()
@@ -2912,6 +2922,22 @@ export default function Editor() {
     editor.commands.setContent(newContent)
     setIsSaved(false)
     setShowCoverPageModal(false)
+
+    // Save project snapshot immediately to IndexedDB
+    if (activeProjectId) {
+      const contentJSON = editor.getJSON()
+      const project = projects.find(p => p.id === activeProjectId)
+      if (project) {
+        const updatedProj = {
+          ...project,
+          title: titleText,
+          content: JSON.stringify(contentJSON),
+          updatedAt: Date.now()
+        }
+        setProjects(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p))
+        saveProject(updatedProj).catch(e => console.error("Failed to save project with cover page", e))
+      }
+    }
 
     setTimeout(() => {
       runPagination(editor)
@@ -5385,6 +5411,7 @@ export default function Editor() {
             onClearInitialTemplate={() => setPendingTemplate(null)}
             triggerUndo={triggerUndo}
             triggerRedo={triggerRedo}
+            onApplyCoverPage={applyCoverPage}
           />
         ) : (
         <>

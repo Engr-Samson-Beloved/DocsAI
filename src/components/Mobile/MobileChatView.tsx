@@ -127,6 +127,19 @@ export interface MobileChatViewProps {
   // Undo / Redo
   triggerUndo?: () => void
   triggerRedo?: () => void
+
+  // Cover page generator callback
+  onApplyCoverPage?: (details: {
+    title?: string
+    studentName?: string
+    matricNo?: string
+    department?: string
+    faculty?: string
+    institution?: string
+    supervisorName?: string
+    academicSession?: string
+    submissionDate?: string
+  }) => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -247,7 +260,8 @@ export default function MobileChatView({
   initialTemplate,
   onClearInitialTemplate,
   triggerUndo,
-  triggerRedo
+  triggerRedo,
+  onApplyCoverPage
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -529,6 +543,17 @@ export default function MobileChatView({
     if (formData.supervisorName) setSupervisorName?.(formData.supervisorName)
     setWizardDocType?.(template as any)
 
+    // Generate & apply front cover page HTML directly to the editor document
+    onApplyCoverPage?.({
+      title: formData.topic || documentTitle || 'UNTITLED PROJECT',
+      studentName: formData.studentName || 'STUDENT NAME',
+      matricNo: formData.matricNumber || 'MATRIC NO',
+      department: formData.department || 'COMPUTER SCIENCE',
+      faculty: 'SCIENCE',
+      institution: 'UNIVERSITY',
+      supervisorName: formData.supervisorName || 'SUPERVISOR NAME'
+    })
+
     // Show confirmation
     const infoSummary = [
       formData.topic && `📌 Topic: ${formData.topic}`,
@@ -544,12 +569,12 @@ export default function MobileChatView({
     ])
 
     setTimeout(() => {
-      addBotMessage(`Great! Your cover page details are saved. Now let's set up the content. 📖`)
+      addBotMessage(`Great! Your front cover page has been created and applied directly to your document. 📄✨ Now let me ask — ready to set up your reference sources or generate chapters? 📖`)
     }, 500)
 
     // Move to sources step
     promptForSources()
-  }, [formData, wizardDocType, addBotMessage, promptForSources, setDocumentTitle, setWizardTopic, setStudentName, setMatricNumber, setSupervisorName, setWizardDocType]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [formData, wizardDocType, addBotMessage, promptForSources, setDocumentTitle, setWizardTopic, setStudentName, setMatricNumber, setSupervisorName, setWizardDocType, onApplyCoverPage, documentTitle]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle sources form completion
   const handleSourcesComplete = useCallback(() => {
