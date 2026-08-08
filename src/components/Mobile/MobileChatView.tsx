@@ -30,7 +30,9 @@ import {
   FileEdit,
   Layers,
   Loader2,
-  Bot
+  Bot,
+  Undo2,
+  Redo2
 } from 'lucide-react'
 import { Project } from '../Dashboard/Dashboard'
 
@@ -121,6 +123,10 @@ export interface MobileChatViewProps {
   // Guided template onboarding
   initialTemplate?: 'Seminar' | 'Proposal' | 'Project' | 'Custom' | null
   onClearInitialTemplate?: () => void
+
+  // Undo / Redo
+  triggerUndo?: () => void
+  triggerRedo?: () => void
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -239,7 +245,9 @@ export default function MobileChatView({
   onOpenPricingModal,
   userSubscription,
   initialTemplate,
-  onClearInitialTemplate
+  onClearInitialTemplate,
+  triggerUndo,
+  triggerRedo
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -723,43 +731,51 @@ export default function MobileChatView({
     if (msg.type === 'export-card') {
       return (
         <div key={msg.id} className="flex justify-start px-4 mb-3 chat-bubble-enter">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3.5 max-w-[85%] space-y-2.5 shadow-sm">
-            <div className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-200">
-              <FileText className="w-4 h-4 text-indigo-500" />
-              <span>Document Ready</span>
-            </div>
-            <div className="flex items-center gap-3 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <span>{wordCount} words</span>
-              <span className="w-1 h-1 bg-zinc-300 dark:bg-zinc-600 rounded-full" />
-              <span>{totalPages} pages</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowPreview(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                Preview
-              </button>
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-2.5 shadow-sm">
+            <div className="flex items-center gap-1.5">
+              {/* Apply */}
               <button
                 onClick={() => {
                   insertAiContent()
                   setMessages(prev => [
                     ...prev,
-                    { id: uid(), role: 'system', content: '✅ Content inserted into document.', timestamp: Date.now(), type: 'status' }
+                    { id: uid(), role: 'system', content: '✅ Content applied to document.', timestamp: Date.now(), type: 'status' }
                   ])
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
               >
                 <Check className="w-3.5 h-3.5" />
                 Apply
               </button>
+              {/* Undo */}
               <button
-                onClick={() => setShowExportSheet(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-semibold active:scale-[0.97] transition-transform"
+                onClick={() => {
+                  triggerUndo?.()
+                  setMessages(prev => [
+                    ...prev,
+                    { id: uid(), role: 'system', content: '↩️ Undone.', timestamp: Date.now(), type: 'status' }
+                  ])
+                }}
+                className="flex items-center gap-1 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl text-xs font-medium active:scale-[0.97] transition-transform"
+                title="Undo"
               >
-                <Download className="w-3.5 h-3.5" />
-                Export
+                <Undo2 className="w-3.5 h-3.5" />
+                Undo
+              </button>
+              {/* Redo */}
+              <button
+                onClick={() => {
+                  triggerRedo?.()
+                  setMessages(prev => [
+                    ...prev,
+                    { id: uid(), role: 'system', content: '↪️ Redone.', timestamp: Date.now(), type: 'status' }
+                  ])
+                }}
+                className="flex items-center gap-1 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 rounded-xl text-xs font-medium active:scale-[0.97] transition-transform"
+                title="Redo"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+                Redo
               </button>
             </div>
           </div>

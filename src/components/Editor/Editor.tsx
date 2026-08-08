@@ -4339,7 +4339,11 @@ export default function Editor() {
   const insertAiContent = () => {
     if (simulatedAiResult) {
       const formatted = formatAiResponseToHtml(simulatedAiResult)
-      editor.chain().focus().insertContent(formatted).run()
+      // Append at the END of the document to avoid overwriting existing content
+      // (e.g., front cover, TOC, existing chapters). This is critical for mobile
+      // where cursor position is unpredictable.
+      const endPos = editor.state.doc.content.size
+      editor.chain().focus().setTextSelection(endPos).insertContent(formatted).run()
       setSimulatedAiResult('')
       setAiPrompt('')
       setAiSelectedText('')
@@ -5378,6 +5382,8 @@ export default function Editor() {
             userSubscription={userSubscription}
             initialTemplate={pendingTemplate}
             onClearInitialTemplate={() => setPendingTemplate(null)}
+            triggerUndo={triggerUndo}
+            triggerRedo={triggerRedo}
           />
         ) : (
         <>
