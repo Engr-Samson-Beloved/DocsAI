@@ -77,7 +77,7 @@ function documentCss(lineHeight: string, marginMm: number): string {
       line-height: ${lineHeight};
     }
 
-    /* The renderer sets the printable margins via Puppeteer's `margin`
+    /* The renderer sets the printable margins via Puppeteer's margin
        option, so @page only fixes the sheet size here. */
     @page { size: A4 portrait; }
 
