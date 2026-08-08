@@ -30,7 +30,7 @@ import {
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
-import { buildStandalonePrintDocument } from '../../utils/pdfDocument'
+import { exportPdfClient } from '../../utils/clientPdf'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -2696,12 +2696,11 @@ export default function Editor() {
   }
 
 
-  // Export to PDF. The app generates the PDF itself via a server-side
-  // Chromium renderer (/api/export/pdf) — it does NOT use the browser's
-  // Print dialog, so there is no automatic URL/date header/footer, and the
-  // output (fonts, spacing, page breaks, page numbers) is fully controlled
-  // by our HTML/CSS and identical for every user. Chromium paginates the
-  // document natively, which handles long docs, tables, and images cleanly.
+  // Export to PDF. Generated entirely in the browser (html2pdf.js →
+  // html2canvas + jsPDF) — NOT the browser Print dialog — so there is no
+  // automatic URL/date header/footer, nothing to fail at deploy time, and
+  // formatting (fonts, spacing, page breaks, page numbers) is controlled by
+  // our shared academic stylesheet.
   const exportToPdfPrint = async (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
     if (!editor) return
 
@@ -2710,40 +2709,14 @@ export default function Editor() {
     setLoadingMessage('Generating your PDF…')
     setIsExporting(true)
     try {
-      const html = buildStandalonePrintDocument(editor.getHTML(), {
+      await exportPdfClient(editor.getHTML(), {
+        filename: `${safeName}.pdf`,
         docHeader,
         docFooter,
         lineHeight: wizardLineSpacing || '2',
         scope,
         marginMm: 25.4,
       })
-
-      const res = await fetch('/api/export/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          html,
-          filename: `${safeName}.pdf`,
-          docHeader,
-          docFooter,
-          marginMm: 25.4,
-        }),
-      })
-
-      if (!res.ok) {
-        const detail = await res.text().catch(() => '')
-        throw new Error(detail || `Server responded ${res.status}`)
-      }
-
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${safeName}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 4000)
     } catch (err) {
       console.error('PDF export failed:', err)
       alert(

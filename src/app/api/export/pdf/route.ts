@@ -1,144 +1,16 @@
-import type { NextRequest } from 'next/server'
-
 /**
- * POST /api/export/pdf
- * ------------------------------------------------------------------
- * Renders a self-contained HTML document (built by the client via
- * utils/pdfDocument.buildStandalonePrintDocument) into a PDF using a
- * headless Chromium instance, and returns it as a downloadable file.
+ * Deprecated endpoint.
  *
- * Why server-side Chromium instead of the browser's Print dialog:
- *  - The browser's Print → Save as PDF injects an automatic URL/date
- *    header and footer that the user often cannot disable. Rendering on
- *    the server with `displayHeaderFooter` + our OWN templates means the
- *    output contains ONLY the header/footer/page-numbers we specify.
- *  - Output is deterministic for every user (same engine, same fonts),
- *    independent of the user's OS/browser settings.
- *  - Full HTML/CSS fidelity: real page-break control, tables spanning
- *    pages, images, alignment, spacing, vector (selectable) text.
- *
- * Vercel notes:
- *  - Runs on the Node.js runtime (NOT Edge) — Chromium needs Node.
- *  - Uses @sparticuz/chromium (a Lambda/Vercel-friendly Chromium build)
- *    in production and a locally installed Chrome in development.
- *  - `next.config` marks these as server-external packages so Next does
- *    not try to bundle the native binary.
+ * PDF export now happens entirely client-side (see utils/clientPdf.ts via
+ * the editor's export action), so this server route is no longer used. It
+ * is kept as a harmless stub to avoid a dangling import; safe to delete.
  */
 
 export const runtime = 'nodejs'
-export const maxDuration = 60 // seconds — allow for cold start + render
-export const dynamic = 'force-dynamic'
 
-function esc(s: string): string {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-async function launchBrowser() {
-  const puppeteer = (await import('puppeteer-core')).default
-  const onServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_VERSION)
-
-  if (onServerless) {
-    const chromium = (await import('@sparticuz/chromium-min')).default
-    // Disable WebGL/graphics stack — not needed for PDF and avoids pulling
-    // extra native graphics libraries.
-    chromium.setGraphicsMode = false
-
-    // chromium-min ships NO binary; it downloads a self-contained pack
-    // (Chromium + ALL shared libs incl. libnss3) to /tmp at runtime. The
-    // pack version MUST match the installed @sparticuz/chromium-min version.
-    // Override with CHROMIUM_PACK_URL (e.g. a self-hosted copy) for speed.
-    const packUrl =
-      process.env.CHROMIUM_PACK_URL ||
-      'https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar'
-
-    return puppeteer.launch({
-      args: [...chromium.args, '--font-render-hinting=none'],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(packUrl),
-      headless: true,
-    })
-  }
-
-  // Local development: use an installed Chrome/Chromium. Set CHROME_PATH
-  // to point at a specific binary, otherwise the 'chrome' channel is used.
-  const executablePath = process.env.CHROME_PATH
-  return puppeteer.launch({
-    headless: true,
-    ...(executablePath ? { executablePath } : { channel: 'chrome' as const }),
-  })
-}
-
-export async function POST(req: NextRequest) {
-  let browser: Awaited<ReturnType<typeof launchBrowser>> | undefined
-
-  try {
-    const body = await req.json()
-    const html: string = body?.html
-    const filename: string = (body?.filename || 'document.pdf').toString().replace(/[\r\n"]/g, '')
-    const docHeader: string = (body?.docHeader || '').toString()
-    const docFooter: string = (body?.docFooter || '').toString()
-    const marginMm: number = typeof body?.marginMm === 'number' ? body.marginMm : 25.4
-
-    if (!html || typeof html !== 'string') {
-      return new Response('Missing "html" in request body.', { status: 400 })
-    }
-
-    const margin = `${marginMm}mm`
-
-    browser = await launchBrowser()
-    const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 })
-    await page.emulateMediaType('print')
-    // Make sure web fonts (Tinos) are loaded before rendering.
-    try {
-      await page.evaluate(async () => {
-        const d = document as Document & { fonts?: { ready?: Promise<unknown> } }
-        if (d.fonts && d.fonts.ready) await d.fonts.ready
-      })
-    } catch {
-      /* non-fatal */
-    }
-
-    // Our own header/footer templates → NO automatic URL/date. Page
-    // numbers via the built-in `.pageNumber` class Puppeteer substitutes.
-    const headerTemplate = `<div style="width:100%; font-family:'Tinos','Times New Roman',serif; font-size:9pt; color:#000; padding:0 ${margin};">${
-      docHeader ? `<span>${esc(docHeader)}</span>` : '&nbsp;'
-    }</div>`
-    const footerTemplate = `<div style="width:100%; font-family:'Tinos','Times New Roman',serif; font-size:10pt; color:#000; padding:0 ${margin}; display:flex; justify-content:space-between; align-items:center;"><span>${esc(
-      docFooter
-    )}</span><span class="pageNumber" style="margin:0 auto;"></span><span></span></div>`
-
-    const pdfBytes = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate,
-      margin: { top: margin, bottom: margin, left: margin, right: margin },
-      preferCSSPageSize: false,
-    })
-
-    await browser.close()
-    browser = undefined
-
-    return new Response(Buffer.from(pdfBytes), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Cache-Control': 'no-store',
-      },
-    })
-  } catch (err: unknown) {
-    if (browser) {
-      try {
-        await browser.close()
-      } catch {
-        /* ignore */
-      }
-    }
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[export/pdf] failed:', message)
-    return new Response(`PDF generation failed: ${message}`, { status: 500 })
-  }
+export async function POST() {
+  return new Response(
+    'PDF export is now generated client-side; this endpoint is no longer used.',
+    { status: 410, headers: { 'Content-Type': 'text/plain' } }
+  )
 }

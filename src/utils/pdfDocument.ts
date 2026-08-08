@@ -56,7 +56,7 @@ function isToc(el: Element): boolean {
  * (headings never orphaned, tables/images never split, manual breaks
  * honoured) rather than by pre-splitting the content.
  */
-function documentCss(lineHeight: string, marginMm: number): string {
+export function documentCss(lineHeight: string, marginMm: number): string {
   // Usable page height for the cover's vertical centering.
   const coverMinHeight = `calc(297mm - ${marginMm * 2}mm)`
   return `
@@ -167,16 +167,25 @@ function documentCss(lineHeight: string, marginMm: number): string {
   `
 }
 
+/** Result of splitting the document into printable fragments. */
+export interface PrintFragments {
+  /** the academic stylesheet (no <style> wrapper) */
+  css: string
+  /** the body inner HTML (cover + toc + flowing content) */
+  body: string
+  /** whether a cover page is present (used to skip its page number) */
+  hasCover: boolean
+}
+
 /**
- * Build the complete standalone HTML document for the PDF renderer.
- * Runs in the browser (uses DOMParser).
+ * Split the editor HTML into { css, body, hasCover }. Shared by both the
+ * server renderer and the client-side html2pdf export so they produce
+ * identical formatting. Runs in the browser (uses DOMParser).
  */
-export function buildStandalonePrintDocument(fullHtml: string, opts: BuildDocumentOptions = {}): string {
+export function buildPrintFragments(fullHtml: string, opts: BuildDocumentOptions = {}): PrintFragments {
   const lineHeight = opts.lineHeight || '2'
   const scope = opts.scope || 'full'
   const marginMm = opts.marginMm ?? 25.4
-  const baseHref =
-    opts.baseHref || (typeof window !== 'undefined' ? window.location.origin : '')
 
   const parser = new DOMParser()
   const doc = parser.parseFromString(fullHtml || '', 'text/html')
@@ -218,10 +227,27 @@ export function buildStandalonePrintDocument(fullHtml: string, opts: BuildDocume
     }
   }
 
-  const bodyInner =
+  const body =
     coverSections.join('') +
     tocSections.join('') +
-    (contentParts.length ? `<main class="content">${contentParts.join('')}</main>` : '')
+    (contentParts.length ? `<main class="content">${contentParts.join('')}</main>` : '') ||
+    '<main class="content"><p></p></main>'
+
+  return {
+    css: documentCss(lineHeight, marginMm),
+    body,
+    hasCover: coverSections.length > 0,
+  }
+}
+
+/**
+ * Build a complete standalone HTML document (kept for any server-side or
+ * download-as-HTML use).
+ */
+export function buildStandalonePrintDocument(fullHtml: string, opts: BuildDocumentOptions = {}): string {
+  const { css, body } = buildPrintFragments(fullHtml, opts)
+  const baseHref =
+    opts.baseHref || (typeof window !== 'undefined' ? window.location.origin : '')
 
   return `<!doctype html>
 <html lang="en">
@@ -229,8 +255,8 @@ export function buildStandalonePrintDocument(fullHtml: string, opts: BuildDocume
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 ${baseHref ? `<base href="${baseHref.replace(/"/g, '&quot;')}/" />` : ''}
-<style>${documentCss(lineHeight, marginMm)}</style>
+<style>${css}</style>
 </head>
-<body>${bodyInner || '<main class="content"><p></p></main>'}</body>
+<body>${body}</body>
 </html>`
 }
