@@ -1,5 +1,7 @@
 "use client"
 
+import { classifyIntent, type ConversationMessage, type DocumentMetadata } from '@/utils/chatIntelligence'
+
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Send,
@@ -562,7 +564,7 @@ export default function MobileChatView({
     }
   }, [simulatedAiResult, isSimulatingAI])
 
-  // ─── Send user message ───────────────────────────────────────
+  // ─── Send user message (Intelligence-enhanced) ──────────────
   const handleSend = () => {
     const text = inputText.trim()
     if (!text || isSimulatingAI) return
@@ -578,10 +580,66 @@ export default function MobileChatView({
         type: 'text'
       }
     ])
-
-    // Set the AI prompt and trigger custom action
-    setAiPrompt(text)
     setInputText('')
+
+    // ── Build conversation history for intent classifier ──
+    const conversationHistory: ConversationMessage[] = messages
+      .filter(m => (m.role === 'user' || m.role === 'ai') && m.content?.trim())
+      .map(m => ({ role: m.role as 'user' | 'ai', content: m.content }))
+    // Add the current message to history
+    conversationHistory.push({ role: 'user', content: text })
+
+    // ── Build document metadata ──
+    const docMetadata: DocumentMetadata = {
+      title: documentTitle || 'Untitled',
+      documentType: wizardDocType || 'Custom',
+      academicLevel: wizardAcademicLevel || 'Undergraduate',
+      wordCount: wordCount,
+      totalPages: totalPages,
+      editorHtml: editorHtml || ''
+    }
+
+    // ── Classify intent ──
+    const classified = classifyIntent(text, conversationHistory, docMetadata)
+
+    // ── Route by classified intent ──
+    if (classified.action === 'export') {
+      setShowExportSheet(true)
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'ai', content: 'Opening export options for you...', timestamp: Date.now(), type: 'text' }
+      ])
+      return
+    }
+
+    if (classified.action === 'blueprint') {
+      onGenerateBlueprint()
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'system', content: `Generating full document blueprint for **"${documentTitle}"**...`, timestamp: Date.now(), type: 'status' }
+      ])
+      return
+    }
+
+    // For all other intents, use the enriched prompt
+    setAiPrompt(classified.enrichedPrompt)
+
+    // Add a contextual status message so user knows what action was detected
+    const intentLabels: Record<string, string> = {
+      'humanize': '🧠 Humanizing content...',
+      'rephrase': '🔄 Rephrasing academically...',
+      'intro': '📝 Generating introduction...',
+      'outline': '📋 Drafting thesis outline...',
+      'generate-section': '✍️ Generating section content...',
+      'edit-section': '✏️ Editing section...',
+      'question': '💬 Analyzing your question...',
+      'custom': '🤖 Processing your request...'
+    }
+    const statusLabel = intentLabels[classified.action] || intentLabels['custom']
+    setMessages(prev => [
+      ...prev,
+      { id: uid(), role: 'system', content: statusLabel, timestamp: Date.now(), type: 'status' }
+    ])
 
     // Trigger AI action after a tick so aiPrompt is set
     setTimeout(() => {
@@ -589,7 +647,7 @@ export default function MobileChatView({
     }, 50)
   }
 
-  // ─── Handle quick action chip tap ────────────────────────────
+  // ─── Handle quick action chip tap (Intelligence-enhanced) ────
   const handleQuickAction = (action: string) => {
     if (action === 'export') {
       setShowExportSheet(true)
@@ -603,7 +661,7 @@ export default function MobileChatView({
         {
           id: uid(),
           role: 'system',
-          content: `✨ Generating full document blueprint for **"${documentTitle}"**...`,
+          content: `Generating full document blueprint for **"${documentTitle}"**...`,
           timestamp: Date.now(),
           type: 'status'
         }
@@ -624,6 +682,29 @@ export default function MobileChatView({
           type: 'text'
         }
       ])
+    }
+
+    // For humanize/rephrase chips, use the intelligence engine to build a
+    // context-enriched prompt instead of requiring editor text selection
+    if (action === 'humanize' || action === 'rephrase') {
+      const conversationHistory: ConversationMessage[] = messages
+        .filter(m => (m.role === 'user' || m.role === 'ai') && m.content?.trim())
+        .map(m => ({ role: m.role as 'user' | 'ai', content: m.content }))
+      const docMetadata: DocumentMetadata = {
+        title: documentTitle || 'Untitled',
+        documentType: wizardDocType || 'Custom',
+        academicLevel: wizardAcademicLevel || 'Undergraduate',
+        wordCount, totalPages,
+        editorHtml: editorHtml || ''
+      }
+      const classified = classifyIntent(
+        action === 'humanize' ? 'Humanize my document text' : 'Rephrase my text academically',
+        conversationHistory,
+        docMetadata
+      )
+      setAiPrompt(classified.enrichedPrompt)
+      setTimeout(() => handleAiAction('custom'), 50)
+      return
     }
 
     handleAiAction(action)
