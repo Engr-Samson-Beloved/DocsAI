@@ -427,7 +427,7 @@ function isToc(el: Element): boolean {
 }
 
 // ─── document assembly ──────────────────────────────────────────────
-function buildDocument(fullHtml: string, opts: ReactPdfOptions): React.ReactElement {
+function buildDocument(fullHtml: string, opts: ReactPdfOptions) {
   const scope = opts.scope || 'full'
   const lineHeight = typeof opts.lineHeight === 'number' ? opts.lineHeight : parseFloat(String(opts.lineHeight || '2')) || 2
   const ctx: BlockCtx = { lineHeight }
