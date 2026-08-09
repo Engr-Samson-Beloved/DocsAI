@@ -3817,6 +3817,16 @@ export default function Editor() {
     }
   }
 
+  // Helper to dynamically load pdfjs-dist and configure workerSrc safely
+  const getPdfJs = async () => {
+    const pdfjs = await import('pdfjs-dist')
+    const api = pdfjs.getDocument ? pdfjs : (pdfjs as any).default
+    if (api && api.GlobalWorkerOptions) {
+      api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${api.version || '6.0.227'}/build/pdf.worker.min.mjs`
+    }
+    return api
+  }
+
   // Import document file (.docx or .pdf) dynamically using mammoth or pdfjs-dist
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -3840,11 +3850,9 @@ export default function Editor() {
         setShowImportModal(true)
       } else if (extension === 'pdf') {
         // Renders PDF text content extracted from pdfjs-dist
-        const pdfjs = await import('pdfjs-dist')
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-        
+        const pdfjs = await getPdfJs()
         const arrayBuffer = await file.arrayBuffer()
-        const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+        const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
         const pdf = await loadingTask.promise
         
         let accumulatedHtml = ''
@@ -3954,10 +3962,9 @@ export default function Editor() {
           const result = await mammoth.convertToHtml({ arrayBuffer })
           htmlContent = result.value
         } else if (extension === 'pdf') {
-          const pdfjs = await import('pdfjs-dist')
-          pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+          const pdfjs = await getPdfJs()
           const arrayBuffer = await file.arrayBuffer()
-          const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+          const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
           const pdf = await loadingTask.promise
 
           let accumulatedHtml = ''
@@ -4615,11 +4622,9 @@ export default function Editor() {
         type: 'docx'
       }
     } else if (extension === 'pdf') {
-      const pdfjs = await import('pdfjs-dist')
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-      
+      const pdfjs = await getPdfJs()
       const arrayBuffer = await file.arrayBuffer()
-      const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
       const pdf = await loadingTask.promise
       
       let accumulatedHtml = ''
