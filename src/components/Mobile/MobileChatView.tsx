@@ -2,7 +2,7 @@
 
 import { classifyIntent, type ConversationMessage, type DocumentMetadata } from '@/utils/chatIntelligence'
 import { planChatAction, type ToolCall } from '@/utils/chatPlanner'
-import { analyzeDocument, summarizeAudit, type ChapterInfo, type DocumentAudit } from '@/utils/documentAudit'
+import { analyzeDocument, summarizeAudit, validateSeminarStructure, type ChapterInfo, type DocumentAudit } from '@/utils/documentAudit'
 import { paginateDocumentForPrint, printSheetCss, renderSheetHtml, type PrintPage, SHEET_WIDTH_MM, SHEET_HEIGHT_MM } from '@/utils/printPagination'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -925,9 +925,40 @@ export default function MobileChatView({
 
   // Execute a tapped audit suggestion chip.
   const handleAuditChoice = (choiceId: string, audit: DocumentAudit) => {
-    if (choiceId === 'format_chapters') {
-      pushStatus('🧹 Formatting document to Seminar Chapters...')
-      handleAiAction('custom', 'Analyze the entire document content. Restructure it into clean Seminar Report chapters (Chapter 1 Introduction, Chapter 2 Literature Review, Chapter 3 Methodology, Chapter 4 Conclusion & Findings, References). Wrap all chapter titles in <h2> and subheadings in <h3>. Format into clean HTML.')
+    if (choiceId === 'format_chapters' || choiceId === 'fix_chapter_format') {
+      pushStatus('🧹 Formatting document to Seminar standard...')
+      handleAiAction('custom', `You are restructuring a rough academic document into a formal Seminar Report. Analyze the ENTIRE document content and apply these MANDATORY structural rules:
+
+CHAPTER HEADING FORMAT: Each chapter MUST use TWO consecutive <h1> tags in ALL-CAPS:
+  First <h1>: "CHAPTER ONE" (word form, ALL-CAPS)
+  Second <h1>: Descriptive title like "INTRODUCTION" (ALL-CAPS)
+  Then <h2> for numbered sections: "1.1 Introduction"
+  Then <h3> for subsections: "1.3.1 Advantages"
+
+CHAPTER STRUCTURE (4 chapters + References):
+  Chapter 1 — INTRODUCTION: 1.1 Introduction, 1.2 Problem Definition and Motivation, 1.3 Advantages and Limitations (with 1.3.1 Advantages, 1.3.2 Limitations subsections). Target: ~1,200–1,500 words.
+  Chapter 2 — LITERATURE REVIEW / RELATED WORK: 2.1 Summary of Existing Works, 2.2 Overview of Previous Research, 2.3 Research Gaps. Target: ~1,200–1,500 words.
+  Chapter 3 — METHODOLOGY / WORKING PRINCIPLE: 3.1 Core Concepts: Theoretical Background (with 3.1.1–3.1.3 subsections), 3.2 Working Principle / Process Flow, 3.3 Techniques and Tools Used (with 3.3.1–3.3.4 subsections). Target: ~1,800–2,000 words.
+  Chapter 4 — FINDINGS, CONCLUSIONS, AND FUTURE SCOPE: 4.1 Summary of Key Takeaways, 4.2 Future Scope. Target: ~900–1,200 words.
+  REFERENCES: APA 7th Edition format, 10–15 entries.
+
+ABSTRACT: Place a concise 2–3 paragraph summary (~250 words) BEFORE Chapter 1 under <h1>ABSTRACT</h1>. End with: <p><strong>Keywords:</strong> Term1, Term2, Term3, Term4, Term5.</p>
+
+TABLES: Preserve ALL existing tables exactly as-is. Do NOT remove or rewrite table content. Use <table> with <thead>/<tbody> and bold <th> headers.
+
+SECTION NUMBERING: Use decimal notation (1.1, 1.2, 1.3.1, 2.1, 3.1.1, etc.)
+
+Output the complete restructured document as clean HTML with proper heading hierarchy.`)
+      return
+    }
+    if (choiceId === 'add_abstract') {
+      pushStatus('📝 Generating Abstract page...')
+      handleAiAction('custom', 'Based on the entire document content, write a concise ABSTRACT section with exactly 2–3 paragraphs (~250 words total). Paragraph 1: problem background. Paragraph 2: proposed approach and methodology. Paragraph 3: key findings and conclusions. End with a Keywords line: <p><strong>Keywords:</strong> Term1, Term2, Term3, Term4, Term5, Term6.</p>. Format as: <h1>ABSTRACT</h1> followed by the paragraphs. Place this BEFORE Chapter 1.')
+      return
+    }
+    if (choiceId === 'add_keywords') {
+      pushStatus('🏷️ Adding Keywords to Abstract...')
+      handleAiAction('custom', 'Read the Abstract section and the full document. Add a Keywords line at the end of the Abstract section: <p><strong>Keywords:</strong> Term1, Term2, Term3, Term4, Term5, Term6, Term7.</p> Choose 5–7 relevant academic keywords from the document topic.')
       return
     }
     if (choiceId === 'generate_cover') {
@@ -957,6 +988,12 @@ export default function MobileChatView({
       handleAiAction('custom', instruction)
       return
     }
+    if (choiceId.startsWith('summarize:')) {
+      const sectionTitle = choiceId.slice('summarize:'.length)
+      pushStatus(`✂️ Summarizing "${sectionTitle}"…`)
+      handleAiAction('custom', `The section "${sectionTitle}" is too long for seminar standards. Condense it to approximately its target word count while preserving: all key arguments and claims, all citations and references, all data tables and figures. Remove: redundant explanations, overly verbose descriptions, repeated points. Maintain the same heading structure and academic tone. (Target section: ${sectionTitle})`)
+      return
+    }
   }
 
   // Analyze the current document and post a summary + one-tap suggestion chips.
@@ -979,15 +1016,46 @@ export default function MobileChatView({
     }
     if (!audit.hasReferences) chips.push({ id: 'add_references', label: 'Add references', icon: '📚' })
     if (!audit.hasToc && audit.chapters.length > 0) chips.push({ id: 'generate_toc', label: 'Generate Table of Contents', icon: '📑' })
+    // New pattern-based audit chips
+    for (const s of audit.suggestions) {
+      if (s.id === 'fix_chapter_format' && !chips.find(c => c.id === 'fix_chapter_format')) {
+        chips.push({ id: 'fix_chapter_format', label: 'Fix chapter heading format', icon: '🔤', description: 'Apply two-line ALL-CAPS standard' })
+      }
+      if (s.id === 'add_abstract' && !chips.find(c => c.id === 'add_abstract')) {
+        chips.push({ id: 'add_abstract', label: 'Add Abstract page', icon: '📝', description: 'Concise 2–3 paragraph summary + Keywords' })
+      }
+      if (s.id === 'add_keywords' && !chips.find(c => c.id === 'add_keywords')) {
+        chips.push({ id: 'add_keywords', label: 'Add Keywords to Abstract', icon: '🏷️' })
+      }
+      if (s.id === 'fix_table_font' && !chips.find(c => c.id === 'fix_table_font')) {
+        chips.push({ id: 'fix_table_font', label: 'Add comparison tables', icon: '📊', description: 'Academic reports benefit from data tables' })
+      }
+    }
+
+    // Structural validation (only when chapters exist — shows what's present vs missing)
+    let structReport = ''
+    if (audit.chapters.length > 0) {
+      const validation = validateSeminarStructure(editorHtml || '')
+      structReport = '\n\n' + validation.report
+      // Add summarization chips for over-long chapters (needs user consent)
+      for (const ol of validation.overlongChapters) {
+        chips.push({
+          id: `summarize:${ol.title}`,
+          label: `Summarize: ${ol.title}`,
+          icon: '✂️',
+          description: `~${ol.words} words → target ~${ol.target}`
+        })
+      }
+    }
 
     const summary = summarizeAudit(audit)
     if (chips.length === 0) {
-      addBotMessage(`${summary}\n\n✅ Looks complete — cover, TOC, references and length all check out!`)
+      addBotMessage(`${summary}${structReport}\n\n✅ Looks complete — cover, TOC, references and length all check out!`)
       return
     }
     setMessages(prev => [
       ...prev,
-      { id: uid(), role: 'ai', content: `${summary}\n\nHere's what I can help you finish — just tap:`, timestamp: Date.now(), type: 'text' },
+      { id: uid(), role: 'ai', content: `${summary}${structReport}\n\nHere's what I can help you finish — just tap:`, timestamp: Date.now(), type: 'text' },
       {
         id: uid(), role: 'system', content: '', timestamp: Date.now(), type: 'choice-card',
         choices: chips,

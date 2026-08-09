@@ -28,7 +28,7 @@ export interface ChapterInfo {
   approxWords: number
 }
 
-export type AuditSuggestionId = 'generate_cover' | 'generate_toc' | 'expand' | 'add_references' | 'format_chapters'
+export type AuditSuggestionId = 'generate_cover' | 'generate_toc' | 'expand' | 'add_references' | 'format_chapters' | 'fix_chapter_format' | 'add_abstract' | 'add_keywords' | 'fix_table_font'
 
 export interface AuditSuggestion {
   id: AuditSuggestionId
@@ -95,6 +95,28 @@ function extractChapters(contentHtml: string): ChapterInfo[] {
   return chapters
 }
 
+/** Check if chapter headings follow the two-line ALL-CAPS format (CHAPTER ONE / INTRODUCTION). */
+function hasProperChapterFormat(contentHtml: string): boolean {
+  // Look for the two-line pattern: <h1>CHAPTER ONE</h1> immediately followed by <h1>INTRODUCTION</h1>
+  return /<h1[^>]*>\s*CHAPTER\s+(ONE|TWO|THREE|FOUR|FIVE)\s*<\/h1>\s*<h1[^>]*>/i.test(contentHtml)
+}
+
+/** Check if an Abstract section exists. */
+function hasAbstract(contentHtml: string): boolean {
+  return /<h[1-3][^>]*>\s*ABSTRACT\s*<\/h[1-3]>/i.test(contentHtml) ||
+    /<p[^>]*>\s*ABSTRACT\s*<\/p>/i.test(contentHtml)
+}
+
+/** Check if a Keywords line exists (typically at end of Abstract). */
+function hasKeywords(contentHtml: string): boolean {
+  return /\bKeywords?\s*:/i.test(contentHtml)
+}
+
+/** Check if tables exist in the document. */
+function countTables(contentHtml: string): number {
+  return (contentHtml.match(/<table[\s>]/gi) || []).length
+}
+
 /**
  * Inspect a document and report what's present, what's missing, and what to do.
  */
@@ -159,6 +181,43 @@ export function analyzeDocument(
     })
   }
 
+  // P1 audit: check two-line chapter heading format
+  if (chapters.length > 0 && !hasProperChapterFormat(content)) {
+    suggestions.push({
+      id: 'fix_chapter_format',
+      label: 'Fix chapter headings to standard format',
+      reason: 'Chapter headings should use the two-line ALL-CAPS format (e.g. CHAPTER ONE / INTRODUCTION).',
+    })
+  }
+
+  // P2 audit: check for Abstract
+  if (chapters.length > 0 && !hasAbstract(content) && !hasAbstract(editorHtml)) {
+    suggestions.push({
+      id: 'add_abstract',
+      label: 'Add an Abstract page',
+      reason: 'No Abstract section was found. Academic reports need a concise 2–3 paragraph abstract with keywords.',
+    })
+  }
+
+  // P3 audit: check for Keywords line
+  if (hasAbstract(content) && !hasKeywords(content)) {
+    suggestions.push({
+      id: 'add_keywords',
+      label: 'Add Keywords to Abstract',
+      reason: 'The Abstract is missing a Keywords line (e.g. "Keywords: Term1, Term2, ...").',
+    })
+  }
+
+  // P4 audit: check table count (informational)
+  const tableCount = countTables(content)
+  if (tableCount === 0 && wordCount > 2000) {
+    suggestions.push({
+      id: 'fix_table_font',
+      label: 'Consider adding comparison tables',
+      reason: 'Academic seminar reports typically include 1–2 comparison/summary tables for visual data presentation.',
+    })
+  }
+
   return {
     hasCover,
     hasToc,
@@ -215,4 +274,71 @@ export function buildTocPageHtml(fullHtml: string, opts: { lineHeight?: string }
     body +
     `</div>`
   )
+}
+
+/**
+ * Validate that a document matches the expected seminar structure.
+ * Returns a checklist string showing what's found vs missing.
+ */
+export function validateSeminarStructure(editorHtml: string): {
+  report: string
+  missingCount: number
+  overlongChapters: { title: string; words: number; target: number }[]
+} {
+  const content = bodyContentHtml(editorHtml)
+  const chapters = extractChapters(content)
+  const headingTitles = chapters.map(c => c.title.toLowerCase())
+
+  // Expected seminar sections and their target word counts
+  const expectedSections = [
+    { label: 'Abstract', keywords: ['abstract'], target: 250 },
+    { label: 'Chapter 1 (Introduction)', keywords: ['chapter one', 'introduction', 'chapter 1'], target: 1500 },
+    { label: 'Chapter 2 (Literature Review)', keywords: ['chapter two', 'literature review', 'related work', 'chapter 2'], target: 1500 },
+    { label: 'Chapter 3 (Methodology)', keywords: ['chapter three', 'methodology', 'working principle', 'chapter 3'], target: 2000 },
+    { label: 'Chapter 4 (Findings/Conclusion)', keywords: ['chapter four', 'findings', 'conclusion', 'chapter 4'], target: 1200 },
+    { label: 'References', keywords: ['references', 'bibliography'], target: 0 },
+  ]
+
+  const lines: string[] = ['**📋 Structure Validation:**', '']
+  let missingCount = 0
+  const overlongChapters: { title: string; words: number; target: number }[] = []
+
+  for (const section of expectedSections) {
+    const found = headingTitles.some(t => section.keywords.some(k => t.includes(k)))
+    if (found) {
+      // Find the matching chapter for word count check
+      const matchedChapter = chapters.find(c =>
+        section.keywords.some(k => c.title.toLowerCase().includes(k))
+      )
+      const words = matchedChapter?.approxWords || 0
+
+      if (section.target > 0 && words > section.target * 2) {
+        lines.push(`⚠️ ${section.label} — found but **too long** (~${words} words, target ~${section.target})`)
+        overlongChapters.push({ title: matchedChapter!.title, words, target: section.target })
+      } else {
+        lines.push(`✅ ${section.label}`)
+      }
+    } else {
+      lines.push(`❌ ${section.label} — **not found**`)
+      missingCount++
+    }
+  }
+
+  // Check for cover page and TOC
+  const hasCover = /<div[^>]*data-cover\s*=\s*["']true["']/i.test(editorHtml)
+  const hasToc = /<div[^>]*data-toc\s*=\s*["']true["']/i.test(editorHtml)
+  lines.push('')
+  lines.push(`${hasCover ? '✅' : '❌'} Cover Page`)
+  lines.push(`${hasToc ? '✅' : '❌'} Table of Contents`)
+
+  if (missingCount === 0 && overlongChapters.length === 0) {
+    lines.push('')
+    lines.push('🎉 **All sections present and within target lengths!**')
+  }
+
+  return {
+    report: lines.join('\n'),
+    missingCount,
+    overlongChapters,
+  }
 }

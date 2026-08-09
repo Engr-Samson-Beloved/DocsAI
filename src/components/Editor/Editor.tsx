@@ -530,6 +530,202 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
   return { isReplacementMode: true, originalText, replacementText }
 }
 
+/**
+ * Deterministic post-processing normalizer for AI-generated academic content.
+ * Runs AFTER AI output, BEFORE ensurePaginatedHtml. Enforces seminar formatting patterns
+ * without relying on AI quality:
+ *  T1: Force ALL-CAPS on chapter <h1> tags containing "chapter"
+ *  T2: Apply font-size: 10pt and page-break-inside: avoid to all <table> elements
+ *  T3: Ensure table headers use <thead> with bold <th>
+ *  T4: Add APA hanging indent class to paragraphs inside References sections
+ */
+const normalizeAcademicHtml = (html: string): string => {
+  if (typeof window === 'undefined' || !html.trim()) return html
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const body = doc.body
+
+    // T1: Force ALL-CAPS on chapter h1 headings
+    body.querySelectorAll('h1').forEach(h1 => {
+      const text = h1.textContent?.trim() || ''
+      if (/chapter\s+(one|two|three|four|five|\d+)/i.test(text) ||
+          /^(introduction|literature\s+review|methodology|findings|abstract|references|appendix)/i.test(text) ||
+          /^(working\s+principle|related\s+work|conclusion)/i.test(text)) {
+        h1.textContent = text.toUpperCase()
+      }
+    })
+
+    // T2: Apply 10pt font-size and page-break-inside: avoid to all tables
+    body.querySelectorAll('table').forEach(table => {
+      table.style.fontSize = '10pt'
+      table.style.pageBreakInside = 'avoid'
+      table.style.width = '100%'
+      table.style.borderCollapse = 'collapse'
+      // Ensure cells have borders
+      table.querySelectorAll('td, th').forEach(cell => {
+        ;(cell as HTMLElement).style.border = '1px solid #000'
+        ;(cell as HTMLElement).style.padding = '4px 6px'
+      })
+      // T3: Ensure header row uses <th> with bold
+      const firstRow = table.querySelector('tr')
+      if (firstRow && !table.querySelector('thead')) {
+        // Check if first row looks like a header (all cells are short text)
+        const cells = Array.from(firstRow.children)
+        const looksLikeHeader = cells.every(c =>
+          (c.textContent?.trim().length || 0) < 80 && !/^\d+\./.test(c.textContent?.trim() || '')
+        )
+        if (looksLikeHeader && cells.length > 1) {
+          const thead = doc.createElement('thead')
+          const tbody = table.querySelector('tbody') || doc.createElement('tbody')
+          // Move remaining rows to tbody if not already
+          if (!table.querySelector('tbody')) {
+            const rows = Array.from(table.querySelectorAll('tr'))
+            rows.slice(1).forEach(row => tbody.appendChild(row))
+          }
+          thead.appendChild(firstRow)
+          // Convert td to th in header row
+          firstRow.querySelectorAll('td').forEach(td => {
+            const th = doc.createElement('th')
+            th.innerHTML = `<strong>${td.innerHTML}</strong>`
+            th.style.border = '1px solid #000'
+            th.style.padding = '4px 6px'
+            th.style.fontWeight = 'bold'
+            firstRow.replaceChild(th, td)
+          })
+          table.innerHTML = ''
+          table.appendChild(thead)
+          table.appendChild(tbody)
+        }
+      }
+    })
+
+    // T4: Add APA hanging indent class to paragraphs in References section
+    let inReferences = false
+    body.querySelectorAll('h1, h2, p').forEach(el => {
+      const tag = el.tagName.toLowerCase()
+      const text = el.textContent?.trim() || ''
+      if ((tag === 'h1' || tag === 'h2') && /^references$/i.test(text)) {
+        inReferences = true
+        return
+      }
+      if ((tag === 'h1' || tag === 'h2') && inReferences) {
+        inReferences = false // Next chapter starts
+        return
+      }
+      if (inReferences && tag === 'p' && text.length > 20) {
+        el.classList.add('apa-reference-entry')
+      }
+    })
+
+    return body.innerHTML
+  } catch (err) {
+    console.warn('normalizeAcademicHtml error:', err)
+    return html
+  }
+}
+
+/**
+ * Deterministic pre-processing pass for imported document HTML.
+ * Runs AFTER parser (mammoth/pdfjs) but BEFORE ensurePaginatedHtml.
+ * Cleans noise and promotes implicit headings:
+ *  C1: Promote bold paragraphs matching chapter/section patterns → h1/h2/h3
+ *  C2: Promote ALL-CAPS short paragraphs → h1 headings
+ *  C3: Remove "Page X of Y" noise paragraphs
+ *  C4: Collapse excessive consecutive blank paragraphs
+ */
+const cleanImportedHtml = (html: string): string => {
+  if (typeof window === 'undefined' || !html.trim()) return html
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const body = doc.body
+
+    // C3: Remove "Page X of Y" noise paragraphs and standalone page numbers
+    body.querySelectorAll('p').forEach(p => {
+      const text = p.textContent?.trim() || ''
+      if (/^page\s+\d+\s*(of\s+\d+)?\.?$/i.test(text)) {
+        p.remove()
+        return
+      }
+      // Remove standalone numbers that are likely page numbers (1-3 digits, nothing else)
+      if (/^\d{1,3}$/.test(text) && !p.previousElementSibling?.matches('ol, ul')) {
+        p.remove()
+        return
+      }
+    })
+
+    // C1: Promote bold paragraphs matching chapter/section patterns to headings
+    body.querySelectorAll('p').forEach(p => {
+      const text = p.textContent?.trim() || ''
+      if (!text || text.length > 150) return // Skip long paragraphs
+
+      // Check if the paragraph is entirely wrapped in <strong> or <b>
+      const isBold = (
+        (p.children.length === 1 && (p.children[0].tagName === 'STRONG' || p.children[0].tagName === 'B')) ||
+        (p.innerHTML.trim().startsWith('<strong>') && p.innerHTML.trim().endsWith('</strong>')) ||
+        (p.innerHTML.trim().startsWith('<b>') && p.innerHTML.trim().endsWith('</b>'))
+      )
+
+      // Chapter title pattern: "CHAPTER ONE", "CHAPTER 1", "CHAPTER TWO" etc.
+      const isChapterTitle = /^chapter\s+(one|two|three|four|five|\d+)\b/i.test(text)
+      // Chapter subtitle pattern: "INTRODUCTION", "LITERATURE REVIEW", "METHODOLOGY", etc.
+      const isChapterSubtitle = /^(introduction|literature\s+review|related\s+work|methodology|working\s+principle|findings|conclusion|recommendations|future\s+scope|abstract|references|bibliography|appendix)/i.test(text) && text.length < 80
+      // Section number pattern: "1.1 Introduction", "2.3 Research Gaps"
+      const isSectionNumber = /^\d+\.\d+\s+\S/.test(text) && text.length < 120
+      // Subsection pattern: "1.3.1 Advantages", "3.1.2 OpenFlow"
+      const isSubsection = /^\d+\.\d+\.\d+\s+\S/.test(text) && text.length < 120
+
+      let newTag = ''
+      if (isChapterTitle || (isBold && isChapterSubtitle)) {
+        newTag = 'h1'
+      } else if (isChapterSubtitle && (isBold || text === text.toUpperCase())) {
+        newTag = 'h1'
+      } else if (isSectionNumber) {
+        newTag = 'h2'
+      } else if (isSubsection) {
+        newTag = 'h3'
+      }
+      // C2: ALL-CAPS short paragraphs that look like headings (bold or standalone)
+      else if (text === text.toUpperCase() && text.length > 3 && text.length < 100 && !/^\d/.test(text)) {
+        // Skip if it's clearly a body sentence (has periods/commas in the middle)
+        if (!/[.,;]/.test(text.slice(1, -1))) {
+          newTag = 'h1'
+        }
+      }
+
+      if (newTag) {
+        const heading = doc.createElement(newTag)
+        heading.textContent = text
+        p.replaceWith(heading)
+      }
+    })
+
+    // C4: Collapse excessive consecutive blank paragraphs (> 2 in a row → keep 1)
+    const allElements = Array.from(body.children)
+    let consecutiveBlanks = 0
+    for (const el of allElements) {
+      const text = el.textContent?.trim() || ''
+      const isEmpty = !text || text === '\u00a0' // &nbsp;
+      if (isEmpty && el.tagName === 'P') {
+        consecutiveBlanks++
+        if (consecutiveBlanks > 1) {
+          el.remove()
+        }
+      } else {
+        consecutiveBlanks = 0
+      }
+    }
+
+    return body.innerHTML
+  } catch (err) {
+    console.warn('cleanImportedHtml error:', err)
+    return html
+  }
+}
+
 // Helper to pre-wrap raw HTML in a page block tag if not already paginated.
 // This ensures that all imported or reset content is correctly parsed into a page node.
 // If a title is provided and no h1 is present, a title heading will be added to the first page.
@@ -3889,7 +4085,7 @@ export default function Editor() {
         
         setImportFileData({
           name: file.name,
-          htmlContent: result.value,
+          htmlContent: cleanImportedHtml(result.value),
           extension: 'docx'
         })
         setImportOption('maintain')
@@ -3963,7 +4159,7 @@ export default function Editor() {
         
         setImportFileData({
           name: file.name,
-          htmlContent: accumulatedHtml,
+          htmlContent: cleanImportedHtml(accumulatedHtml),
           extension: 'pdf'
         })
         setImportOption('maintain')
@@ -4006,7 +4202,7 @@ export default function Editor() {
           const mammoth = await import('mammoth')
           const arrayBuffer = await file.arrayBuffer()
           const result = await mammoth.convertToHtml({ arrayBuffer })
-          htmlContent = result.value
+          htmlContent = cleanImportedHtml(result.value)
         } else if (extension === 'pdf') {
           const pdfjs = await getPdfJs()
           const arrayBuffer = await file.arrayBuffer()
@@ -4060,10 +4256,10 @@ export default function Editor() {
               }
             }
           }
-          htmlContent = accumulatedHtml
+          htmlContent = cleanImportedHtml(accumulatedHtml)
         } else if (extension === 'txt') {
           const text = await file.text()
-          htmlContent = text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')
+          htmlContent = cleanImportedHtml(text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join(''))
         } else {
           alert('Unsupported format. Please upload a .docx, .pdf, or .txt file.')
           setIsExporting(false)
@@ -4439,7 +4635,7 @@ export default function Editor() {
 
   const insertAiContent = (targetOverride?: string | React.MouseEvent) => {
     if (simulatedAiResult) {
-      const formatted = formatAiResponseToHtml(simulatedAiResult)
+      const formatted = normalizeAcademicHtml(formatAiResponseToHtml(simulatedAiResult))
       const currentHtml = editor.getHTML()
       const explicitTarget = typeof targetOverride === 'string' ? targetOverride : undefined
       const targetSec = explicitTarget || lastTargetSectionRef.current
@@ -5100,7 +5296,7 @@ export default function Editor() {
                   const data = JSON.parse(dataStr)
                   if (data.text) {
                     accumulatedText += data.text
-                    const formatted = formatAiResponseToHtml(accumulatedText)
+                    const formatted = normalizeAcademicHtml(formatAiResponseToHtml(accumulatedText))
                     editor.commands.setContent(ensurePaginatedHtml(formatted, finalTitle))
                   }
                 } catch (e) {}
@@ -5405,7 +5601,8 @@ export default function Editor() {
           }
         }
 
-        let formattedHtml = ensurePaginatedHtml(accumulatedText, finalTitle)
+        const normalizedHtml = normalizeAcademicHtml(accumulatedText)
+        let formattedHtml = ensurePaginatedHtml(normalizedHtml, finalTitle)
         if (coverPageMarkup) {
           formattedHtml = coverPageMarkup + formattedHtml
         }

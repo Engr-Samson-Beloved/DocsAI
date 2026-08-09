@@ -92,8 +92,11 @@ export function printContentCss(scope: string, lineHeight: string): string {
   ${scope} li { margin: 0 0 0.15em; text-indent: 0; text-align: left; }
   ${scope} blockquote { margin: 0.4em 0; padding-left: 0.4in; border-left: 3px solid #999; font-style: italic; }
   ${scope} img { max-width: 100%; height: auto; }
-  ${scope} table { border-collapse: collapse; width: 100%; }
-  ${scope} td, ${scope} th { border: 1px solid #000; padding: 4px 6px; }
+  ${scope} table { border-collapse: collapse; width: 100%; font-size: 10pt; page-break-inside: avoid; margin: 0.6em 0; }
+  ${scope} td, ${scope} th { border: 1px solid #000; padding: 4px 6px; text-align: left; vertical-align: top; }
+  ${scope} thead th { font-weight: bold; background-color: #f2f2f2; }
+  ${scope} thead { display: table-header-group; }
+  ${scope} tr { page-break-inside: avoid; }
   ${scope} .apa-reference-entry, ${scope} .references-list p {
     text-indent: -0.5in; padding-left: 0.5in; margin-bottom: 0.4em; text-align: left;
   }
