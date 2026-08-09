@@ -1276,6 +1276,7 @@ export default function Editor() {
     
     // Set active states
     setActiveProjectId(newProjId)
+    setPendingTemplate(null)
     localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
     setDocumentTitle(finalTitle)
     setDocHeader('')
@@ -1482,6 +1483,7 @@ export default function Editor() {
     if (!project) return
 
     setActiveProjectId(project.id)
+    setPendingTemplate(null)
     localStorage.setItem(STORAGE_KEY_ACTIVE_ID, project.id)
     setDocumentTitle(project.title)
     setDocHeader(project.docHeader || '')
@@ -4029,6 +4031,7 @@ export default function Editor() {
         const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 
         setActiveProjectId(newProjId)
+        setPendingTemplate(null)
         localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
         setDocumentTitle(cleanName)
         setDocHeader('')
@@ -5471,7 +5474,10 @@ export default function Editor() {
             toggleTheme={toggleTheme}
             projects={projects}
             onCreateProject={createNewProject}
-            onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onCreateProjectWithTemplate={(type) => {
+              createNewProjectWithTemplate(type)
+              setPendingTemplate(type)
+            }}
             onImportDocument={handleDashboardImport}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}

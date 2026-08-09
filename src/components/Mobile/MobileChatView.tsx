@@ -550,8 +550,12 @@ export default function MobileChatView({
     if (prevProjectIdRef.current === activeProjectId) return
     prevProjectIdRef.current = activeProjectId
 
-    // If starting fresh template onboarding, skip loading saved history
-    if (initialTemplate) return
+    // If starting fresh template onboarding, clear existing messages and return
+    // (the template onboarding effect below will populate fresh onboarding messages)
+    if (initialTemplate) {
+      setMessages([])
+      return
+    }
 
     const storageKey = `wordpi-chat-history-${activeProjectId}`
     try {
@@ -593,14 +597,15 @@ export default function MobileChatView({
   // ─── Guided Template Onboarding Flow ─────────────────────────
   // Handle initial template selection from MobileDashboard
   useEffect(() => {
-    if (!initialTemplate || hasProcessedTemplateRef.current === initialTemplate) return
-    hasProcessedTemplateRef.current = initialTemplate
+    const templateKey = initialTemplate ? (activeProjectId ? `${activeProjectId}_${initialTemplate}` : initialTemplate) : null
+    if (!initialTemplate || !templateKey || hasProcessedTemplateRef.current === templateKey) return
+    hasProcessedTemplateRef.current = templateKey
     onboardingTemplateRef.current = initialTemplate
     setOnboardingStage('template-greeting')
 
     const label = templateLabels[initialTemplate] || initialTemplate
 
-    // Clear existing messages and start fresh guided flow
+    // Clear existing messages and start fresh guided flow for this project
     setMessages([])
 
     // Typewriter-style greeting sequence
@@ -637,7 +642,7 @@ export default function MobileChatView({
     }, 2200)
 
     onClearInitialTemplate?.()
-  }, [initialTemplate]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialTemplate, activeProjectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle onboarding choice selections
   const handleOnboardingChoice = useCallback((choiceId: string) => {
