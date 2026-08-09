@@ -1075,6 +1075,11 @@ export default function Editor() {
   const [isSimulatingAI, setIsSimulatingAI] = useState(false)
   const [simulatedAiResult, setSimulatedAiResult] = useState('')
   const [isExporting, setIsExporting] = useState(false)
+  // Incremented after a document import so the mobile chat can run a fresh
+  // "what's missing" audit and surface suggestions.
+  const [importSignal, setImportSignal] = useState(0)
+  // Holds a file picked from the dashboard before the editor is ready
+  const pendingImportFileRef = useRef<File | null>(null)
   const [docHeader, setDocHeader] = useState('')
   const [docFooter, setDocFooter] = useState('')
   const [loadingMessage, setLoadingMessage] = useState('Processing Document...')
@@ -2356,6 +2361,22 @@ export default function Editor() {
       if (timeoutId) clearTimeout(timeoutId)
     }
   }, [editor])
+
+  // Process pending import file when editor becomes ready after dashboard import
+  useEffect(() => {
+    if (!editor || !importFileData || showImportModal) return
+    // Only process if we came from a dashboard import (importFileData set but modal not yet shown)
+    if (!showDashboard && importFileData.htmlContent) {
+      const formattedHtml = ensurePaginatedHtml(importFileData.htmlContent, documentTitle)
+      editor.commands.setContent(formattedHtml)
+      setTimeout(() => {
+        runPagination(editor)
+        setShowImportModal(true)
+      }, 200)
+      pendingImportFileRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, importFileData])
 
   // Enable scrolling with keyboard when focus is outside the editor
   useEffect(() => {
@@ -3906,6 +3927,164 @@ export default function Editor() {
     }
   }
 
+  // Import document from the dashboard landing page
+  // Opens a file picker, parses the file, creates a new project, and loads content
+  const handleDashboardImport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.docx,.pdf,.txt'
+    input.style.display = 'none'
+    document.body.appendChild(input)
+
+    input.onchange = async (ev: Event) => {
+      const file = (ev.target as HTMLInputElement).files?.[0]
+      document.body.removeChild(input)
+      if (!file) return
+
+      setLoadingMessage('Importing and Parsing File...')
+      setIsExporting(true)
+
+      try {
+        const extension = file.name.split('.').pop()?.toLowerCase()
+        let htmlContent = ''
+
+        if (extension === 'docx') {
+          const mammoth = await import('mammoth')
+          const arrayBuffer = await file.arrayBuffer()
+          const result = await mammoth.convertToHtml({ arrayBuffer })
+          htmlContent = result.value
+        } else if (extension === 'pdf') {
+          const pdfjs = await import('pdfjs-dist')
+          pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+          const arrayBuffer = await file.arrayBuffer()
+          const loadingTask = pdfjs.getDocument({ data: arrayBuffer })
+          const pdf = await loadingTask.promise
+
+          let accumulatedHtml = ''
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i)
+            const textContent = await page.getTextContent()
+            const items = textContent.items as any[]
+            if (items.length === 0) continue
+
+            let currentParagraph = ''
+            let lastY: number | null = null
+            const paragraphs: string[] = []
+
+            for (const item of items) {
+              const str = item.str || ''
+              if (!str.trim()) continue
+              const y = item.transform ? item.transform[5] : null
+              if (lastY !== null && y !== null) {
+                const yGap = Math.abs(lastY - y)
+                if (yGap > 5) {
+                  if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
+                  currentParagraph = str
+                } else {
+                  currentParagraph += ' ' + str
+                }
+              } else {
+                currentParagraph += (currentParagraph ? ' ' : '') + str
+              }
+              lastY = y
+            }
+            if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
+
+            for (const para of paragraphs) {
+              const isHeading = (
+                (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
+                /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
+              )
+              const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
+              if (isHeading) {
+                accumulatedHtml += `<h1>${para}</h1>`
+              } else if (isSectionHeading) {
+                const level = para.split('.').length
+                const hTag = level <= 2 ? 'h2' : 'h3'
+                accumulatedHtml += `<${hTag}>${para}</${hTag}>`
+              } else {
+                accumulatedHtml += `<p>${para}</p>`
+              }
+            }
+          }
+          htmlContent = accumulatedHtml
+        } else if (extension === 'txt') {
+          const text = await file.text()
+          htmlContent = text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join('')
+        } else {
+          alert('Unsupported format. Please upload a .docx, .pdf, or .txt file.')
+          setIsExporting(false)
+          return
+        }
+
+        // Create a new project to hold the imported content
+        const cleanName = file.name.replace(/\.[^/.]+$/, '')
+        const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+
+        setActiveProjectId(newProjId)
+        localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
+        setDocumentTitle(cleanName)
+        setDocHeader('')
+        setDocFooter('')
+        window.history.pushState({}, '', `/?project=${newProjId}`)
+        setShowDashboard(false)
+        setProjectSources([])
+        setWizardDocType('Custom')
+        setWizardTopic(cleanName)
+
+        // Store parsed data for the import modal
+        setImportFileData({
+          name: file.name,
+          htmlContent,
+          extension: extension || 'docx'
+        })
+        setImportOption('maintain')
+
+        // Load content into editor once it's ready
+        if (editor) {
+          const formattedHtml = ensurePaginatedHtml(htmlContent, cleanName)
+          editor.commands.setContent(formattedHtml)
+          setTimeout(() => runPagination(editor), 150)
+          // Show import modal for formatting options
+          setShowImportModal(true)
+        } else {
+          // Editor not ready yet — store in ref for useEffect to pick up
+          pendingImportFileRef.current = file
+        }
+
+        // Save the project
+        const newProj: Project = {
+          id: newProjId,
+          title: cleanName,
+          content: JSON.stringify(editor ? editor.getJSON() : {}),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          wordCount: 0,
+          charCount: 0,
+          documentType: 'Custom',
+          academicLevel: 'Undergraduate',
+          academicTone: 'Analytical',
+          docHeader: '',
+          docFooter: ''
+        }
+        setProjects(prev => {
+          const filtered = prev.filter(p => p.id !== newProjId)
+          const updated = [newProj, ...filtered]
+          saveProject(newProj).catch(e => console.error('Failed to save imported project', e))
+          return updated
+        })
+        setIsSaved(false)
+      } catch (err: any) {
+        console.error('Dashboard import failure:', err)
+        alert(`Failed to import document: ${err.message || err}`)
+      } finally {
+        setIsExporting(false)
+      }
+    }
+
+    input.click()
+  }
+
   const confirmImportAction = () => {
     if (!importFileData || !editor) return
 
@@ -3964,6 +4143,10 @@ export default function Editor() {
     // Clean up states
     setShowImportModal(false)
     setImportFileData(null)
+
+    // Trigger a post-import document audit (mobile chat) once pagination and
+    // word/page counts have settled.
+    setTimeout(() => setImportSignal((n) => n + 1), 900)
   }
 
   // Phase 2 AI Prompt execution (Streams response from WordPI AI route proxy)
@@ -5267,6 +5450,7 @@ export default function Editor() {
               createNewProjectWithTemplate(type)
               setPendingTemplate(type)
             }}
+            onImportDocument={handleDashboardImport}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5283,6 +5467,7 @@ export default function Editor() {
             projects={projects}
             onCreateProject={createNewProject}
             onCreateProjectWithTemplate={createNewProjectWithTemplate}
+            onImportDocument={handleDashboardImport}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5351,6 +5536,8 @@ export default function Editor() {
             setWizardAcademicLevel={setWizardAcademicLevel}
             onApplyFormattingStyles={applyFormattingStyles}
             onRemoveSection={removeSectionFromDocument}
+            onGenerateToc={generateTableOfContents}
+            importSignal={importSignal}
           />
         ) : (
         <>

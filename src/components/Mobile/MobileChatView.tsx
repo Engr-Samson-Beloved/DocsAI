@@ -2,6 +2,7 @@
 
 import { classifyIntent, type ConversationMessage, type DocumentMetadata } from '@/utils/chatIntelligence'
 import { planChatAction, type ToolCall } from '@/utils/chatPlanner'
+import { analyzeDocument, summarizeAudit, type ChapterInfo, type DocumentAudit } from '@/utils/documentAudit'
 import { paginateDocumentForPrint, printSheetCss, renderSheetHtml, type PrintPage, SHEET_WIDTH_MM, SHEET_HEIGHT_MM } from '@/utils/printPagination'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -160,6 +161,9 @@ export interface MobileChatViewProps {
   setWizardAcademicLevel?: (level: string) => void
   onApplyFormattingStyles?: (font: string, spacing: string, level?: string) => void
   onRemoveSection?: (sectionName: string) => void
+  onGenerateToc?: () => void
+  /** bump this number after an import to trigger a document audit */
+  importSignal?: number
 }
 
 // ─── Quick Action Chip Data ────────────────────────────────────────
@@ -261,7 +265,9 @@ export default function MobileChatView({
   setWizardLineSpacing,
   setWizardAcademicLevel,
   onApplyFormattingStyles,
-  onRemoveSection
+  onRemoveSection,
+  onGenerateToc,
+  importSignal
 }: MobileChatViewProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
@@ -912,6 +918,80 @@ export default function MobileChatView({
     ])
   }
 
+  // Execute a tapped audit suggestion chip.
+  const handleAuditChoice = (choiceId: string, audit: DocumentAudit) => {
+    if (choiceId === 'generate_cover') {
+      setShowInfoForm(true)
+      setMessages(prev => [
+        ...prev,
+        { id: uid(), role: 'system', content: '', timestamp: Date.now(), type: 'form-card', formType: wizardDocType === 'Seminar' ? 'seminar-info' : wizardDocType === 'Proposal' ? 'proposal-info' : 'project-info' }
+      ])
+      return
+    }
+    if (choiceId === 'generate_toc') {
+      onGenerateToc?.()
+      addBotMessage('📑 Generating your Table of Contents with accurate page numbers…')
+      return
+    }
+    if (choiceId === 'add_references') {
+      executeJournalSearch(documentTitle || 'academic references')
+      return
+    }
+    if (choiceId.startsWith('expand:')) {
+      const key = choiceId.slice('expand:'.length)
+      const target = key !== 'auto' ? audit.underLengthChapters[parseInt(key, 10)] : undefined
+      const instruction = target
+        ? `Substantially expand the "${target.title}" section with more depth, detail, examples and analysis. Aim for at least 800–1200 words. Keep the existing subheadings and academic tone. (Target section: ${target.title})`
+        : `Expand the document's chapters with more depth, detail and analysis to reach a fuller academic length, keeping the existing structure and tone.`
+      pushStatus('✍️ Expanding…')
+      handleAiAction('custom', instruction)
+      return
+    }
+  }
+
+  // Analyze the current document and post a summary + one-tap suggestion chips.
+  const postAuditCard = () => {
+    const audit = analyzeDocument(editorHtml || '', { totalPages, wordCount })
+    const chips: { id: string; label: string; icon: string; description?: string }[] = []
+    if (!audit.hasCover) chips.push({ id: 'generate_cover', label: 'Generate cover page', icon: '📋' })
+    if (audit.needsExpand) {
+      const thin = audit.underLengthChapters.slice(0, 4)
+      if (thin.length > 0) {
+        thin.forEach((c: ChapterInfo, i: number) =>
+          chips.push({ id: `expand:${i}`, label: `Expand: ${c.title}`, icon: '✍️', description: `~${c.approxWords} words` })
+        )
+      } else {
+        chips.push({ id: 'expand:auto', label: 'Expand the document', icon: '✍️' })
+      }
+    }
+    if (!audit.hasReferences) chips.push({ id: 'add_references', label: 'Add references', icon: '📚' })
+    if (!audit.hasToc && audit.chapters.length > 0) chips.push({ id: 'generate_toc', label: 'Generate Table of Contents', icon: '📑' })
+
+    const summary = summarizeAudit(audit)
+    if (chips.length === 0) {
+      addBotMessage(`${summary}\n\n✅ Looks complete — cover, TOC, references and length all check out!`)
+      return
+    }
+    setMessages(prev => [
+      ...prev,
+      { id: uid(), role: 'ai', content: `${summary}\n\nHere's what I can help you finish — just tap:`, timestamp: Date.now(), type: 'text' },
+      {
+        id: uid(), role: 'system', content: '', timestamp: Date.now(), type: 'choice-card',
+        choices: chips,
+        onChoice: (choiceId: string) => handleAuditChoice(choiceId, audit)
+      }
+    ])
+  }
+
+  // After an import (Editor bumps importSignal), analyze the document and
+  // surface suggestions (expand / cover / TOC) as a chat card.
+  useEffect(() => {
+    if (!importSignal) return
+    const t = setTimeout(() => postAuditCard(), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importSignal])
+
   const dispatchToolCall = (call: ToolCall, originalText: string): boolean => {
     const args = (call.args || {}) as Record<string, unknown>
     const say = (call.say || '').trim()
@@ -973,6 +1053,16 @@ export default function MobileChatView({
             { id: uid(), role: 'system', content: '', timestamp: Date.now(), type: 'form-card', formType: wizardDocType === 'Seminar' ? 'seminar-info' : wizardDocType === 'Proposal' ? 'proposal-info' : 'project-info' }
           ])
         }
+        return true
+      }
+      case 'generate_toc': {
+        if (!onGenerateToc) return false
+        onGenerateToc()
+        addBotMessage(say || '📑 Generating your Table of Contents with accurate page numbers…')
+        return true
+      }
+      case 'analyze_document': {
+        postAuditCard()
         return true
       }
       case 'search_journals': {

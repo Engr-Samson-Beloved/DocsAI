@@ -28,6 +28,8 @@ export type ToolName =
   | 'move_section'
   | 'format_document'
   | 'apply_cover_page'
+  | 'generate_toc'
+  | 'analyze_document'
   | 'search_journals'
   | 'generate_full_document'
   | 'export_document'
@@ -52,6 +54,8 @@ const TOOL_MANIFEST = `
 - move_section: Reorder a section. args: { section: string, position: string (e.g. "before Chapter 2", "to the end") }
 - format_document: Change typography of the WHOLE document. args: { font?: "Times New Roman"|"Arial"|"Georgia"|"Courier"|"default", spacing?: "single"|"1.5"|"double" }
 - apply_cover_page: Create/replace the front/title/cover page. args: { studentName?, matricNo?, department?, faculty?, institution?, supervisorName?, title?, academicSession?, submissionDate? } (include whatever the user provided; empty is fine)
+- generate_toc: Generate/refresh the Table of Contents with accurate page numbers (placed after the cover). args: {}
+- analyze_document: Review the document and report what's missing (cover, TOC, references, length) with suggestions. Use for "check my document", "what's left to do", "is my report complete", "review my document". args: {}
 - search_journals: Find REAL academic references/citations online. args: { query: string (the topic to find papers about) }
 - generate_full_document: Generate the entire multi-chapter document from scratch. args: {}
 - export_document: Download the document. args: { format: "pdf"|"word"|"powerpoint" }

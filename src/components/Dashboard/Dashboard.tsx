@@ -53,6 +53,7 @@ interface DashboardProps {
   onSignOut: () => void
   onOpenAuth: () => void
   onOpenPricingModal?: () => void
+  onImportDocument?: () => void
 }
 
 // Subcomponent to render a miniature version of the document content
@@ -120,7 +121,8 @@ export default function Dashboard({
   userEmail,
   onSignOut,
   onOpenAuth,
-  onOpenPricingModal
+  onOpenPricingModal,
+  onImportDocument
 }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'title' | 'words'>('updated')
@@ -438,7 +440,7 @@ export default function Dashboard({
               {/* Import Doc Card */}
               <div className="flex flex-col gap-1.5">
                 <button 
-                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                  onClick={() => onImportDocument ? onImportDocument() : onCreateProjectWithTemplate('Custom')}
                   className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
                 >
                   <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xl">
