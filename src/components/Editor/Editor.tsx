@@ -3820,7 +3820,7 @@ export default function Editor() {
   // Helper to dynamically load pdfjs-dist and configure workerSrc safely
   const getPdfJs = async () => {
     const pdfjs = await import('pdfjs-dist')
-    const api = pdfjs.getDocument ? pdfjs : (pdfjs as any).default
+    const api = typeof (pdfjs as any).getDocument === 'function' ? pdfjs : (pdfjs as any).default
     if (api && api.GlobalWorkerOptions) {
       api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${api.version || '6.0.227'}/build/pdf.worker.min.mjs`
     }
