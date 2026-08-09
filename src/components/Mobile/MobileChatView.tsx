@@ -925,6 +925,11 @@ export default function MobileChatView({
 
   // Execute a tapped audit suggestion chip.
   const handleAuditChoice = (choiceId: string, audit: DocumentAudit) => {
+    if (choiceId === 'format_chapters') {
+      pushStatus('🧹 Formatting document to Seminar Chapters...')
+      handleAiAction('custom', 'Analyze the entire document content. Restructure it into clean Seminar Report chapters (Chapter 1 Introduction, Chapter 2 Literature Review, Chapter 3 Methodology, Chapter 4 Conclusion & Findings, References). Wrap all chapter titles in <h2> and subheadings in <h3>. Format into clean HTML.')
+      return
+    }
     if (choiceId === 'generate_cover') {
       setShowInfoForm(true)
       setMessages(prev => [
@@ -958,6 +963,9 @@ export default function MobileChatView({
   const postAuditCard = () => {
     const audit = analyzeDocument(editorHtml || '', { totalPages, wordCount })
     const chips: { id: string; label: string; icon: string; description?: string }[] = []
+    if (audit.chapters.length === 0 && wordCount > 30) {
+      chips.push({ id: 'format_chapters', label: 'Format into Seminar Chapters', icon: '🧹', description: 'Structure plain text into Chapters 1–4' })
+    }
     if (!audit.hasCover) chips.push({ id: 'generate_cover', label: 'Generate cover page', icon: '📋' })
     if (audit.needsExpand) {
       const thin = audit.underLengthChapters.slice(0, 4)

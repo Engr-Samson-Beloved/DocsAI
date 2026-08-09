@@ -294,7 +294,16 @@ export function extractSectionFromHtml(html: string, sectionTarget: string): str
     headings.push({ level, text: cleanText, index: match.index })
   }
 
-  if (headings.length === 0) return ''
+  // Fallback: If no h1-h6 tags matched, search for paragraph headings (<p>Chapter 1...</p>)
+  if (headings.length === 0) {
+    const pRegex = /<p[^>]*>(.*?)<\/p>/gi
+    while ((match = pRegex.exec(html)) !== null) {
+      const cleanText = match[1].replace(/<[^>]*>/g, '').trim()
+      if (/^(?:chapter\s*\d+|1\.\s*introduction|2\.\s*literature|3\.\s*methodology|4\.\s*conclusion|references|abstract)/i.test(cleanText)) {
+        headings.push({ level: 2, text: cleanText, index: match.index })
+      }
+    }
+  }
 
   // Find the best matching heading
   let bestIdx = -1
@@ -342,6 +351,17 @@ export function replaceSectionInHtml(fullHtml: string, sectionTarget: string, ne
     const level = parseInt(match[1], 10)
     const cleanText = match[2].replace(/<[^>]*>/g, '').trim()
     headings.push({ level, text: cleanText, index: match.index })
+  }
+
+  // Fallback: If no h1-h6 tags matched, search for paragraph headings (<p>Chapter 1...</p>)
+  if (headings.length === 0) {
+    const pRegex = /<p[^>]*>(.*?)<\/p>/gi
+    while ((match = pRegex.exec(fullHtml)) !== null) {
+      const cleanText = match[1].replace(/<[^>]*>/g, '').trim()
+      if (/^(?:chapter\s*\d+|1\.\s*introduction|2\.\s*literature|3\.\s*methodology|4\.\s*conclusion|references|abstract)/i.test(cleanText)) {
+        headings.push({ level: 2, text: cleanText, index: match.index })
+      }
+    }
   }
 
   if (headings.length === 0) return fullHtml
@@ -541,18 +561,16 @@ export function classifyIntent(
           `- Return the complete expanded section in clean HTML (<h2/h3>, <p>, <ul>/<li>).`
       } else {
         enrichedPrompt =
-          `You are WordPilot, an expert academic writing co-pilot. The user wants to edit a section.\n\n` +
+          `You are WordPilot, an expert academic writing co-pilot. The user wants to edit/expand ${section ? `"${section}"` : 'a section'}.\n\n` +
           `${docMeta}\n\n` +
           `${outline}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
-          `The exact target section wasn't found by name. Look at the DOCUMENT STRUCTURE above and the conversation history to determine what the user wants to edit.\n` +
-          `If you can determine the target, generate a comprehensive, robust version (1500-2500 words) in clean HTML.\n` +
-          `If you're unsure, ask a brief clarification and provide clickable suggestions:\n` +
+          `The target section ${section ? `"${section}"` : ''} was not found as a formatted chapter in the document outline. The document may be unformatted or missing heading tags.\n` +
+          `Explain briefly that formatting the document to Seminar chapter standards will ensure exact section replacement, and provide clickable options:\n` +
           `<<<SUGGESTIONS>>>\n` +
-          `- Expand Chapter 1: Introduction\n` +
-          `- Expand Chapter 2: Literature Review\n` +
-          `- Expand Chapter 3: Methodology\n` +
+          `- Format document to Seminar Chapters\n` +
+          `- Write and append ${section || 'requested section'}\n` +
           `<<<END>>>`
       }
       break

@@ -28,7 +28,7 @@ export interface ChapterInfo {
   approxWords: number
 }
 
-export type AuditSuggestionId = 'generate_cover' | 'generate_toc' | 'expand' | 'add_references'
+export type AuditSuggestionId = 'generate_cover' | 'generate_toc' | 'expand' | 'add_references' | 'format_chapters'
 
 export interface AuditSuggestion {
   id: AuditSuggestionId
@@ -118,6 +118,13 @@ export function analyzeDocument(
   const needsExpand = pageCount > 0 && pageCount < MIN_ACADEMIC_PAGES
 
   const suggestions: AuditSuggestion[] = []
+  if (chapters.length === 0 && wordCount > 30) {
+    suggestions.push({
+      id: 'format_chapters',
+      label: 'Format document into Seminar Chapters',
+      reason: 'No structured chapter headings were found in this document.',
+    })
+  }
   if (!hasCover) {
     suggestions.push({
       id: 'generate_cover',
