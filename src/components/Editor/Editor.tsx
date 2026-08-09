@@ -1973,6 +1973,13 @@ export default function Editor() {
             const nextPageEl = pageContentElements[i + 1] as HTMLElement
             const firstChildDom = nextPageEl?.firstElementChild as HTMLElement
             if (firstChildDom) {
+              const firstChildText = firstChildDom.textContent?.trim().toLowerCase() || ''
+              const isChapterBreakHeader = /^h[1-3]$/i.test(firstChildDom.tagName) && 
+                (/\b(chapter|abstract|references|bibliography|appendix|table of contents)\b/i.test(firstChildText) || /^\d+\.?\s+chapter/i.test(firstChildText))
+
+              // Never pull a chapter/major section heading backwards into previous page space
+              if (isChapterBreakHeader) continue
+
               // Measure first child height including margins
               const rect = firstChildDom.getBoundingClientRect()
               const style = window.getComputedStyle(firstChildDom)
@@ -2014,15 +2021,52 @@ export default function Editor() {
         return
       }
 
-      // Step 2: Measure element heights and split overflowing pages
+      // Step 2: Measure element heights and split overflowing pages or mid-page chapter headers
       for (let pageIdx = 0; pageIdx < pageContentElements.length; pageIdx++) {
         const pageEl = pageContentElements[pageIdx] as HTMLElement
         if (!pageEl) continue
 
         const clientHeight = 931 // Safe content area height boundary
+        const children = Array.from(pageEl.children) as HTMLElement[]
+
+        // First check: If a chapter header landed mid-page (i > 0), force a split right before it
+        let forcedSplitIdx = -1
+        for (let i = 1; i < children.length; i++) {
+          const child = children[i]
+          const childText = child.textContent?.trim().toLowerCase() || ''
+          const isChapterBreakHeader = /^h[1-3]$/i.test(child.tagName) && 
+            (/\b(chapter|abstract|references|bibliography|appendix|table of contents)\b/i.test(childText) || /^\d+\.?\s+chapter/i.test(childText))
+
+          if (isChapterBreakHeader) {
+            forcedSplitIdx = i
+            break
+          }
+        }
+
+        if (forcedSplitIdx !== -1) {
+          const childDom = children[forcedSplitIdx]
+          try {
+            const absolutePos = editorInstance.view.posAtDOM(childDom, 0)
+            if (absolutePos !== undefined) {
+              const $pos = editorInstance.state.doc.resolve(absolutePos)
+              const depth = Math.min($pos.depth, 2)
+              const posBeforeBlock = $pos.before(depth)
+              const freshTr = editorInstance.state.tr.split(posBeforeBlock, 1)
+              editorInstance.view.dispatch(freshTr.setMeta('paginating', true))
+              
+              if (paginationTimeoutRef.current) clearTimeout(paginationTimeoutRef.current)
+              paginationTimeoutRef.current = setTimeout(() => {
+                isPaginatingRef.current = false
+                runPagination(editorInstance)
+              }, 150)
+              return
+            }
+          } catch (e) {
+            console.warn('Failed to split mid-page chapter header:', e)
+          }
+        }
 
         if (pageEl.scrollHeight > clientHeight) {
-          const children = Array.from(pageEl.children) as HTMLElement[]
           let accumulatedHeight = 0
           let splitChildIdx = -1
 
