@@ -389,10 +389,10 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
     const hs = parseInlineStyle(el.getAttribute('style'))
     const text = (el.textContent || '').trim().toLowerCase()
     // Force a page break before chapter-level headings so each chapter starts on a new page.
+    // Note: Line 2 topic titles (INTRODUCTION, LITERATURE REVIEW, etc.) sit on the same page right below CHAPTER X.
     const isChapterBreak = tag === 'h1' && (
       /^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(text) ||
-      /^(abstract|references|bibliography|appendix|table of contents)/i.test(text) ||
-      /^(introduction|literature\s+review|methodology|findings|conclusion|working\s+principle|related\s+work)/i.test(text)
+      /^(abstract|references|bibliography|appendix|table of contents)/i.test(text)
     )
     const headingNode = (
       <Text

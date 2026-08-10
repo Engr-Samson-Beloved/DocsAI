@@ -530,6 +530,139 @@ const parseStreamingReplacement = (accumulated: string): ParsedReplacement => {
   return { isReplacementMode: true, originalText, replacementText }
 }
 
+const CHAPTER_NUM_WORDS: Record<string, string> = {
+  '1': 'ONE', 'one': 'ONE',
+  '2': 'TWO', 'two': 'TWO',
+  '3': 'THREE', 'three': 'THREE',
+  '4': 'FOUR', 'four': 'FOUR',
+  '5': 'FIVE', 'five': 'FIVE',
+}
+
+const CHAPTER_DEFAULT_TITLES: Record<string, string> = {
+  'ONE': 'INTRODUCTION',
+  'TWO': 'LITERATURE REVIEW',
+  'THREE': 'METHODOLOGY',
+  'FOUR': 'FINDINGS AND DISCUSSION',
+  'FIVE': 'CONCLUSION AND RECOMMENDATIONS',
+}
+
+/**
+ * Restructure chapter headings into professional academic two-line ALL-CAPS format:
+ *   Line 1: <h1>CHAPTER ONE</h1>
+ *   Line 2: <h1>INTRODUCTION</h1>
+ *   Sub-headings: <h2>1.1 Introduction</h2>
+ * Also inserts page break dividers before each chapter.
+ */
+const formatSeminarHeadingsAndBreaks = (html: string): string => {
+  if (typeof window === 'undefined' || !html.trim()) return html
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    const body = doc.body
+
+    const elements = Array.from(body.querySelectorAll('h1, h2, h3, p'))
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i]
+      if (!el.parentNode) continue
+      const text = (el.textContent || '').trim()
+      if (!text) continue
+
+      // Match "CHAPTER ONE: INTRODUCTION", "CHAPTER 1 - INTRODUCTION", "CHAPTER TWO", etc.
+      const chapterMatch = text.match(/^chapter\s+(one|two|three|four|five|\d+)(?:\s*[:\-–—\s]\s*(.*))?$/i)
+
+      if (chapterMatch) {
+        const rawNum = chapterMatch[1].toLowerCase()
+        const wordNum = CHAPTER_NUM_WORDS[rawNum] || rawNum.toUpperCase()
+        const chapterHeader = `CHAPTER ${wordNum}`
+        let topicText = (chapterMatch[2] || '').trim().toUpperCase()
+
+        // Check if the next element is the topic title (e.g. <h1>CHAPTER ONE</h1> followed by <h1>INTRODUCTION</h1> or <p>INTRODUCTION</p>)
+        const nextEl = elements[i + 1]
+        const nextText = (nextEl?.textContent || '').trim()
+
+        if (!topicText && nextEl && i < elements.length - 1) {
+          const isTopicCandidate = /^(introduction|literature\s+review|related\s+work|methodology|working\s+principle|findings|conclusion|recommendations|future\s+scope)/i.test(nextText) ||
+            (nextText.length < 80 && nextText === nextText.toUpperCase() && !/^\d/.test(nextText))
+
+          if (isTopicCandidate) {
+            topicText = nextText.toUpperCase()
+            nextEl.remove()
+            i++
+          }
+        }
+
+        if (!topicText) {
+          topicText = CHAPTER_DEFAULT_TITLES[wordNum] || 'OVERVIEW'
+        }
+
+        // Line 1: CHAPTER ONE
+        const h1Chapter = doc.createElement('h1')
+        h1Chapter.textContent = chapterHeader
+
+        // Line 2: INTRODUCTION
+        const h1Topic = doc.createElement('h1')
+        h1Topic.textContent = topicText
+
+        // Page break before chapter (unless it's the very first element in body)
+        const isFirstInDoc = el === body.firstElementChild || (i === 0 && !el.previousElementSibling)
+        if (!isFirstInDoc) {
+          const pb = doc.createElement('div')
+          pb.className = 'page-break'
+          pb.setAttribute('style', 'page-break-after: always; break-after: page;')
+          el.parentNode.insertBefore(pb, el)
+        }
+
+        el.parentNode.insertBefore(h1Chapter, el)
+        el.parentNode.insertBefore(h1Topic, el)
+        el.remove()
+        continue
+      }
+
+      // Format standalone Abstract or References heading
+      if (/^abstract$/i.test(text) && el.tagName.toLowerCase() !== 'h1') {
+        const pb = doc.createElement('div')
+        pb.className = 'page-break'
+        pb.setAttribute('style', 'page-break-after: always; break-after: page;')
+        el.parentNode.insertBefore(pb, el)
+
+        const h1 = doc.createElement('h1')
+        h1.textContent = 'ABSTRACT'
+        el.replaceWith(h1)
+        continue
+      }
+
+      if (/^references$/i.test(text) && el.tagName.toLowerCase() !== 'h1') {
+        const pb = doc.createElement('div')
+        pb.className = 'page-break'
+        pb.setAttribute('style', 'page-break-after: always; break-after: page;')
+        el.parentNode.insertBefore(pb, el)
+
+        const h1 = doc.createElement('h1')
+        h1.textContent = 'REFERENCES'
+        el.replaceWith(h1)
+        continue
+      }
+
+      // Format section subheadings: e.g. "1.1 Introduction" -> <h2>1.1 Introduction</h2>
+      const sectionMatch = text.match(/^(\d+\.\d+)\.?\s+(.+)$/)
+      if (sectionMatch && el.tagName.toLowerCase() !== 'h2') {
+        const secNum = sectionMatch[1]
+        const secTitle = sectionMatch[2].trim()
+        const h2 = doc.createElement('h2')
+        h2.textContent = `${secNum} ${secTitle}`
+        el.replaceWith(h2)
+      }
+    }
+
+    return body.innerHTML
+  } catch (err) {
+    console.warn('formatSeminarHeadingsAndBreaks error:', err)
+    return html
+  }
+}
+
 /**
  * Deterministic post-processing normalizer for AI-generated academic content.
  * Runs AFTER AI output, BEFORE ensurePaginatedHtml. Enforces seminar formatting patterns
@@ -543,8 +676,10 @@ const normalizeAcademicHtml = (html: string): string => {
   if (typeof window === 'undefined' || !html.trim()) return html
 
   try {
+    // First run two-line chapter formatting and page break insertion
+    const structuredHtml = formatSeminarHeadingsAndBreaks(html)
     const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
+    const doc = parser.parseFromString(structuredHtml, 'text/html')
     const body = doc.body
 
     // T1: Force ALL-CAPS on chapter h1 headings
@@ -4356,6 +4491,11 @@ export default function Editor() {
     let cleanedContent = contentToLoad
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     
+    // If Seminar template is selected, restructure headings into two-line ALL-CAPS format and insert chapter page breaks
+    if (importOption === 'seminar') {
+      cleanedContent = normalizeAcademicHtml(cleanedContent)
+    }
+
     // 2. Load the content into Tiptap
     editor.commands.setContent(ensurePaginatedHtml(cleanedContent))
     setIsSaved(false)
@@ -5174,27 +5314,40 @@ export default function Editor() {
       // Generate structural guide based on doc type
       let outlineStructurePrompt = ''
       if (wizardDocType === 'Seminar') {
-        outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and subheadings:
-        Chapter 1.
-        1.1. Introduction 
-        1.2. Problem Definition and Motivation 
-        1.4. Advantages and Limitations
+        outlineStructurePrompt = `The document MUST be structured EXACTLY as a Seminar report following these chapters and two-line ALL-CAPS chapter headings:
 
-        Chapter 2
-        Literature Review/Related work 
-        2.1. Summary of exit works
-        2.2. Overview of previous research 
-        Research Gaps.
+        CHAPTER ONE
+        INTRODUCTION
+        1.1 Introduction
+        1.2 Problem Definition and Motivation
+        1.3 Advantages and Limitations (1.3.1 Advantages, 1.3.2 Limitations)
 
-        Chapter 3
-        Methodology/Working Principle 
-        3.1. Core Concepts: Theoretical Background 
-        3.2. Working Principle/Process Flow 
-        3.3. Techniques/Tool Used
+        CHAPTER TWO
+        LITERATURE REVIEW / RELATED WORK
+        2.1 Summary of Existing Works
+        2.2 Overview of Previous Research
+        2.3 Research Gaps
 
-        Chapter 4
-        4.1. Summary of key takeaways and main findings 
-        4.2. Future Scope.`
+        CHAPTER THREE
+        METHODOLOGY / WORKING PRINCIPLE
+        3.1 Core Concepts: Theoretical Background (3.1.1 Overview, 3.1.2 Framework Architecture)
+        3.2 Working Principle and Process Flow
+        3.3 Techniques and Tools Used
+
+        CHAPTER FOUR
+        FINDINGS, CONCLUSIONS, AND FUTURE SCOPE
+        4.1 Summary of Key Takeaways and Main Findings
+        4.2 Future Scope
+
+        REFERENCES
+        (Include 10-15 APA formatted citations)
+
+        MANDATORY HEADING FORMAT:
+        Each chapter heading MUST be two separate <h1> tags in ALL-CAPS:
+        <h1>CHAPTER ONE</h1>
+        <h1>INTRODUCTION</h1>
+        Sub-headings MUST be <h2> with decimal notation (e.g. <h2>1.1 Introduction</h2>).
+        Sub-sub-headings MUST be <h3> (e.g. <h3>1.3.1 Advantages</h3>).`
       } else if (wizardDocType === 'Proposal') {
         outlineStructurePrompt = `The document MUST be structured EXACTLY as a Proposal report following these chapters and subheadings:
         Chapter 1

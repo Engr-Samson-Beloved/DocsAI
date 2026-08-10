@@ -246,8 +246,7 @@ export function buildPrintFragments(fullHtml: string, opts: BuildDocumentOptions
         const tag = heading.tagName.toLowerCase()
         const isChapterHeading = tag === 'h1' && (
           /^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(text) ||
-          /^(abstract|references|bibliography|appendix|table of contents)/i.test(text) ||
-          /^(introduction|literature\s+review|methodology|findings|conclusion|working\s+principle|related\s+work)/i.test(text)
+          /^(abstract|references|bibliography|appendix|table of contents)/i.test(text)
         )
         if (isChapterHeading) {
           const marker = doc.createElement('div')
