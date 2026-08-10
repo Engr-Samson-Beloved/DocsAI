@@ -76,7 +76,7 @@ export async function exportPdfClient(fullHtml: string, opts: ClientPdfOptions =
       },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
       // Honour our CSS page-breaks and avoid splitting these elements.
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'img', 'h1', 'h2', 'h3', 'blockquote'] },
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'img', 'h1', 'h2', 'h3', 'blockquote', 'table'] },
     }
 
     // Build the PDF, then stamp page numbers (and optional header/footer)

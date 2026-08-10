@@ -125,6 +125,7 @@ export function documentCss(lineHeight: string, marginMm: number): string {
       border-collapse: collapse;
       width: 100%;
       margin: 0.5em 0;
+      font-size: 10pt;
       page-break-inside: avoid;
     }
     th, td {
@@ -133,6 +134,7 @@ export function documentCss(lineHeight: string, marginMm: number): string {
       text-align: left;
       vertical-align: top;
     }
+    th { font-weight: bold; }
     thead { display: table-header-group; } /* repeat header row across pages */
     tr, img { page-break-inside: avoid; }
 
@@ -164,6 +166,19 @@ export function documentCss(lineHeight: string, marginMm: number): string {
 
     /* Manual page breaks inserted by the user in the editor. */
     .page-break, .hard-break { page-break-after: always; break-after: page; height: 0; border: 0; margin: 0; }
+
+    /* Force chapter headings to start on a new page.
+       The .chapter-start wrapper is injected by buildPrintFragments
+       around each chapter-level heading to guarantee a page break. */
+    .chapter-start {
+      page-break-before: always;
+      break-before: page;
+    }
+    /* The very first content element should not get a spurious leading page break. */
+    .content > .chapter-start:first-child {
+      page-break-before: auto;
+      break-before: auto;
+    }
   `
 }
 
@@ -223,6 +238,24 @@ export function buildPrintFragments(fullHtml: string, opts: BuildDocumentOptions
         hb.className = 'hard-break'
         br.replaceWith(hb)
       })
+
+      // Inject .chapter-start markers before chapter-level headings so each
+      // chapter starts on a new page in the exported PDF.
+      clone.querySelectorAll('h1, h2').forEach((heading) => {
+        const text = (heading.textContent || '').trim().toLowerCase()
+        const tag = heading.tagName.toLowerCase()
+        const isChapterHeading = tag === 'h1' && (
+          /^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(text) ||
+          /^(abstract|references|bibliography|appendix|table of contents)/i.test(text) ||
+          /^(introduction|literature\s+review|methodology|findings|conclusion|working\s+principle|related\s+work)/i.test(text)
+        )
+        if (isChapterHeading) {
+          const marker = doc.createElement('div')
+          marker.className = 'chapter-start'
+          heading.parentNode?.insertBefore(marker, heading)
+        }
+      })
+
       contentParts.push(clone.innerHTML)
     }
   }
