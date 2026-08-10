@@ -289,8 +289,96 @@ function isBlockLevel(tag: string): boolean {
   ].includes(tag)
 }
 
+function isTocItem(el: HTMLElement): boolean {
+  if (el.getAttribute('data-type') === 'toc-item' || el.getAttribute('data-type') === 'toc-item-text') return true
+  if (el.classList.contains('toc-item-row')) return true
+  if (el.querySelector('.toc-title') || el.querySelector('.toc-dots') || el.querySelector('.toc-page')) return true
+  const text = (el.textContent || '').trim()
+  if (/\.{3,}\s*[\w\d]+$/.test(text)) return true
+  return false
+}
+
+function renderTocItem(el: HTMLElement, ctx: BlockCtx): React.ReactNode {
+  let titleText = ''
+  let pageText = ''
+  let level = parseInt(el.getAttribute('data-level') || '1', 10)
+
+  const titleEl = el.querySelector('.toc-title')
+  const pageEl = el.querySelector('.toc-page')
+
+  if (titleEl && pageEl) {
+    titleText = (titleEl.textContent || '').trim()
+    pageText = (pageEl.textContent || '').trim()
+  } else {
+    const rawText = (el.textContent || '').trim()
+    const dotMatch = rawText.match(/^(.*?)\s*[\.\s]{3,}\s*([\w\d]+)$/)
+    if (dotMatch) {
+      titleText = dotMatch[1].trim()
+      pageText = dotMatch[2].trim()
+    } else {
+      titleText = rawText
+      pageText = el.getAttribute('data-page') || ''
+    }
+  }
+
+  if (!titleText) return null
+
+  const isLevel1 = level === 1 || /^chapter\s+/i.test(titleText)
+  const paddingLeft = Math.max(0, (level - 1) * 16)
+  const fontFamily = isLevel1 ? 'Times-Bold' : 'Times-Roman'
+
+  return (
+    <View
+      key={`b${blockKey++}`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        marginBottom: 6,
+        paddingLeft,
+      }}
+    >
+      <Text
+        style={{
+          fontFamily,
+          fontSize: 11,
+          lineHeight: 1.2,
+        }}
+      >
+        {titleText}
+      </Text>
+
+      {/* Dotted leader line connecting section title to page number */}
+      <View
+        style={{
+          flex: 1,
+          borderBottomWidth: 1,
+          borderBottomStyle: 'dotted',
+          borderBottomColor: '#000000',
+          marginHorizontal: 6,
+          marginBottom: 2,
+        }}
+      />
+
+      <Text
+        style={{
+          fontFamily,
+          fontSize: 11,
+          lineHeight: 1.2,
+        }}
+      >
+        {pageText}
+      </Text>
+    </View>
+  )
+}
+
 function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.ReactNode[] {
   const tag = el.tagName.toLowerCase()
+
+  // Table of Contents item rows — render with flex layout and dotted leader lines.
+  if (isTocItem(el)) {
+    return renderTocItem(el, ctx)
+  }
 
   // Manual page breaks.
   if (el.classList.contains('page-break') || el.classList.contains('hard-break')) {

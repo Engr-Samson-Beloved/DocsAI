@@ -258,15 +258,26 @@ export function buildTocPageHtml(fullHtml: string, opts: { lineHeight?: string }
   const rows = headings
     // Skip a heading that is literally the TOC title, just in case.
     .filter((h) => !/^table\s+of\s+contents$/i.test(h.title))
-    .map(
-      (h) =>
-        `<p data-type="toc-item" data-level="${h.level}" data-page="${h.page}">${escapeHtml(h.title)}</p>`
-    )
+    .map((h) => {
+      const paddingLeft = (h.level - 1) * 20
+      const fontWeight = h.level === 1 ? 'bold' : 'normal'
+      return (
+        `<p data-type="toc-item" class="toc-item-row" data-level="${h.level}" data-page="${h.page}" style="display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 10px; font-family: 'Times New Roman', Times, serif; padding-left: ${paddingLeft}px; font-weight: ${fontWeight};">` +
+        `<span class="toc-title">${escapeHtml(h.title)}</span>` +
+        `<span class="toc-dots" style="flex-grow: 1; border-bottom: 1px dotted #71717a; margin: 0 10px; position: relative; top: -4px;"></span>` +
+        `<span class="toc-page" style="flex-shrink: 0;">${h.page}</span>` +
+        `</p>`
+      )
+    })
     .join('')
 
   const body =
     rows ||
-    `<p data-type="toc-item" data-level="1" data-page="1">No headings found — add chapter headings first.</p>`
+    `<p data-type="toc-item" class="toc-item-row" data-level="1" data-page="1" style="display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 10px;">` +
+    `<span class="toc-title">No headings found — add chapter headings first.</span>` +
+    `<span class="toc-dots" style="flex-grow: 1; border-bottom: 1px dotted #71717a; margin: 0 10px; position: relative; top: -4px;"></span>` +
+    `<span class="toc-page" style="flex-shrink: 0;">1</span>` +
+    `</p>`
 
   return (
     `<div data-type="page" data-toc="true">` +
