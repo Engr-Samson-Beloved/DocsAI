@@ -994,6 +994,11 @@ Output the complete restructured document as clean HTML with proper heading hier
       handleAiAction('custom', `The section "${sectionTitle}" is too long for seminar standards. Condense it to approximately its target word count while preserving: all key arguments and claims, all citations and references, all data tables and figures. Remove: redundant explanations, overly verbose descriptions, repeated points. Maintain the same heading structure and academic tone. (Target section: ${sectionTitle})`)
       return
     }
+    if (choiceId === 'export_pptx') {
+      pushStatus('📊 Compiling PowerPoint presentation slides...')
+      exportToPptx()
+      return
+    }
   }
 
   // Analyze the current document and post a summary + one-tap suggestion chips.
@@ -1002,6 +1007,9 @@ Output the complete restructured document as clean HTML with proper heading hier
     const chips: { id: string; label: string; icon: string; description?: string }[] = []
     if (audit.chapters.length === 0 && wordCount > 30) {
       chips.push({ id: 'format_chapters', label: 'Format into Seminar Chapters', icon: '🧹', description: 'Structure plain text into Chapters 1–4' })
+    }
+    if (audit.chapters.length > 0) {
+      chips.push({ id: 'export_pptx', label: 'Export PowerPoint Presentation (.pptx)', icon: '📊', description: 'Generates 12–15 slide academic presentation' })
     }
     if (!audit.hasCover) chips.push({ id: 'generate_cover', label: 'Generate cover page', icon: '📋' })
     if (audit.needsExpand) {
