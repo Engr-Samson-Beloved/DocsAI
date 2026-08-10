@@ -163,8 +163,9 @@ function alignOf(el: HTMLElement, ctx: BlockCtx): 'left' | 'center' | 'right' | 
   if (ctx.forceAlign) return ctx.forceAlign as 'center'
   const s = parseInlineStyle(el.getAttribute('style'))
   const a = s.align || (el.getAttribute('align') || '').toLowerCase()
-  if (a === 'center' || a === 'right' || a === 'justify') return a
-  return 'left'
+  if (a === 'center' || a === 'right' || a === 'justify' || a === 'left') return a
+  // Default to justify for body text (academic standard)
+  return 'justify'
 }
 
 function headingSize(tag: string): number {
@@ -228,6 +229,7 @@ function renderTable(el: HTMLElement, ctx: BlockCtx): React.ReactNode {
   return (
     <View
       key={`b${blockKey++}`}
+      wrap={false}
       style={{ marginVertical: 8, borderTopWidth: 1, borderLeftWidth: 1, borderColor: '#000' }}
     >
       {rows.map((tr, ri) => {
@@ -251,7 +253,7 @@ function renderTable(el: HTMLElement, ctx: BlockCtx): React.ReactNode {
                 <Text
                   style={{
                     fontFamily: cell.tagName.toLowerCase() === 'th' ? 'Times-Bold' : 'Times-Roman',
-                    fontSize: 11,
+                    fontSize: 10,
                     lineHeight: 1.2,
                     textAlign: 'left',
                   }}
@@ -297,10 +299,18 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
 
   if (/^h[1-6]$/.test(tag)) {
     const hs = parseInlineStyle(el.getAttribute('style'))
-    return (
+    const text = (el.textContent || '').trim().toLowerCase()
+    // Force a page break before chapter-level headings so each chapter starts on a new page.
+    const isChapterBreak = tag === 'h1' && (
+      /^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i.test(text) ||
+      /^(abstract|references|bibliography|appendix|table of contents)/i.test(text) ||
+      /^(introduction|literature\s+review|methodology|findings|conclusion|working\s+principle|related\s+work)/i.test(text)
+    )
+    const headingNode = (
       <Text
         key={`b${blockKey++}`}
         wrap={false}
+        break={isChapterBreak}
         style={{
           fontFamily: 'Times-Bold',
           fontSize: hs.fontSize || headingSize(tag),
@@ -313,6 +323,7 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
         {renderInline(el, { bold: true, upper: hs.upper })}
       </Text>
     )
+    return headingNode
   }
 
   if (tag === 'p') {
@@ -329,6 +340,9 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
       return <View key={`b${blockKey++}`} style={{ height: 12 }} />
     }
     const align = alignOf(el, ctx)
+    // APA hanging indent for references
+    const isApaRef = el.classList.contains('apa-reference-entry') ||
+      el.closest('.references-list') !== null
     return (
       <Text
         key={`b${blockKey++}`}
@@ -336,11 +350,12 @@ function renderBlock(el: HTMLElement, ctx: BlockCtx): React.ReactNode | React.Re
           fontFamily: fontFamilyFor(ps.bold, ps.italic),
           fontSize: ps.fontSize || 12,
           lineHeight: ctx.lineHeight,
-          marginBottom: 2,
-          textAlign: align,
-          // First-line indent only for normal left/justified body text
-          // (not for centered cover/heading-like lines).
-          ...(align === 'center' || align === 'right' || ctx.forceAlign ? {} : { textIndent: INDENT_PT }),
+          marginBottom: isApaRef ? 6 : 2,
+          textAlign: isApaRef ? 'left' as const : align,
+          // APA references: hanging indent (negative first-line indent + left padding)
+          ...(isApaRef
+            ? { textIndent: -INDENT_PT, paddingLeft: INDENT_PT }
+            : (align === 'center' || align === 'right' || ctx.forceAlign ? {} : { textIndent: INDENT_PT })),
         }}
       >
         {inline}
