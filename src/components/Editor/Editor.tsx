@@ -3884,9 +3884,15 @@ export default function Editor() {
     }
   }
 
-  // Helper to dynamically load pdfjs-dist and configure workerSrc safely
+  // Helper to dynamically load pdfjs-dist and configure workerSrc safely.
+  // Uses "pdfjs-dist/webpack.mjs" (the bundler entry) because Next.js cannot
+  // bundle the ESM-only main build: `import('pdfjs-dist')` returns an empty
+  // namespace where every export (including getDocument) is undefined, which
+  // throws "undefined is not a function" at import time. The webpack entry
+  // also auto-bundles the worker, so no CDN fetch is required.
   const getPdfJs = async () => {
-    const pdfjs = await import('pdfjs-dist')
+    // @ts-ignore - pdfjs-dist/webpack.mjs ships no type declarations
+    const pdfjs = await import('pdfjs-dist/webpack.mjs')
     const api = typeof (pdfjs as any).getDocument === 'function' ? pdfjs : (pdfjs as any).default
     if (api && api.GlobalWorkerOptions) {
       api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${api.version || '6.0.227'}/build/pdf.worker.min.mjs`
