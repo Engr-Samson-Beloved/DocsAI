@@ -12,12 +12,12 @@
  *
  * Rules Enforced:
  *  - 12–15 Slide Deck (Title + 10–13 Content + Q&A)
- *  - Two-line chapter headings merged into one slide header
+ *  - Two-line & single-line chapter headings unified into slide headers
+ *  - Strict bullet deduplication & prompt noise filtering
+ *  - Bullet symbol cleaning (strips unicode artifacts like , •, ▸)
+ *  - Max 5 bullets per slide chunking to prevent visual overflow
  *  - Widescreen 16:9 aspect ratio
- *  - Font Sizes: Title 34pt, Headers 24pt, Body 18pt (min 16pt)
- *  - Sections with >5 bullets auto-split into Part 1 / Part 2
- *  - Cover/TOC pages are excluded from content extraction
- *  - Paragraph text → concise bullet summarization (sentence-level)
+ *  - Font Sizes: Title 34pt, Headers 24pt, Subheaders 16pt, Body 18pt (min 16pt)
  *  - 60-30-10 Color System: Slate bg, Navy headers, Indigo accents
  */
 
@@ -48,8 +48,38 @@ interface AcademicSection {
   rawParagraphs: string[]
 }
 
+const NUM_TO_WORD: Record<string, string> = {
+  '1': 'ONE', '2': 'TWO', '3': 'THREE', '4': 'FOUR', '5': 'FIVE',
+  '6': 'SIX', '7': 'SEVEN', '8': 'EIGHT', '9': 'NINE', '10': 'TEN',
+}
+
 function cleanText(txt: string): string {
-  return txt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  return txt
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[\uFFFD\uFFFC]/g, '') // remove replacement chars
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function cleanBulletText(str: string): string {
+  return str
+    .replace(/^[\s\u2022\u2023\u25B6\u25B8\u2013\u2014\u2212\uFFFD*•\-▸\s]+/, '')
+    .replace(/[\uFFFD\uFFFC]/g, '')
+    .trim()
+}
+
+function isNoiseText(text: string): boolean {
+  const lower = text.toLowerCase()
+  return (
+    lower.includes('format the entire document') ||
+    lower.includes('standard academic guidelines') ||
+    lower.includes('reorganize the document structure') ||
+    lower.includes('apply a specific formatting style') ||
+    lower.includes('improve the overall readability') ||
+    lower.includes('start writing your document') ||
+    lower.includes('click here to edit') ||
+    lower.includes('bypassing ai detection')
+  )
 }
 
 function isCoverPage(el: Element): boolean {
@@ -66,33 +96,51 @@ function isTocPage(el: Element): boolean {
   )
 }
 
-const CHAPTER_PATTERN = /^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i
 const TOPIC_PATTERN = /^(abstract|introduction|literature\s+review|related\s+work|methodology|working\s+principle|findings|conclusion|recommendations|future\s+scope|references|bibliography|appendix)/i
-const SECTION_NUM_PATTERN = /^(\d+\.\d+)\s+/
-const SUBSECTION_NUM_PATTERN = /^(\d+\.\d+\.\d+)\s+/
+
+function parseChapterHeader(text: string): { chapterNum: string | null; topicTitle: string } | null {
+  const clean = text.trim()
+  
+  // Case A: "CHAPTER ONE" or "CHAPTER 1: INTRODUCTION"
+  const m1 = clean.match(/^chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)(?:\s*[:\-]\s*(.*))?$/i)
+  if (m1) {
+    const rawNum = m1[1].toUpperCase()
+    const numWord = NUM_TO_WORD[rawNum] || rawNum
+    const rest = m1[2] ? m1[2].trim() : ''
+    return { chapterNum: numWord, topicTitle: rest }
+  }
+
+  // Case B: "1.0 INTRODUCTION" or "1.1 INTRODUCTION"
+  const m2 = clean.match(/^([1-9])\.\d*\s+(.+)$/i)
+  if (m2) {
+    const numWord = NUM_TO_WORD[m2[1]] || m2[1]
+    const topic = m2[2].trim()
+    return { chapterNum: numWord, topicTitle: topic }
+  }
+
+  return null
+}
 
 function summarizeParagraph(text: string, maxBullets: number = 3): string[] {
-  // Split into sentences, keep the most informative ones
   const sentences = text
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
-    .filter(s => s.length > 15 && !/^(however|therefore|moreover|furthermore|in\s+addition)/i.test(s))
+    .filter(s => s.length > 15 && !/^(however|therefore|moreover|furthermore|in\s+addition)/i.test(s) && !isNoiseText(s))
 
-  if (sentences.length === 0) return [text.slice(0, 120)]
+  if (sentences.length === 0) return isNoiseText(text) ? [] : [text.slice(0, 120)]
 
   // Score each sentence: prefer those with numbers, technical terms, keywords
   const scored = sentences.map(s => {
     let score = 0
-    if (/\d+/.test(s)) score += 2                    // Contains numbers/data
+    if (/\d+/.test(s)) score += 2
     if (/\b(system|design|implement|result|performance|accuracy|efficiency|method)\b/i.test(s)) score += 2
-    if (s.length > 40 && s.length < 150) score += 1  // Medium length (not too short, not too long)
+    if (s.length > 40 && s.length < 150) score += 1
     if (/\b(proposed|developed|achieved|improved|reduced|increased)\b/i.test(s)) score += 2
     return { text: s, score }
   })
 
   scored.sort((a, b) => b.score - a.score)
   return scored.slice(0, maxBullets).map(s => {
-    // Truncate very long sentences
     if (s.text.length > 120) return s.text.slice(0, 117) + '...'
     return s.text
   })
@@ -108,7 +156,18 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
   let current: AcademicSection | null = null
   let currentSubHeading = ''
   let currentSubBullets: string[] = []
+  let seenBullets = new Set<string>()
   let pendingChapterNum: string | null = null
+
+  const addBullet = (bText: string) => {
+    const cleaned = cleanBulletText(bText)
+    if (!cleaned || cleaned.length < 4 || isNoiseText(cleaned)) return
+    const key = cleaned.toLowerCase()
+    if (!seenBullets.has(key)) {
+      seenBullets.add(key)
+      currentSubBullets.push(cleaned)
+    }
+  }
 
   const flushSubsection = () => {
     if (current && currentSubHeading && currentSubBullets.length > 0) {
@@ -121,48 +180,59 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
   const flushCurrent = () => {
     flushSubsection()
     if (current && (current.subsections.length > 0 || current.rawParagraphs.length > 0 || current.tables.length > 0)) {
-      // If section only has raw paragraphs, convert them to bullets
       if (current.subsections.length === 0 && current.rawParagraphs.length > 0) {
         const allText = current.rawParagraphs.join(' ')
         const bullets = summarizeParagraph(allText, 5)
-        current.subsections.push({ heading: '', bullets })
+        const filtered = bullets.map(b => cleanBulletText(b)).filter(b => b.length > 3 && !isNoiseText(b))
+        current.subsections.push({ heading: '', bullets: filtered })
       }
       sections.push(current)
     }
     current = null
+    seenBullets.clear()
   }
 
-  // Get all pages, filtering out cover and TOC
   const pages = Array.from(doc.querySelectorAll('div[data-type="page"]'))
   const contentPages = pages.filter(p => !isCoverPage(p) && !isTocPage(p))
-
-  // If no page structure, use the body directly
   const containers = contentPages.length > 0 ? contentPages : [doc.body]
 
   for (const container of containers) {
     const elements = Array.from(container.querySelectorAll('h1, h2, h3, p, ul, ol, table'))
 
     for (const el of elements) {
-      // Skip elements inside cover/TOC
       if (isCoverPage(el) || isTocPage(el)) continue
 
       const tag = el.tagName.toLowerCase()
       const text = cleanText(el.textContent || '')
-      if (!text) continue
+      if (!text || isNoiseText(text)) continue
 
       // ── H1: Chapter heading or topic title ──
       if (tag === 'h1') {
-        const chapterMatch = text.match(CHAPTER_PATTERN)
+        const parsed = parseChapterHeader(text)
 
-        if (chapterMatch) {
-          // "CHAPTER ONE" — store the number, wait for the topic title on the next h1
-          flushCurrent()
-          pendingChapterNum = chapterMatch[1].toUpperCase()
-          continue
+        if (parsed) {
+          if (parsed.topicTitle) {
+            // Full heading: "CHAPTER ONE: INTRODUCTION" or "1.0 INTRODUCTION"
+            flushCurrent()
+            current = {
+              chapterNum: parsed.chapterNum,
+              title: parsed.topicTitle.toUpperCase(),
+              subsections: [],
+              tables: [],
+              rawParagraphs: [],
+            }
+            pendingChapterNum = null
+            continue
+          } else {
+            // "CHAPTER ONE" — store number, wait for topic title
+            flushCurrent()
+            pendingChapterNum = parsed.chapterNum
+            continue
+          }
         }
 
         if (pendingChapterNum) {
-          // This h1 is the topic title after "CHAPTER ONE" (e.g., "INTRODUCTION")
+          // Topic title following "CHAPTER ONE"
           current = {
             chapterNum: pendingChapterNum,
             title: text.toUpperCase(),
@@ -199,15 +269,28 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
         continue
       }
 
-      // ── H2/H3: Sub-section heading (e.g., "1.1 Introduction") ──
+      // ── H2/H3: Sub-section heading ──
       if (tag === 'h2' || tag === 'h3') {
+        const parsed = parseChapterHeader(text)
+        if (parsed && parsed.chapterNum && !current) {
+          // Chapter heading inside h2/h3
+          flushCurrent()
+          current = {
+            chapterNum: parsed.chapterNum,
+            title: (parsed.topicTitle || text).toUpperCase(),
+            subsections: [],
+            tables: [],
+            rawParagraphs: [],
+          }
+          continue
+        }
+
         if (!current) {
-          // No parent chapter — create a standalone section
           flushCurrent()
           current = { chapterNum: null, title: text, subsections: [], tables: [], rawParagraphs: [] }
         } else {
           flushSubsection()
-          currentSubHeading = text
+          currentSubHeading = cleanBulletText(text)
         }
         continue
       }
@@ -217,9 +300,7 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
         const items = Array.from(el.querySelectorAll('li'))
         for (const li of items) {
           const itemText = cleanText(li.textContent || '')
-          if (itemText.length > 3) {
-            currentSubBullets.push(itemText.length > 120 ? itemText.slice(0, 117) + '...' : itemText)
-          }
+          addBullet(itemText)
         }
         continue
       }
@@ -244,9 +325,8 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
         if (!current) continue
         if (text.length > 20 && !/^page\s+\d+/i.test(text)) {
           if (currentSubHeading) {
-            // Under a sub-section — summarize and add as bullets
             const bullets = summarizeParagraph(text, 2)
-            currentSubBullets.push(...bullets)
+            bullets.forEach(b => addBullet(b))
           } else {
             current.rawParagraphs.push(text)
           }
@@ -255,7 +335,6 @@ function extractAcademicSections(fullHtml: string): AcademicSection[] {
     }
   }
 
-  // Handle dangling pendingChapterNum with no topic title
   if (pendingChapterNum && !current) {
     current = {
       chapterNum: pendingChapterNum,
@@ -282,33 +361,45 @@ interface SlideData {
 
 function buildSlideData(sections: AcademicSection[]): SlideData[] {
   const slides: SlideData[] = []
+  const MAX_BULLETS_PER_SLIDE = 5
 
   for (const sec of sections) {
-    // Merge all bullets from subsections
     const allBullets: string[] = []
+    const seenInSec = new Set<string>()
+
     for (const sub of sec.subsections) {
       if (sub.heading) {
-        allBullets.push(`▸ ${sub.heading}`)
+        const cleanH = cleanBulletText(sub.heading)
+        if (cleanH && !seenInSec.has(cleanH.toLowerCase())) {
+          seenInSec.add(cleanH.toLowerCase())
+          allBullets.push(`▸ ${cleanH}`)
+        }
       }
-      allBullets.push(...sub.bullets)
+      for (const b of sub.bullets) {
+        const cleanB = cleanBulletText(b)
+        if (cleanB && !seenInSec.has(cleanB.toLowerCase())) {
+          seenInSec.add(cleanB.toLowerCase())
+          allBullets.push(cleanB)
+        }
+      }
     }
 
     const headerText = sec.chapterNum ? `CHAPTER ${sec.chapterNum}` : sec.title
     const subHeaderText = sec.chapterNum ? sec.title : undefined
 
-    // Auto-split: if >5 bullets, split into Part 1 / Part 2
-    if (allBullets.length > 5) {
-      const mid = Math.ceil(allBullets.length / 2)
-      slides.push({
-        type: 'chapter',
-        headerText: subHeaderText ? `${headerText}: ${subHeaderText}` : headerText,
-        bullets: allBullets.slice(0, mid),
-      })
-      slides.push({
-        type: 'content',
-        headerText: subHeaderText ? `${subHeaderText} (Continued)` : `${headerText} (Continued)`,
-        bullets: allBullets.slice(mid),
-      })
+    if (allBullets.length > MAX_BULLETS_PER_SLIDE) {
+      // Chunk bullets into blocks of max 5 per slide
+      for (let i = 0; i < allBullets.length; i += MAX_BULLETS_PER_SLIDE) {
+        const chunk = allBullets.slice(i, i + MAX_BULLETS_PER_SLIDE)
+        const partNum = Math.floor(i / MAX_BULLETS_PER_SLIDE) + 1
+        const isFirst = i === 0
+        slides.push({
+          type: isFirst ? 'chapter' : 'content',
+          headerText: isFirst ? (subHeaderText ? `${headerText}: ${subHeaderText}` : headerText) : (subHeaderText || headerText),
+          subHeaderText: partNum > 1 ? `Part ${partNum}` : undefined,
+          bullets: chunk,
+        })
+      }
     } else if (allBullets.length > 0) {
       slides.push({
         type: 'chapter',
@@ -323,7 +414,7 @@ function buildSlideData(sections: AcademicSection[]): SlideData[] {
       slides.push({
         type: 'table',
         headerText: sec.title + ' — Data',
-        tableRows: table.slice(0, 8), // Max 8 rows per table slide
+        tableRows: table.slice(0, 8),
         bullets: [],
       })
     }
@@ -401,7 +492,7 @@ export async function exportPresentationPptx(fullHtml: string, meta: PptxMetadat
       fontSize: sd.subHeaderText ? 20 : 24, bold: true, color: 'FFFFFF', fontFace: 'Arial', valign: 'middle',
     })
 
-    // Sub-header (topic title like "INTRODUCTION")
+    // Sub-header (topic title or Part 2/3)
     if (sd.subHeaderText) {
       slide.addText(sd.subHeaderText, {
         x: 0.85, y: 0.55, w: 10.0, h: 0.4,
@@ -439,8 +530,9 @@ export async function exportPresentationPptx(fullHtml: string, meta: PptxMetadat
       const startY = sd.type === 'table' && sd.tableRows ? 4.5 : 1.5
       const bulletProps = sd.bullets.map((bText, bIdx) => {
         const isSubHeading = bText.startsWith('▸ ')
+        const rawText = isSubHeading ? bText.slice(2) : bText
         return {
-          text: (isSubHeading ? bText.slice(2) : bText) + (bIdx === sd.bullets.length - 1 ? '' : '\n'),
+          text: rawText + (bIdx === sd.bullets.length - 1 ? '' : '\n'),
           options: {
             ...(isSubHeading
               ? { bold: true, fontSize: 17, color: '1E293B', fontFace: 'Arial', lineSpacing: 28 }
