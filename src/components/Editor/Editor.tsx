@@ -3884,19 +3884,45 @@ export default function Editor() {
     }
   }
 
-  // Helper to dynamically load pdfjs-dist and configure workerSrc safely.
-  // Uses "pdfjs-dist/webpack.mjs" (the bundler entry) because Next.js cannot
-  // bundle the ESM-only main build: `import('pdfjs-dist')` returns an empty
-  // namespace where every export (including getDocument) is undefined, which
-  // throws "undefined is not a function" at import time. The webpack entry
-  // also auto-bundles the worker, so no CDN fetch is required.
+  // Helper to dynamically load pdfjs-dist and configure workerSrc safely across mobile and desktop.
   const getPdfJs = async () => {
-    // @ts-ignore - pdfjs-dist/webpack.mjs ships no type declarations
-    const pdfjs = await import('pdfjs-dist/webpack.mjs')
-    const api = typeof (pdfjs as any).getDocument === 'function' ? pdfjs : (pdfjs as any).default
-    if (api && api.GlobalWorkerOptions) {
-      api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${api.version || '6.0.227'}/build/pdf.worker.min.mjs`
+    let pdfjsModule: any = null
+    try {
+      // 1. Try standard build
+      pdfjsModule = await import('pdfjs-dist/build/pdf.mjs')
+    } catch (e1) {
+      try {
+        // 2. Try legacy build (for maximum mobile browser compatibility)
+        pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      } catch (e2) {
+        // 3. Fallback to webpack bundler entry
+        pdfjsModule = await import('pdfjs-dist/webpack.mjs')
+      }
     }
+
+    // Resolve API object from named or default export
+    const api =
+      typeof pdfjsModule?.getDocument === 'function'
+        ? pdfjsModule
+        : typeof pdfjsModule?.default?.getDocument === 'function'
+        ? pdfjsModule.default
+        : pdfjsModule
+
+    if (!api || typeof api.getDocument !== 'function') {
+      console.error('pdfjs-dist export structure:', pdfjsModule)
+      throw new Error('PDF parsing library could not initialize getDocument function. Please try uploading a .docx file or refresh.')
+    }
+
+    // Configure workerSrc for PDF.js if available
+    try {
+      if (api.GlobalWorkerOptions) {
+        const version = api.version || '6.0.227'
+        api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`
+      }
+    } catch (workerErr) {
+      console.warn('Could not set PDF workerSrc, proceeding in fallback mode:', workerErr)
+    }
+
     return api
   }
 
