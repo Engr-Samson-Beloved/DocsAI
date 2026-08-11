@@ -3889,13 +3889,16 @@ export default function Editor() {
     let pdfjsModule: any = null
     try {
       // 1. Try standard build
+      // @ts-ignore
       pdfjsModule = await import('pdfjs-dist/build/pdf.mjs')
     } catch (e1) {
       try {
         // 2. Try legacy build (for maximum mobile browser compatibility)
+        // @ts-ignore
         pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs')
       } catch (e2) {
         // 3. Fallback to webpack bundler entry
+        // @ts-ignore
         pdfjsModule = await import('pdfjs-dist/webpack.mjs')
       }
     }
