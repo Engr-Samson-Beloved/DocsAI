@@ -4017,6 +4017,12 @@ export default function Editor() {
           }
         }
         
+        if (!accumulatedHtml.trim()) {
+          alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
+          setIsExporting(false)
+          return
+        }
+        
         setImportFileData({
           name: file.name,
           htmlContent: cleanImportedHtml(accumulatedHtml),
@@ -4115,6 +4121,11 @@ export default function Editor() {
                 accumulatedHtml += `<p>${para}</p>`
               }
             }
+          }
+          if (!accumulatedHtml.trim()) {
+            alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
+            setIsExporting(false)
+            return
           }
           htmlContent = cleanImportedHtml(accumulatedHtml)
         } else if (extension === 'txt') {
