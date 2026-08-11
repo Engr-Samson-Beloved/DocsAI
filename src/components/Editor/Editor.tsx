@@ -1443,6 +1443,7 @@ export default function Editor() {
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
   const mobileToolsMenuRef = useRef<HTMLDivElement | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom' | null>(null)
+  const [pendingPptx, setPendingPptx] = useState(false)
 
   // Mobile viewport detection
   const [isMobile, setIsMobile] = useState(false)
@@ -5542,6 +5543,10 @@ export default function Editor() {
               setPendingTemplate(type)
             }}
             onImportDocument={handleDashboardImport}
+            onGeneratePptx={() => {
+              createNewProject()
+              setPendingPptx(true)
+            }}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5619,6 +5624,8 @@ export default function Editor() {
             userSubscription={userSubscription}
             initialTemplate={pendingTemplate}
             onClearInitialTemplate={() => setPendingTemplate(null)}
+            initialPptxExport={pendingPptx}
+            onClearInitialPptxExport={() => setPendingPptx(false)}
             triggerUndo={triggerUndo}
             triggerRedo={triggerRedo}
             onApplyCoverPage={applyCoverPage}

@@ -27,6 +27,7 @@ interface MobileDashboardProps {
   onCreateProject: () => void
   onCreateProjectWithTemplate: (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => void
   onImportDocument?: () => void
+  onGeneratePptx?: () => void
   onDeleteProject: (id: string) => void
   onRenameProject: (id: string) => void
   onLoadProject: (id: string) => void
@@ -51,7 +52,8 @@ export default function MobileDashboard({
   onOpenAuth,
   onOpenPricingModal,
   userSubscription,
-  onImportDocument
+  onImportDocument,
+  onGeneratePptx
 }: MobileDashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeMenuProjectId, setActiveMenuProjectId] = useState<string | null>(null)
@@ -226,7 +228,7 @@ export default function MobileDashboard({
               </div>
             </button>
             <button
-              onClick={() => onCreateProjectWithTemplate('Custom')}
+              onClick={() => onGeneratePptx?.()}
               className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-amber-500 text-left active:scale-[0.98] transition-all shadow-xs"
             >
               <span className="w-6.5 h-6.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-amber-600 font-bold text-sm">📊</span>
