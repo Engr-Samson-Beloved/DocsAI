@@ -3884,49 +3884,65 @@ export default function Editor() {
     }
   }
 
-  // Helper to dynamically load pdfjs-dist and configure workerSrc safely across mobile and desktop.
+  // Helper to dynamically load PDF.js with CDN script fallback for mobile & Next.js compatibility.
   const getPdfJs = async () => {
-    let pdfjsModule: any = null
-    try {
-      // 1. Try standard build
-      // @ts-ignore
-      pdfjsModule = await import('pdfjs-dist/build/pdf.mjs')
-    } catch (e1) {
-      try {
-        // 2. Try legacy build (for maximum mobile browser compatibility)
-        // @ts-ignore
-        pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs')
-      } catch (e2) {
-        // 3. Fallback to webpack bundler entry
-        // @ts-ignore
-        pdfjsModule = await import('pdfjs-dist/webpack.mjs')
-      }
+    // 1. Check if already loaded globally on window
+    if (typeof window !== 'undefined' && (window as any).pdfjsLib && typeof (window as any).pdfjsLib.getDocument === 'function') {
+      return (window as any).pdfjsLib
     }
 
-    // Resolve API object from named or default export
-    const api =
-      typeof pdfjsModule?.getDocument === 'function'
-        ? pdfjsModule
-        : typeof pdfjsModule?.default?.getDocument === 'function'
-        ? pdfjsModule.default
+    // 2. Try importing npm package
+    try {
+      // @ts-ignore
+      const pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs')
+      const api = typeof pdfjsModule?.getDocument === 'function' 
+        ? pdfjsModule 
+        : typeof (pdfjsModule as any)?.default?.getDocument === 'function' 
+        ? (pdfjsModule as any).default 
         : pdfjsModule
 
-    if (!api || typeof api.getDocument !== 'function') {
-      console.error('pdfjs-dist export structure:', pdfjsModule)
-      throw new Error('PDF parsing library could not initialize getDocument function. Please try uploading a .docx file or refresh.')
-    }
-
-    // Configure workerSrc for PDF.js if available
-    try {
-      if (api.GlobalWorkerOptions) {
-        const version = api.version || '6.0.227'
-        api.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`
+      if (api && typeof api.getDocument === 'function') {
+        try {
+          if (api.GlobalWorkerOptions) {
+            api.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+          }
+        } catch (e) {}
+        return api
       }
-    } catch (workerErr) {
-      console.warn('Could not set PDF workerSrc, proceeding in fallback mode:', workerErr)
+    } catch (npmErr) {
+      console.warn('NPM pdfjs-dist import failed, falling back to CDN script:', npmErr)
     }
 
-    return api
+    // 3. Robust CDN Script Injection fallback (Guaranteed to work on all mobile/desktop browsers)
+    if (typeof window !== 'undefined') {
+      if ((window as any).pdfjsLib && typeof (window as any).pdfjsLib.getDocument === 'function') {
+        return (window as any).pdfjsLib
+      }
+
+      if (!(window as any)._pdfJsLoadingPromise) {
+        (window as any)._pdfJsLoadingPromise = new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+          script.async = true
+          script.onload = () => {
+            const pdfjs = (window as any).pdfjsLib
+            if (pdfjs && typeof pdfjs.getDocument === 'function') {
+              try {
+                pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+              } catch (e) {}
+              resolve(pdfjs)
+            } else {
+              reject(new Error('PDF.js script loaded but getDocument function was not found'))
+            }
+          }
+          script.onerror = () => reject(new Error('Failed to load PDF parser from network. Please check your internet connection.'))
+          document.head.appendChild(script)
+        })
+      }
+      return (window as any)._pdfJsLoadingPromise
+    }
+
+    throw new Error('PDF parsing library could not be loaded.')
   }
 
   // Import document file (.docx or .pdf) dynamically using mammoth or pdfjs-dist
