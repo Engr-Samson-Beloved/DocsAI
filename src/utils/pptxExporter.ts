@@ -22,9 +22,16 @@
  *  - Bullets are compressed (citations, hedges and lead-ins stripped, clause-aware
  *    trimming) rather than hard-cut mid-word.
  *  - Overflow is prevented by measuring estimated text lines against the body box
- *    and stepping the font down 18 -> 16pt before splitting onto another slide.
- *  - Fonts: Title 34pt, Headers 24pt, Subheaders 16pt, Body 18pt (never below 16pt).
- *  - Widescreen 16:9, 60-30-10 colour system (slate ground, navy headers, indigo accent).
+ *    and stepping the font down 22 -> 16pt before splitting onto another slide.
+ *  - Typography matches the guideline exactly: Title 36pt (spec 36-40), Section
+ *    Heading 24pt (spec 24-28), Body 22-18pt (spec 18-22), floor 16pt.
+ *  - Deck order follows the guideline's recommended structure: Title (with name,
+ *    matric no, department, supervisor) -> body chapters, with Aim & Objectives
+ *    lifted onto its own slide -> Questions. No outline slide: the guideline's
+ *    structure does not include one (opt in via options.includeAgenda).
+ *  - Max 6 bullets per slide, supporting "limit each slide to one main idea".
+ *  - Widescreen 16:9, 60-30-10 colour system, white-on-navy and dark-on-light
+ *    pairings from the guideline's contrast table.
  *
  * Note: this file is deliberately ASCII-only. Literal box-drawing and bullet
  * glyphs here have been corrupted by tooling before; where a non-ASCII character
@@ -44,10 +51,13 @@ export interface PptxMetadata {
 }
 
 export interface PptxOptions {
-  /** Total slides including title, agenda and Q&A. Defaults to the 12-15 guideline. */
+  /** Total slides including title and Q&A. Defaults to the 12-15 guideline. */
   minSlides?: number
   maxSlides?: number
-  /** Include the agenda/outline slide (skipped automatically for very short docs). */
+  /**
+   * Add an outline/agenda slide. Off by default: the guideline's recommended deck
+   * goes Title -> Problem Statement -> Aim & Objectives, with no outline slide.
+   */
   includeAgenda?: boolean
 }
 
@@ -62,8 +72,14 @@ const BODY_TOP = 1.5
 const BODY_BOTTOM = 6.85 // footer sits below this
 const BODY_H = BODY_BOTTOM - BODY_TOP
 
+// Typography per the guideline's "TYPOGRAPHY AND VISUAL HIERARCHY" page:
+// Title 36-40pt, Section Heading 24-28pt, Body 18-22pt, never below 16pt.
+// Arial is one of the four fonts it names (Arial, Calibri, Helvetica, Segoe UI).
 const FONT = 'Arial'
-const BODY_FONT_MAX = 18
+const TITLE_FONT = 36
+const HEADER_FONT = 24
+const SUBHEADER_FONT = 18
+const BODY_FONT_MAX = 22
 const BODY_FONT_MIN = 16
 
 /**
@@ -628,15 +644,20 @@ function packBullets(bullets: Bullet[], maxSlides: number): { chunks: Bullet[][]
   return { chunks: chunkAt(BODY_FONT_MIN, maxSlides), fontSize: BODY_FONT_MIN }
 }
 
-/** Builds the bullet stream for a section, sized to the slides it was allotted. */
-function bulletsForSection(section: DocSection, slideQuota: number): Bullet[] {
+/**
+ * The guideline devotes Slide 3 to Aim & Objectives, so a subsection covering it
+ * is lifted onto its own slide instead of being flattened into the chapter.
+ */
+const AIM_HEADING = /\b(aims?|objectives?)\b/i
+
+/** Builds the bullet stream for a set of subsections, sized to its slide quota. */
+function bulletsFrom(subsections: Subsection[], slideQuota: number, references: boolean): Bullet[] {
   const bullets: Bullet[] = []
   const seen = new Set<string>()
-  const references = isReferenceSection(section)
 
   // Roughly six bullets fill a slide comfortably; that sets the extraction target.
-  const targetBullets = Math.max(3, slideQuota * 6)
-  const subsectionCount = Math.max(1, section.subsections.length)
+  const targetBullets = Math.max(3, slideQuota * MAX_BULLETS_PER_SLIDE)
+  const subsectionCount = Math.max(1, subsections.length)
   const perSubsection = Math.max(1, Math.round(targetBullets / subsectionCount))
 
   const push = (text: string, kind: BulletKind) => {
@@ -648,7 +669,7 @@ function bulletsForSection(section: DocSection, slideQuota: number): Bullet[] {
     bullets.push({ text: clean, kind })
   }
 
-  for (const sub of section.subsections) {
+  for (const sub of subsections) {
     if (references) {
       // Reference entries are already atomic - never summarise them.
       sub.paragraphs.forEach(p => push(trimToLength(p, 150), 'point'))
@@ -695,14 +716,37 @@ export function buildSlideSpecs(sections: DocSection[], contentBudget: number): 
   usable.forEach((section, i) => {
     const headerText = section.chapterNum ? 'CHAPTER ' + section.chapterNum : section.title
     const subHeaderText = section.chapterNum ? section.title : undefined
+    const references = isReferenceSection(section)
 
-    const bullets = bulletsForSection(section, quotas[i])
+    let quota = quotas[i]
+    let subsections = section.subsections
+
+    // Lift Aim & Objectives onto a dedicated slide, ahead of the chapter body.
+    if (!references && quota > 1) {
+      const aimSubs = subsections.filter(s => AIM_HEADING.test(s.heading))
+      if (aimSubs.length > 0 && aimSubs.length < subsections.length) {
+        const aimBullets = bulletsFrom(aimSubs, 1, false).filter(b => b.kind === 'point')
+        if (aimBullets.length > 0) {
+          const { chunks } = packBullets(aimBullets, 1)
+          specs.push({
+            headerText,
+            subHeaderText: 'Aim & Objectives',
+            bullets: chunks[0] ?? aimBullets,
+            variant: 'bullets',
+          })
+          subsections = subsections.filter(s => !AIM_HEADING.test(s.heading))
+          quota -= 1
+        }
+      }
+    }
+
+    const bullets = bulletsFrom(subsections, quota, references)
 
     if (bullets.length > 0) {
-      if (isReferenceSection(section)) {
+      if (references) {
         specs.push({ headerText, subHeaderText, bullets: bullets.slice(0, 7), variant: 'references' })
       } else {
-        const { chunks } = packBullets(bullets, quotas[i])
+        const { chunks } = packBullets(bullets, quota)
         chunks.forEach((chunk, ci) => {
           specs.push({
             headerText,
@@ -747,7 +791,7 @@ function paintContentChrome(
     y: 0.14,
     w: 9.6,
     h: spec.subHeaderText ? 0.42 : 0.7,
-    fontSize: spec.subHeaderText ? 20 : 24,
+    fontSize: spec.subHeaderText ? HEADER_FONT - 4 : HEADER_FONT,
     bold: true,
     color: COLOR.white,
     fontFace: FONT,
@@ -761,7 +805,7 @@ function paintContentChrome(
       y: 0.55,
       w: 9.6,
       h: 0.4,
-      fontSize: 16,
+      fontSize: SUBHEADER_FONT,
       italic: true,
       color: COLOR.indigoLight,
       fontFace: FONT,
@@ -823,7 +867,7 @@ export async function exportPresentationPptx(
 
   // Title + Q&A are fixed; the agenda is dropped when there is little to outline.
   const chapterTitles = sections.filter(s => s.kind === 'chapter').map(s => s.title)
-  const includeAgenda = (options.includeAgenda ?? true) && chapterTitles.length >= 3
+  const includeAgenda = (options.includeAgenda ?? false) && chapterTitles.length >= 3
   const reserved = 2 + (includeAgenda ? 1 : 0)
 
   const contentBudget = Math.max(1, maxSlides - reserved)
@@ -852,12 +896,12 @@ export async function exportPresentationPptx(
     y: 1.5,
     w: BODY_W,
     h: 2.2,
-    fontSize: 34,
+    fontSize: TITLE_FONT,
     bold: true,
     color: COLOR.white,
     align: 'center',
     fontFace: FONT,
-    lineSpacing: 42,
+    lineSpacing: 44,
     fit: 'shrink',
   })
 
