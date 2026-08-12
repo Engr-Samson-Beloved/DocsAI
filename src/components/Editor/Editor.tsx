@@ -34,7 +34,7 @@ import { exportPdfReact } from '../../utils/reactPdf'
 import { exportPresentationPptx } from '../../utils/pptxExporter'
 import { mapHeadingsToContentPages } from '../../utils/printPagination'
 import { buildTocPageHtml } from '../../utils/documentAudit'
-import { loadPdfDocument, detectDocumentKind, DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
+import { extractPdfAsHtml, detectDocumentKind, DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -3911,68 +3911,8 @@ export default function Editor() {
         setShowImportModal(true)
       } else if (extension === 'pdf') {
         // Renders PDF text content extracted from pdfjs-dist
-        const pdf = await loadPdfDocument(file)
+        const accumulatedHtml = await extractPdfAsHtml(file)
 
-        let accumulatedHtml = ''
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i)
-          const textContent = await page.getTextContent()
-          const items = textContent.items as any[]
-          
-          // Group text items into paragraphs using Y-coordinate gaps
-          if (items.length === 0) continue
-          
-          let currentParagraph = ''
-          let lastY: number | null = null
-          const paragraphs: string[] = []
-          
-          for (const item of items) {
-            const str = item.str || ''
-            if (!str.trim()) continue
-            
-            const y = item.transform ? item.transform[5] : null
-            
-            if (lastY !== null && y !== null) {
-              const yGap = Math.abs(lastY - y)
-              // A Y gap > 5 units typically indicates a new line/paragraph
-              if (yGap > 5) {
-                if (currentParagraph.trim()) {
-                  paragraphs.push(currentParagraph.trim())
-                }
-                currentParagraph = str
-              } else {
-                currentParagraph += ' ' + str
-              }
-            } else {
-              currentParagraph += (currentParagraph ? ' ' : '') + str
-            }
-            lastY = y
-          }
-          
-          if (currentParagraph.trim()) {
-            paragraphs.push(currentParagraph.trim())
-          }
-          
-          // Detect headings: short lines that are all uppercase or start with chapter/section numbers
-          for (const para of paragraphs) {
-            const isHeading = (
-              (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
-              /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
-            )
-            const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
-            
-            if (isHeading) {
-              accumulatedHtml += `<h1>${para}</h1>`
-            } else if (isSectionHeading) {
-              const level = para.split('.').length // e.g. 1.2 = h2, 1.2.3 = h3
-              const hTag = level <= 2 ? 'h2' : 'h3'
-              accumulatedHtml += `<${hTag}>${para}</${hTag}>`
-            } else {
-              accumulatedHtml += `<p>${para}</p>`
-            }
-          }
-        }
-        
         if (!accumulatedHtml.trim()) {
           alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
           setIsExporting(false)
@@ -3990,8 +3930,10 @@ export default function Editor() {
         alert('Unsupported document format. Please upload a .docx or .pdf file.')
       }
     } catch (err: any) {
-      console.error('File import failure:', err)
-      alert(`Failed to import document: ${err.message || err}`)
+      // Log the stack too: import failures are usually reported from a phone,
+      // where the alert text is all the diagnostic anyone can send back.
+      console.error('File import failure:', err, err?.stack)
+      alert(`Failed to import document: ${err?.message || err}`)
     } finally {
       setIsExporting(false)
       // Reset input element value to allow re-upload of same file
@@ -4026,55 +3968,8 @@ export default function Editor() {
           const result = await mammoth.convertToHtml({ arrayBuffer })
           htmlContent = cleanImportedHtml(result.value)
         } else if (extension === 'pdf') {
-          const pdf = await loadPdfDocument(file)
+          const accumulatedHtml = await extractPdfAsHtml(file)
 
-          let accumulatedHtml = ''
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i)
-            const textContent = await page.getTextContent()
-            const items = textContent.items as any[]
-            if (items.length === 0) continue
-
-            let currentParagraph = ''
-            let lastY: number | null = null
-            const paragraphs: string[] = []
-
-            for (const item of items) {
-              const str = item.str || ''
-              if (!str.trim()) continue
-              const y = item.transform ? item.transform[5] : null
-              if (lastY !== null && y !== null) {
-                const yGap = Math.abs(lastY - y)
-                if (yGap > 5) {
-                  if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
-                  currentParagraph = str
-                } else {
-                  currentParagraph += ' ' + str
-                }
-              } else {
-                currentParagraph += (currentParagraph ? ' ' : '') + str
-              }
-              lastY = y
-            }
-            if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
-
-            for (const para of paragraphs) {
-              const isHeading = (
-                (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
-                /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
-              )
-              const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
-              if (isHeading) {
-                accumulatedHtml += `<h1>${para}</h1>`
-              } else if (isSectionHeading) {
-                const level = para.split('.').length
-                const hTag = level <= 2 ? 'h2' : 'h3'
-                accumulatedHtml += `<${hTag}>${para}</${hTag}>`
-              } else {
-                accumulatedHtml += `<p>${para}</p>`
-              }
-            }
-          }
           if (!accumulatedHtml.trim()) {
             alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
             setIsExporting(false)
@@ -4694,64 +4589,14 @@ export default function Editor() {
         type: 'docx'
       }
     } else if (extension === 'pdf') {
-      const pdf = await loadPdfDocument(file)
+      const accumulatedHtml = await extractPdfAsHtml(file)
 
-      let accumulatedHtml = ''
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const textContent = await page.getTextContent()
-        const items = textContent.items as any[]
-        
-        if (items.length === 0) continue
-        
-        let currentParagraph = ''
-        let lastY: number | null = null
-        const paragraphs: string[] = []
-        
-        for (const item of items) {
-          const str = item.str || ''
-          if (!str.trim()) continue
-          
-          const y = item.transform ? item.transform[5] : null
-          
-          if (lastY !== null && y !== null) {
-            const yGap = Math.abs(lastY - y)
-            if (yGap > 5) {
-              if (currentParagraph.trim()) {
-                paragraphs.push(currentParagraph.trim())
-              }
-              currentParagraph = str
-            } else {
-              currentParagraph += ' ' + str
-            }
-          } else {
-            currentParagraph += (currentParagraph ? ' ' : '') + str
-          }
-          lastY = y
-        }
-        
-        if (currentParagraph.trim()) {
-          paragraphs.push(currentParagraph.trim())
-        }
-        
-        for (const para of paragraphs) {
-          const isHeading = (
-            (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
-            /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
-          )
-          const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
-          
-          if (isHeading) {
-            accumulatedHtml += `<h1>${para}</h1>`
-          } else if (isSectionHeading) {
-            const level = para.split('.').length
-            const hTag = level <= 2 ? 'h2' : 'h3'
-            accumulatedHtml += `<${hTag}>${para}</${hTag}>`
-          } else {
-            accumulatedHtml += `<p>${para}</p>`
-          }
-        }
+      if (!accumulatedHtml.trim()) {
+        throw new Error(
+          'No extractable text was found in this PDF. If it is a scanned image, upload a text-based PDF or a .docx file.'
+        )
       }
+
       return {
         name: file.name,
         content: accumulatedHtml,

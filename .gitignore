@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# pdf.js worker copied out of node_modules by scripts/copy-pdf-worker.mjs
+# (regenerated on install and before dev/build - never edit or commit it)
+/public/pdf.worker.min.mjs
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

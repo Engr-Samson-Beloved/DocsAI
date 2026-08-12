@@ -97,14 +97,139 @@ export async function getPdfJs(): Promise<PdfJsApi> {
 }
 
 /**
+ * Reads a file's bytes.
+ *
+ * `Blob.arrayBuffer()` is missing on iOS Safari below 14 and on several Android
+ * WebViews, where calling it throws "undefined is not a function". Those are
+ * exactly the browsers this app's mobile users are on, so FileReader backs it up.
+ */
+async function readArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer()
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.onerror = () => reject(new Error('The selected file could not be read.'))
+    reader.readAsArrayBuffer(blob)
+  })
+}
+
+/** Errors carry the stage that failed so the UI can report something actionable. */
+export class PdfImportError extends Error {
+  stage: string
+  constructor(stage: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause)
+    super(`[${stage}] ${detail}`)
+    this.name = 'PdfImportError'
+    this.stage = stage
+  }
+}
+
+/**
  * Opens a PDF and returns the loaded document.
  * Mobile pickers hand over files backed by cloud providers, so the bytes are read
  * up front rather than streamed through a URL the worker cannot reach.
  */
-export async function loadPdfDocument(file: File | ArrayBuffer): Promise<any> {
-  const pdfjs = await getPdfJs()
-  const buffer = file instanceof ArrayBuffer ? file : await file.arrayBuffer()
-  return pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise
+export async function loadPdfDocument(file: File | Blob | ArrayBuffer): Promise<any> {
+  let pdfjs: PdfJsApi
+  try {
+    pdfjs = await getPdfJs()
+  } catch (err) {
+    throw new PdfImportError('load-pdfjs', err)
+  }
+
+  let bytes: Uint8Array
+  try {
+    const buffer = file instanceof ArrayBuffer ? file : await readArrayBuffer(file)
+    bytes = new Uint8Array(buffer)
+  } catch (err) {
+    throw new PdfImportError('read-file', err)
+  }
+
+  try {
+    return await pdfjs.getDocument({ data: bytes }).promise
+  } catch (err) {
+    throw new PdfImportError('parse-pdf', err)
+  }
+}
+
+/**
+ * Extracts a PDF's text as structured HTML (headings + paragraphs).
+ *
+ * Text items are grouped into paragraphs by Y-coordinate gaps, then lines that
+ * look like chapter/section headings are promoted to h1/h2/h3 so downstream
+ * consumers (the editor, the audit, the PPTX exporter) see real structure.
+ *
+ * Returns '' when the PDF holds no extractable text, which is the signal that it
+ * is a scanned image rather than a text PDF.
+ */
+export async function extractPdfAsHtml(file: File | Blob): Promise<string> {
+  const pdf = await loadPdfDocument(file)
+
+  let html = ''
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    let items: any[]
+    try {
+      const page = await pdf.getPage(i)
+      const textContent = await page.getTextContent()
+      // Defensive: never iterate straight off the library's return value.
+      items = Array.isArray(textContent?.items) ? textContent.items : Array.from(textContent?.items || [])
+    } catch (err) {
+      throw new PdfImportError(`read-page-${i}`, err)
+    }
+
+    if (items.length === 0) continue
+
+    const paragraphs: string[] = []
+    let currentParagraph = ''
+    let lastY: number | null = null
+
+    for (const item of items) {
+      const str = (item && item.str) || ''
+      if (!str.trim()) continue
+
+      const y = item && item.transform ? item.transform[5] : null
+
+      if (lastY !== null && y !== null) {
+        // A Y gap > 5 units typically indicates a new line/paragraph.
+        if (Math.abs(lastY - y) > 5) {
+          if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
+          currentParagraph = str
+        } else {
+          currentParagraph += ' ' + str
+        }
+      } else {
+        currentParagraph += (currentParagraph ? ' ' : '') + str
+      }
+      lastY = y
+    }
+
+    if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
+
+    for (const para of paragraphs) {
+      const isHeading =
+        (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
+        /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
+      const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
+
+      if (isHeading) {
+        html += `<h1>${escapeHtml(para)}</h1>`
+      } else if (isSectionHeading) {
+        const hTag = para.split('.').length <= 2 ? 'h2' : 'h3' // 1.2 -> h2, 1.2.3 -> h3
+        html += `<${hTag}>${escapeHtml(para)}</${hTag}>`
+      } else {
+        html += `<p>${escapeHtml(para)}</p>`
+      }
+    }
+  }
+
+  return html
+}
+
+/** PDF text is untrusted here — "<" in the source must not become markup. */
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 export type DocumentKind = 'pdf' | 'docx' | 'txt' | 'unknown'
