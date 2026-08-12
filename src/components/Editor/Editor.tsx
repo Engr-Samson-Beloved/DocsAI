@@ -34,6 +34,7 @@ import { exportPdfReact } from '../../utils/reactPdf'
 import { exportPresentationPptx } from '../../utils/pptxExporter'
 import { mapHeadingsToContentPages } from '../../utils/printPagination'
 import { buildTocPageHtml } from '../../utils/documentAudit'
+import { loadPdfDocument, detectDocumentKind, DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -3884,66 +3885,8 @@ export default function Editor() {
     }
   }
 
-  // Helper to dynamically load PDF.js with CDN script fallback for mobile & Next.js compatibility.
-  const getPdfJs = async () => {
-    // 1. Check if already loaded globally on window
-    if (typeof window !== 'undefined' && (window as any).pdfjsLib && typeof (window as any).pdfjsLib.getDocument === 'function') {
-      return (window as any).pdfjsLib
-    }
-
-    // 2. Try importing npm package
-    try {
-      // @ts-ignore
-      const pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs')
-      const api = typeof pdfjsModule?.getDocument === 'function' 
-        ? pdfjsModule 
-        : typeof (pdfjsModule as any)?.default?.getDocument === 'function' 
-        ? (pdfjsModule as any).default 
-        : pdfjsModule
-
-      if (api && typeof api.getDocument === 'function') {
-        try {
-          if (api.GlobalWorkerOptions) {
-            api.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-          }
-        } catch (e) {}
-        return api
-      }
-    } catch (npmErr) {
-      console.warn('NPM pdfjs-dist import failed, falling back to CDN script:', npmErr)
-    }
-
-    // 3. Robust CDN Script Injection fallback (Guaranteed to work on all mobile/desktop browsers)
-    if (typeof window !== 'undefined') {
-      if ((window as any).pdfjsLib && typeof (window as any).pdfjsLib.getDocument === 'function') {
-        return (window as any).pdfjsLib
-      }
-
-      if (!(window as any)._pdfJsLoadingPromise) {
-        (window as any)._pdfJsLoadingPromise = new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
-          script.async = true
-          script.onload = () => {
-            const pdfjs = (window as any).pdfjsLib
-            if (pdfjs && typeof pdfjs.getDocument === 'function') {
-              try {
-                pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-              } catch (e) {}
-              resolve(pdfjs)
-            } else {
-              reject(new Error('PDF.js script loaded but getDocument function was not found'))
-            }
-          }
-          script.onerror = () => reject(new Error('Failed to load PDF parser from network. Please check your internet connection.'))
-          document.head.appendChild(script)
-        })
-      }
-      return (window as any)._pdfJsLoadingPromise
-    }
-
-    throw new Error('PDF parsing library could not be loaded.')
-  }
+  // PDF.js loading lives in utils/pdfLoader so the worker always matches the bundled
+  // API version (see the "API version does not match the worker version" failure).
 
   // Import document file (.docx or .pdf) dynamically using mammoth or pdfjs-dist
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3953,12 +3896,12 @@ export default function Editor() {
     setLoadingMessage('Importing and Parsing File...')
     setIsExporting(true)
     try {
-      const extension = file.name.split('.').pop()?.toLowerCase()
+      const extension = await detectDocumentKind(file)
       if (extension === 'docx') {
         const mammoth = await import('mammoth')
         const arrayBuffer = await file.arrayBuffer()
         const result = await mammoth.convertToHtml({ arrayBuffer })
-        
+
         setImportFileData({
           name: file.name,
           htmlContent: cleanImportedHtml(result.value),
@@ -3968,11 +3911,8 @@ export default function Editor() {
         setShowImportModal(true)
       } else if (extension === 'pdf') {
         // Renders PDF text content extracted from pdfjs-dist
-        const pdfjs = await getPdfJs()
-        const arrayBuffer = await file.arrayBuffer()
-        const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
-        const pdf = await loadingTask.promise
-        
+        const pdf = await loadPdfDocument(file)
+
         let accumulatedHtml = ''
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i)
@@ -4064,7 +4004,7 @@ export default function Editor() {
   const handleDashboardImport = () => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.docx,.pdf,.txt'
+    input.accept = `${DOCUMENT_ACCEPT},.txt,text/plain`
     input.style.display = 'none'
     document.body.appendChild(input)
 
@@ -4077,7 +4017,7 @@ export default function Editor() {
       setIsExporting(true)
 
       try {
-        const extension = file.name.split('.').pop()?.toLowerCase()
+        const extension = await detectDocumentKind(file)
         let htmlContent = ''
 
         if (extension === 'docx') {
@@ -4086,10 +4026,7 @@ export default function Editor() {
           const result = await mammoth.convertToHtml({ arrayBuffer })
           htmlContent = cleanImportedHtml(result.value)
         } else if (extension === 'pdf') {
-          const pdfjs = await getPdfJs()
-          const arrayBuffer = await file.arrayBuffer()
-          const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
-          const pdf = await loadingTask.promise
+          const pdf = await loadPdfDocument(file)
 
           let accumulatedHtml = ''
           for (let i = 1; i <= pdf.numPages; i++) {
@@ -4745,8 +4682,8 @@ export default function Editor() {
 
   // Setup Wizard & Source Context File Parsing Helpers
   const parseSourceFile = async (file: File): Promise<{ name: string; content: string; type: string }> => {
-    const extension = file.name.split('.').pop()?.toLowerCase()
-    
+    const extension = await detectDocumentKind(file)
+
     if (extension === 'docx') {
       const mammoth = await import('mammoth')
       const arrayBuffer = await file.arrayBuffer()
@@ -4757,11 +4694,8 @@ export default function Editor() {
         type: 'docx'
       }
     } else if (extension === 'pdf') {
-      const pdfjs = await getPdfJs()
-      const arrayBuffer = await file.arrayBuffer()
-      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) })
-      const pdf = await loadingTask.promise
-      
+      const pdf = await loadPdfDocument(file)
+
       let accumulatedHtml = ''
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i)
@@ -5807,7 +5741,7 @@ export default function Editor() {
           {/* Import (Desktop visible, mobile inside Quick Tools menu) */}
           <input
             type="file"
-            accept=".docx,.pdf"
+            accept={DOCUMENT_ACCEPT}
             id="import-file"
             onChange={handleImportFile}
             className="hidden"
@@ -5970,7 +5904,7 @@ export default function Editor() {
                     <span>Import (.docx / .pdf)</span>
                     <input
                       type="file"
-                      accept=".docx,.pdf"
+                      accept={DOCUMENT_ACCEPT}
                       onChange={(e) => {
                         setShowMobileToolsMenu(false)
                         handleImportFile(e)
@@ -6543,7 +6477,7 @@ export default function Editor() {
                           <span>Ingest PDF or Word File</span>
                           <input
                             type="file"
-                            accept=".docx,.pdf"
+                            accept={DOCUMENT_ACCEPT}
                             multiple
                             onChange={handleWizardFileUpload}
                             className="hidden"
@@ -7290,7 +7224,7 @@ export default function Editor() {
                       <span>{isProcessingSource ? 'Extracting style elements...' : 'Upload Style Reference (.docx, .pdf)'}</span>
                       <input
                         type="file"
-                        accept=".docx,.pdf"
+                        accept={DOCUMENT_ACCEPT}
                         disabled={isProcessingSource}
                         onChange={handleStyleReferenceUpload}
                         className="hidden"
@@ -7327,7 +7261,7 @@ export default function Editor() {
                     </span>
                     <input
                       type="file"
-                      accept=".docx,.pdf"
+                      accept={DOCUMENT_ACCEPT}
                       multiple
                       disabled={isProcessingSource}
                       onChange={handleWizardFileUpload}
@@ -8027,7 +7961,7 @@ export default function Editor() {
                   <span>{isProcessingSource ? 'Uploading and parsing references...' : 'Ingest PDF or Word Reference File'}</span>
                   <input
                     type="file"
-                    accept=".docx,.pdf"
+                    accept={DOCUMENT_ACCEPT}
                     multiple
                     disabled={isProcessingSource}
                     onChange={handleWizardFileUpload}

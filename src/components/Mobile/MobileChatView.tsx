@@ -4,6 +4,7 @@ import { classifyIntent, type ConversationMessage, type DocumentMetadata } from 
 import { planChatAction, type ToolCall } from '@/utils/chatPlanner'
 import { analyzeDocument, summarizeAudit, validateSeminarStructure, type ChapterInfo, type DocumentAudit } from '@/utils/documentAudit'
 import { paginateDocumentForPrint, printSheetCss, renderSheetHtml, type PrintPage, SHEET_WIDTH_MM, SHEET_HEIGHT_MM } from '@/utils/printPagination'
+import { DOCUMENT_ACCEPT } from '@/utils/pdfLoader'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
@@ -1601,7 +1602,7 @@ Output the complete restructured document as clean HTML with proper heading hier
                   <span>Tap to Select Files</span>
                   <input
                     type="file"
-                    accept=".docx,.pdf"
+                    accept={DOCUMENT_ACCEPT}
                     multiple
                     onChange={(e) => {
                       handleWizardFileUpload(e)
@@ -1900,7 +1901,7 @@ Output the complete restructured document as clean HTML with proper heading hier
                 <span>Upload Reference (PDF/DOCX)</span>
                 <input
                   type="file"
-                  accept=".docx,.pdf"
+                  accept={DOCUMENT_ACCEPT}
                   multiple
                   onChange={handleWizardFileUpload}
                   className="hidden"
@@ -1978,7 +1979,7 @@ Output the complete restructured document as clean HTML with proper heading hier
             <Paperclip className="w-5 h-5" />
             <input
               type="file"
-              accept=".docx,.pdf"
+              accept={DOCUMENT_ACCEPT}
               multiple
               onChange={(e) => {
                 handleWizardFileUpload(e)
