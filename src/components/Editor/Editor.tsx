@@ -3888,7 +3888,7 @@ export default function Editor() {
   // PDF.js loading lives in utils/pdfLoader so the worker always matches the bundled
   // API version (see the "API version does not match the worker version" failure).
 
-  // Import document file (.docx or .pdf) dynamically using mammoth or pdfjs-dist
+  // Import a document (.docx or .pdf) via mammoth or the shared PDF loader
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -3910,7 +3910,7 @@ export default function Editor() {
         setImportOption('maintain')
         setShowImportModal(true)
       } else if (extension === 'pdf') {
-        // Renders PDF text content extracted from pdfjs-dist
+        // Renders PDF text content as structured HTML (headings + paragraphs)
         const accumulatedHtml = await extractPdfAsHtml(file)
 
         if (!accumulatedHtml.trim()) {
@@ -4044,8 +4044,10 @@ export default function Editor() {
         })
         setIsSaved(false)
       } catch (err: any) {
-        console.error('Dashboard import failure:', err)
-        alert(`Failed to import document: ${err.message || err}`)
+        // Log the stack too: this is the mobile import path, where the alert text
+        // is all the diagnostic a user can send back.
+        console.error('Dashboard import failure:', err, err?.stack)
+        alert(`Failed to import document: ${err?.message || err}`)
       } finally {
         setIsExporting(false)
       }

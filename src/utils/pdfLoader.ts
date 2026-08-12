@@ -211,12 +211,19 @@ export async function extractPdfAsHtml(file: File | Blob): Promise<string> {
       const isHeading =
         (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
         /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
-      const isSectionHeading = /^\d+\.\d*\s+\S/.test(para) && para.length < 120
+
+      // A leading dotted number: "1.0", "1.1", "1.2.3". The trailing dot is
+      // required so a sentence opening with a bare year ("2024 saw ...") is not
+      // mistaken for a heading.
+      const numbering = para.match(/^\d+\.(?:\d+\.?)*(?=\s+\S)/)
+      const isSectionHeading = numbering !== null && para.length < 120
 
       if (isHeading) {
         html += `<h1>${escapeHtml(para)}</h1>`
       } else if (isSectionHeading) {
-        const hTag = para.split('.').length <= 2 ? 'h2' : 'h3' // 1.2 -> h2, 1.2.3 -> h3
+        // Depth comes from the numeric prefix alone: 1.2 -> h2, 1.2.3 -> h3.
+        const depth = numbering[0].replace(/\.$/, '').split('.').length
+        const hTag = depth <= 2 ? 'h2' : 'h3'
         html += `<${hTag}>${escapeHtml(para)}</${hTag}>`
       } else {
         html += `<p>${escapeHtml(para)}</p>`
