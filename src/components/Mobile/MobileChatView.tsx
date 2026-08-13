@@ -135,8 +135,6 @@ export interface MobileChatViewProps {
   onClearInitialTemplate?: () => void
 
   // PPTX quick-export (triggered from dashboard "Generate PPTX" button)
-  initialPptxExport?: boolean
-  onClearInitialPptxExport?: () => void
 
   // Undo / Redo
   triggerUndo?: () => void
@@ -260,8 +258,6 @@ export default function MobileChatView({
   userSubscription,
   initialTemplate,
   onClearInitialTemplate,
-  initialPptxExport,
-  onClearInitialPptxExport,
   triggerUndo,
   triggerRedo,
   onApplyCoverPage,
@@ -651,45 +647,9 @@ export default function MobileChatView({
     onClearInitialTemplate?.()
   }, [initialTemplate, activeProjectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── PPTX Quick-Export Flow (from Dashboard "Generate PPTX" button) ───
-  const hasFiredPptxRef = useRef(false)
-  useEffect(() => {
-    if (!initialPptxExport || hasFiredPptxRef.current) return
-    hasFiredPptxRef.current = true
-
-    setMessages([])
-
-    setTimeout(() => {
-      addBotMessage('📊 **Generate PowerPoint Presentation**\n\nI\'ll convert your document into a professional academic slide deck (.pptx) following seminar presentation standards.')
-    }, 300)
-
-    setTimeout(() => {
-      setMessages(prev => [
-        ...prev,
-        {
-          id: uid(),
-          role: 'system',
-          content: '',
-          timestamp: Date.now(),
-          type: 'choice-card',
-          choices: [
-            { id: 'pptx-export-now', label: 'Export current document as PPTX', icon: '📊', description: 'Generate slides from what\'s already in the editor' },
-            { id: 'pptx-import-first', label: 'Import a document first', icon: '📥', description: 'Upload a PDF or DOCX, then generate slides from it' },
-          ],
-          onChoice: (choiceId: string) => {
-            if (choiceId === 'pptx-export-now') {
-              addBotMessage('📊 Compiling your academic PowerPoint slides...')
-              exportToPptx()
-            } else {
-              addBotMessage('📥 Please upload your document using the attachment button below, then I\'ll generate your PowerPoint slides automatically.')
-            }
-          }
-        }
-      ])
-    }, 1100)
-
-    onClearInitialPptxExport?.()
-  }, [initialPptxExport]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The dashboard's "Generate PPTX" card no longer routes through the chat: it
+  // uploads a document and exports the deck directly (see generatePptxFromUpload
+  // in Editor.tsx). Asking for slides in conversation still works below.
 
   // Handle onboarding choice selections
   const handleOnboardingChoice = useCallback((choiceId: string) => {

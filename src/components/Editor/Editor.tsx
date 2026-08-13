@@ -34,7 +34,13 @@ import { exportPdfReact } from '../../utils/reactPdf'
 import { exportPresentationPptx } from '../../utils/pptxExporter'
 import { mapHeadingsToContentPages } from '../../utils/printPagination'
 import { buildTocPageHtml } from '../../utils/documentAudit'
-import { extractPdfAsHtml, detectDocumentKind, DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
+import { DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
+import {
+  pickDocumentFile,
+  ingestDocumentFile,
+  DocumentIngestError,
+  type IngestedDocument
+} from '../../utils/documentIngest'
 import { REPORT_DOCX, REPORT_STYLE, headingConvention } from '../../utils/houseStyle'
 import {
   Bold as BoldIcon,
@@ -1462,7 +1468,7 @@ export default function Editor() {
   const [userSubscription, setUserSubscription] = useState<any>(null)
   const [paymentNotice, setPaymentNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
   const [quotaNotice, setQuotaNotice] = useState<string | null>(null)
-  const [hintNotice, setHintNotice] = useState<string | null>(null)
+  const [hintNotice, setHintNotice] = useState<{ tone: 'info' | 'error'; message: string } | null>(null)
   // True only when a real cloud backend is holding the documents
   const [isCloudSynced, setIsCloudSynced] = useState(false)
   const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
@@ -1470,7 +1476,6 @@ export default function Editor() {
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
   const mobileToolsMenuRef = useRef<HTMLDivElement | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<'Seminar' | 'Proposal' | 'Project' | 'Custom' | null>(null)
-  const [pendingPptx, setPendingPptx] = useState(false)
 
   // Mobile viewport detection
   const [isMobile, setIsMobile] = useState(false)
@@ -1517,7 +1522,8 @@ export default function Editor() {
 
   useEffect(() => {
     if (!hintNotice) return
-    const timer = setTimeout(() => setHintNotice(null), 10000)
+    // Errors stay up longer — they usually need an action from the user.
+    const timer = setTimeout(() => setHintNotice(null), hintNotice.tone === 'error' ? 14000 : 10000)
     return () => clearTimeout(timer)
   }, [hintNotice])
 
@@ -1587,7 +1593,10 @@ export default function Editor() {
   // user at the tool that does the work, rather than silently creating a blank.
   const handleDashboardHumanize = () => {
     createNewProject()
-    setHintNotice('Paste or type the text you want rewritten, select it, then choose AI ▸ Humanize Selection.')
+    setHintNotice({
+      tone: 'info',
+      message: 'Paste or type the text you want rewritten, select it, then choose AI ▸ Humanize Selection.'
+    })
   }
 
   // Import document and styling modal states
@@ -4004,6 +4013,27 @@ export default function Editor() {
   }
 
   // Export to PowerPoint Presentation (.pptx) using pptxgenjs (dynamic load)
+  /**
+   * Builds a deck from arbitrary document HTML.
+   *
+   * Kept separate from the editor so slides can be generated straight from a
+   * freshly parsed upload, before the editor has taken the content — the caller
+   * owns the loading state and error reporting.
+   */
+  const exportPptxFromHtml = async (html: string, title: string) => {
+    await exportPresentationPptx(html, {
+      title: title || 'Academic Seminar Presentation',
+      studentName: coverDetails.studentName || 'STUDENT NAME',
+      matricNo: coverDetails.matricNo || 'MATRIC NUMBER',
+      department: coverDetails.department || 'COMPUTER ENGINEERING',
+      supervisorName: coverDetails.supervisorName || 'SUPERVISOR NAME',
+      academicLevel: wizardAcademicLevel || 'Undergraduate',
+      institution: coverDetails.institution || 'YABA COLLEGE OF TECHNOLOGY',
+      docHeader,
+      docFooter,
+    })
+  }
+
   const exportToPptx = async () => {
     if (!editor) {
       alert('Editor is not initialized yet.')
@@ -4013,17 +4043,7 @@ export default function Editor() {
     setLoadingMessage('Compiling Academic PowerPoint Presentation...')
     setIsExporting(true)
     try {
-      await exportPresentationPptx(editor.getHTML(), {
-        title: documentTitle || 'Academic Seminar Presentation',
-        studentName: coverDetails.studentName || 'STUDENT NAME',
-        matricNo: coverDetails.matricNo || 'MATRIC NUMBER',
-        department: coverDetails.department || 'COMPUTER ENGINEERING',
-        supervisorName: coverDetails.supervisorName || 'SUPERVISOR NAME',
-        academicLevel: wizardAcademicLevel || 'Undergraduate',
-        institution: coverDetails.institution || 'YABA COLLEGE OF TECHNOLOGY',
-        docHeader,
-        docFooter,
-      })
+      await exportPptxFromHtml(editor.getHTML(), documentTitle)
     } catch (err: any) {
       console.error('PPTX export error:', err)
       alert(`Failed to export PowerPoint presentation: ${err.message || err}`)
@@ -4034,53 +4054,97 @@ export default function Editor() {
 
   // PDF.js loading lives in utils/pdfLoader so the worker always matches the bundled
   // API version (see the "API version does not match the worker version" failure).
+  // Picking and parsing live in utils/documentIngest so every entry point below
+  // shares one pipeline instead of three near-copies.
 
-  // Import a document (.docx or .pdf) via mammoth or the shared PDF loader
+  /**
+   * Surfaces an ingestion failure. Ingest errors already carry a message written
+   * for the user; anything else is unexpected and gets a generic line plus a
+   * full console trace, since these are usually reported from a phone.
+   */
+  const reportIngestFailure = (err: unknown, context: string) => {
+    console.error(`${context} failed:`, err, (err as { stack?: string })?.stack)
+    const message = err instanceof DocumentIngestError
+      ? err.userMessage
+      : `We could not read that document. ${(err as { message?: string })?.message || ''}`.trim()
+    setHintNotice({ tone: 'error', message })
+  }
+
+  /**
+   * Creates a project around already-parsed document HTML and opens it.
+   *
+   * Shared by the dashboard import and the PPTX-from-upload flow so both produce
+   * an identical, saved project rather than two implementations that drift.
+   */
+  const createProjectFromIngested = (doc: IngestedDocument, cleanedHtml: string): string => {
+    const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+
+    setActiveProjectId(newProjId)
+    setPendingTemplate(null)
+    localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
+    setDocumentTitle(doc.title)
+    setDocHeader('')
+    setDocFooter('')
+    window.history.pushState({}, '', `/?project=${newProjId}`)
+    setShowDashboard(false)
+    setProjectSources([])
+    setWizardDocType('Custom')
+    setWizardTopic(doc.title)
+
+    if (editor) {
+      editor.commands.setContent(ensurePaginatedHtml(cleanedHtml, doc.title))
+      setTimeout(() => runPagination(editor), 150)
+    } else {
+      // Editor not mounted yet — the effect watching importFileData picks it up
+      pendingImportFileRef.current = doc.file
+    }
+
+    const importedText = editor ? editor.getText() : ''
+    const newProj: Project = {
+      id: newProjId,
+      title: doc.title,
+      content: JSON.stringify(editor ? editor.getJSON() : {}),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      wordCount: importedText.trim() ? importedText.trim().split(/\s+/).length : 0,
+      charCount: importedText.length,
+      documentType: 'Custom',
+      academicLevel: 'Undergraduate',
+      academicTone: 'Analytical',
+      docHeader: '',
+      docFooter: ''
+    }
+
+    setProjects(prev => {
+      const filtered = prev.filter(p => p.id !== newProjId)
+      const updated = [newProj, ...filtered]
+      saveProject(newProj).catch(e => console.error('Failed to save imported project', e))
+      return updated
+    })
+    setIsSaved(false)
+
+    return newProjId
+  }
+
+  // Toolbar import: the file already came from a real <input>, so only parsing
+  // is needed here.
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    setLoadingMessage('Importing and Parsing File...')
+    setLoadingMessage('Importing and parsing your document...')
     setIsExporting(true)
     try {
-      const extension = await detectDocumentKind(file)
-      if (extension === 'docx') {
-        const mammoth = await import('mammoth')
-        const arrayBuffer = await file.arrayBuffer()
-        const result = await mammoth.convertToHtml({ arrayBuffer })
-
-        setImportFileData({
-          name: file.name,
-          htmlContent: cleanImportedHtml(result.value),
-          extension: 'docx'
-        })
-        setImportOption('maintain')
-        setShowImportModal(true)
-      } else if (extension === 'pdf') {
-        // Renders PDF text content as structured HTML (headings + paragraphs)
-        const accumulatedHtml = await extractPdfAsHtml(file)
-
-        if (!accumulatedHtml.trim()) {
-          alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
-          setIsExporting(false)
-          return
-        }
-        
-        setImportFileData({
-          name: file.name,
-          htmlContent: cleanImportedHtml(accumulatedHtml),
-          extension: 'pdf'
-        })
-        setImportOption('maintain')
-        setShowImportModal(true)
-      } else {
-        alert('Unsupported document format. Please upload a .docx or .pdf file.')
-      }
-    } catch (err: any) {
-      // Log the stack too: import failures are usually reported from a phone,
-      // where the alert text is all the diagnostic anyone can send back.
-      console.error('File import failure:', err, err?.stack)
-      alert(`Failed to import document: ${err?.message || err}`)
+      const doc = await ingestDocumentFile(file)
+      setImportFileData({
+        name: doc.name,
+        htmlContent: cleanImportedHtml(doc.html),
+        extension: doc.kind
+      })
+      setImportOption('maintain')
+      setShowImportModal(true)
+    } catch (err) {
+      reportIngestFailure(err, 'Toolbar import')
     } finally {
       setIsExporting(false)
       // Reset input element value to allow re-upload of same file
@@ -4088,120 +4152,67 @@ export default function Editor() {
     }
   }
 
-  // Import document from the dashboard landing page
-  // Opens a file picker, parses the file, creates a new project, and loads content
-  const handleDashboardImport = () => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = `${DOCUMENT_ACCEPT},.txt,text/plain`
-    input.style.display = 'none'
-    document.body.appendChild(input)
+  /**
+   * Dashboard "Import Doc": pick a file, parse it, and open it as a new project.
+   */
+  const handleDashboardImport = async () => {
+    // Pick first, then show the spinner — an overlay behind the system file
+    // dialog just looks like the app hung while the user is still browsing.
+    const file = await pickDocumentFile()
+    if (!file) return // dismissed: leave the dashboard exactly as it was
 
-    input.onchange = async (ev: Event) => {
-      const file = (ev.target as HTMLInputElement).files?.[0]
-      document.body.removeChild(input)
-      if (!file) return
+    setLoadingMessage('Importing and parsing your document...')
+    setIsExporting(true)
+    try {
+      const doc = await ingestDocumentFile(file)
+      const cleanedHtml = cleanImportedHtml(doc.html)
 
-      setLoadingMessage('Importing and Parsing File...')
-      setIsExporting(true)
+      createProjectFromIngested(doc, cleanedHtml)
 
-      try {
-        const extension = await detectDocumentKind(file)
-        let htmlContent = ''
-
-        if (extension === 'docx') {
-          const mammoth = await import('mammoth')
-          const arrayBuffer = await file.arrayBuffer()
-          const result = await mammoth.convertToHtml({ arrayBuffer })
-          htmlContent = cleanImportedHtml(result.value)
-        } else if (extension === 'pdf') {
-          const accumulatedHtml = await extractPdfAsHtml(file)
-
-          if (!accumulatedHtml.trim()) {
-            alert('No extractable text was found in this PDF file. If it is a scanned image, please upload a text-based PDF or a .docx document.')
-            setIsExporting(false)
-            return
-          }
-          htmlContent = cleanImportedHtml(accumulatedHtml)
-        } else if (extension === 'txt') {
-          const text = await file.text()
-          htmlContent = cleanImportedHtml(text.split('\n').filter(l => l.trim()).map(l => `<p>${l}</p>`).join(''))
-        } else {
-          alert('Unsupported format. Please upload a .docx, .pdf, or .txt file.')
-          setIsExporting(false)
-          return
-        }
-
-        // Create a new project to hold the imported content
-        const cleanName = file.name.replace(/\.[^/.]+$/, '')
-        const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-
-        setActiveProjectId(newProjId)
-        setPendingTemplate(null)
-        localStorage.setItem(STORAGE_KEY_ACTIVE_ID, newProjId)
-        setDocumentTitle(cleanName)
-        setDocHeader('')
-        setDocFooter('')
-        window.history.pushState({}, '', `/?project=${newProjId}`)
-        setShowDashboard(false)
-        setProjectSources([])
-        setWizardDocType('Custom')
-        setWizardTopic(cleanName)
-
-        // Store parsed data for the import modal
-        setImportFileData({
-          name: file.name,
-          htmlContent,
-          extension: extension || 'docx'
-        })
-        setImportOption('maintain')
-
-        // Load content into editor once it's ready
-        if (editor) {
-          const formattedHtml = ensurePaginatedHtml(htmlContent, cleanName)
-          editor.commands.setContent(formattedHtml)
-          setTimeout(() => runPagination(editor), 150)
-          // Show import modal for formatting options
-          setShowImportModal(true)
-        } else {
-          // Editor not ready yet — store in ref for useEffect to pick up
-          pendingImportFileRef.current = file
-        }
-
-        // Save the project
-        const importedText = editor ? editor.getText() : ''
-        const newProj: Project = {
-          id: newProjId,
-          title: cleanName,
-          content: JSON.stringify(editor ? editor.getJSON() : {}),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          wordCount: importedText.trim() ? importedText.trim().split(/\s+/).length : 0,
-          charCount: importedText.length,
-          documentType: 'Custom',
-          academicLevel: 'Undergraduate',
-          academicTone: 'Analytical',
-          docHeader: '',
-          docFooter: ''
-        }
-        setProjects(prev => {
-          const filtered = prev.filter(p => p.id !== newProjId)
-          const updated = [newProj, ...filtered]
-          saveProject(newProj).catch(e => console.error('Failed to save imported project', e))
-          return updated
-        })
-        setIsSaved(false)
-      } catch (err: any) {
-        // Log the stack too: this is the mobile import path, where the alert text
-        // is all the diagnostic a user can send back.
-        console.error('Dashboard import failure:', err, err?.stack)
-        alert(`Failed to import document: ${err?.message || err}`)
-      } finally {
-        setIsExporting(false)
-      }
+      setImportFileData({ name: doc.name, htmlContent: cleanedHtml, extension: doc.kind })
+      setImportOption('maintain')
+      if (editor) setShowImportModal(true)
+    } catch (err) {
+      reportIngestFailure(err, 'Dashboard import')
+    } finally {
+      setIsExporting(false)
     }
+  }
 
-    input.click()
+  /**
+   * Dashboard "Generate PPTX": upload a document, then build slides from it.
+   *
+   * This used to create a blank project and drop the user into the chat with a
+   * choice card, which meant "export current document" produced an empty deck.
+   * Now the upload is the first step and the deck comes from the file itself.
+   * The parsed document is kept as a project so the user can edit and re-export.
+   */
+  const generatePptxFromUpload = async () => {
+    const file = await pickDocumentFile()
+    if (!file) return
+
+    setLoadingMessage('Reading your document...')
+    setIsExporting(true)
+    try {
+      const doc = await ingestDocumentFile(file)
+      const cleanedHtml = cleanImportedHtml(doc.html)
+
+      createProjectFromIngested(doc, cleanedHtml)
+
+      setLoadingMessage('Building your PowerPoint slides...')
+      // Build from the parsed HTML rather than editor.getHTML(): setContent has
+      // not necessarily flushed yet, and the deck must reflect the upload.
+      await exportPptxFromHtml(cleanedHtml, doc.title)
+
+      setHintNotice({
+        tone: 'info',
+        message: `Slides generated from "${doc.name}". The document is open here — edit it and export again anytime.`
+      })
+    } catch (err) {
+      reportIngestFailure(err, 'PPTX from upload')
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   const confirmImportAction = () => {
@@ -4750,35 +4761,11 @@ export default function Editor() {
   }
 
   // Setup Wizard & Source Context File Parsing Helpers
+  // Reference sources keep their raw parsed HTML — the RAG chunker strips tags
+  // itself, so no editor-oriented cleanup is applied here.
   const parseSourceFile = async (file: File): Promise<{ name: string; content: string; type: string }> => {
-    const extension = await detectDocumentKind(file)
-
-    if (extension === 'docx') {
-      const mammoth = await import('mammoth')
-      const arrayBuffer = await file.arrayBuffer()
-      const result = await mammoth.convertToHtml({ arrayBuffer })
-      return {
-        name: file.name,
-        content: result.value,
-        type: 'docx'
-      }
-    } else if (extension === 'pdf') {
-      const accumulatedHtml = await extractPdfAsHtml(file)
-
-      if (!accumulatedHtml.trim()) {
-        throw new Error(
-          'No extractable text was found in this PDF. If it is a scanned image, upload a text-based PDF or a .docx file.'
-        )
-      }
-
-      return {
-        name: file.name,
-        content: accumulatedHtml,
-        type: 'pdf'
-      }
-    } else {
-      throw new Error('Unsupported document format. Only .docx and .pdf files are supported.')
-    }
+    const doc = await ingestDocumentFile(file)
+    return { name: doc.name, content: doc.html, type: doc.kind }
   }
 
   const handleStyleReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -5587,11 +5574,15 @@ export default function Editor() {
         </div>
       )}
 
-      {/* Contextual hint (e.g. how to humanize a selection) */}
+      {/* Contextual hint or a document-handling error */}
       {hintNotice && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="flex items-start gap-3 p-3.5 rounded-2xl shadow-xl border bg-indigo-50 dark:bg-indigo-950/80 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 text-xs font-semibold backdrop-blur-sm">
-            <span className="flex-1 leading-relaxed">{hintNotice}</span>
+          <div className={`flex items-start gap-3 p-3.5 rounded-2xl shadow-xl border text-xs font-semibold backdrop-blur-sm ${
+            hintNotice.tone === 'error'
+              ? 'bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800 text-red-900 dark:text-red-200'
+              : 'bg-indigo-50 dark:bg-indigo-950/80 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200'
+          }`}>
+            <span className="flex-1 leading-relaxed">{hintNotice.message}</span>
             <button
               onClick={() => setHintNotice(null)}
               className="p-0.5 opacity-60 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
@@ -5622,10 +5613,7 @@ export default function Editor() {
               setPendingTemplate(type)
             }}
             onImportDocument={handleDashboardImport}
-            onGeneratePptx={() => {
-              createNewProject()
-              setPendingPptx(true)
-            }}
+            onGeneratePptx={generatePptxFromUpload}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5646,10 +5634,7 @@ export default function Editor() {
               setPendingTemplate(type)
             }}
             onImportDocument={handleDashboardImport}
-            onGeneratePptx={() => {
-              createNewProject()
-              setPendingPptx(true)
-            }}
+            onGeneratePptx={generatePptxFromUpload}
             onHumanizeText={handleDashboardHumanize}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
@@ -5709,8 +5694,6 @@ export default function Editor() {
             userSubscription={userSubscription}
             initialTemplate={pendingTemplate}
             onClearInitialTemplate={() => setPendingTemplate(null)}
-            initialPptxExport={pendingPptx}
-            onClearInitialPptxExport={() => setPendingPptx(false)}
             triggerUndo={triggerUndo}
             triggerRedo={triggerRedo}
             onApplyCoverPage={applyCoverPage}

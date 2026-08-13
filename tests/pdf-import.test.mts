@@ -342,40 +342,132 @@ describe('error reporting', () => {
   })
 })
 
-// --- Mobile import wiring --------------------------------------------
+// --- Document ingestion ----------------------------------------------
+//
+// One pipeline turns a picked file into HTML. These exercise it directly.
+
+const ingest = () => import('../src/utils/documentIngest.ts')
+
+describe('ingestDocumentFile', () => {
+  it('parses a PDF into HTML and reports its kind', async () => {
+    const { ingestDocumentFile } = await ingest()
+    const doc = await ingestDocumentFile(
+      pdfFile([{ text: 'Findings and analysis of the study.', y: 700 }], 'Chapter Four.pdf')
+    )
+
+    assert.equal(doc.kind, 'pdf')
+    assert.equal(doc.name, 'Chapter Four.pdf')
+    assert.equal(doc.title, 'Chapter Four', 'the extension should be stripped for the title')
+    assert.match(doc.html, /Findings and analysis/)
+  })
+
+  it('rejects an image-only PDF with an actionable message', async () => {
+    const { ingestDocumentFile } = await ingest()
+
+    await assert.rejects(
+      () => ingestDocumentFile(pdfFile([], 'scanned.pdf')),
+      (err: any) => {
+        assert.equal(err.name, 'DocumentIngestError')
+        assert.equal(err.reason, 'empty-pdf')
+        assert.match(err.userMessage, /scanned/i)
+        return true
+      }
+    )
+  })
+
+  it('rejects an unsupported file type rather than producing empty slides', async () => {
+    const { ingestDocumentFile } = await ingest()
+    const junk = new File([new Uint8Array([1, 2, 3, 4])], 'photo.heic', { type: 'image/heic' })
+
+    await assert.rejects(
+      () => ingestDocumentFile(junk),
+      (err: any) => {
+        assert.equal(err.reason, 'unsupported-format')
+        return true
+      }
+    )
+  })
+
+  it('converts a text file into paragraphs and escapes markup', async () => {
+    const { ingestDocumentFile } = await ingest()
+    const file = new File(['First line\n\nSecond <b>line</b>'], 'notes.txt', { type: 'text/plain' })
+    const doc = await ingestDocumentFile(file)
+
+    assert.equal(doc.kind, 'txt')
+    assert.match(doc.html, /<p>First line<\/p>/)
+    assert.ok(!doc.html.includes('<b>'), 'raw markup from the file leaked into the output')
+    assert.match(doc.html, /&lt;b&gt;/)
+  })
+
+  it('recognises a .docx by magic bytes even without an extension', async () => {
+    const { detectDocumentKind } = await loader()
+    assert.equal(await detectDocumentKind(new File([DOCX_MAGIC], 'download')), 'docx')
+  })
+})
+
+// --- Dashboard wiring (source checks) --------------------------------
 //
 // Source-level checks, not browser tests: without a DOM there is no way to click
-// the button here. They guard the chain from the mobile Import Doc button to the
-// parser against silent regressions.
+// the button here. They guard the chain from each dashboard card to the parser.
 
-describe('mobile import wiring (source checks)', () => {
+describe('dashboard document wiring (source checks)', () => {
   const editor = () => readFileSync(join(ROOT, 'src/components/Editor/Editor.tsx'), 'utf8')
+  const mobileDashboard = () =>
+    readFileSync(join(ROOT, 'src/components/Mobile/MobileDashboard.tsx'), 'utf8')
 
   it('wires the mobile Import Doc button to the dashboard import handler', () => {
-    const dashboard = readFileSync(join(ROOT, 'src/components/Mobile/MobileDashboard.tsx'), 'utf8')
-
-    assert.match(dashboard, /onClick=\{\(\) => onImportDocument/, 'Import Doc button is not wired')
+    assert.match(mobileDashboard(), /onClick=\{\(\) => onImportDocument/, 'Import Doc button is not wired')
     assert.match(editor(), /onImportDocument=\{handleDashboardImport\}/, 'handler is not passed down')
   })
 
-  it('opens the picker and accepts PDFs by MIME type as well as extension', () => {
+  it('wires Generate PPTX to the upload flow on both dashboards', () => {
+    assert.match(mobileDashboard(), /onClick=\{\(\) => onGeneratePptx/, 'mobile PPTX button is not wired')
+
+    const source = editor()
+    const wirings = source.match(/onGeneratePptx=\{[^}]*\}/g) || []
+    assert.equal(wirings.length, 2, 'expected both the mobile and desktop dashboards to be wired')
+    for (const wiring of wirings) {
+      assert.match(
+        wiring,
+        /onGeneratePptx=\{generatePptxFromUpload\}/,
+        `Generate PPTX should open an upload, got: ${wiring}`
+      )
+    }
+  })
+
+  it('uploads before exporting instead of opening the chat on a blank document', () => {
     const source = editor()
     const handler = source.slice(
-      source.indexOf('const handleDashboardImport'),
+      source.indexOf('const generatePptxFromUpload'),
       source.indexOf('const confirmImportAction')
     )
 
-    assert.ok(handler.length > 0, 'handleDashboardImport not found')
-    assert.match(handler, /input\.type = 'file'/)
-    assert.match(handler, /input\.accept = `\$\{DOCUMENT_ACCEPT\}/, 'picker does not use DOCUMENT_ACCEPT')
-    assert.match(handler, /input\.click\(\)/, 'the picker is never opened')
-    assert.match(handler, /await detectDocumentKind\(file\)/, 'file type is not detected from content')
-    assert.match(handler, /await extractPdfAsHtml\(file\)/, 'PDFs are not routed to the parser')
+    assert.ok(handler.length > 0, 'generatePptxFromUpload not found')
+    assert.match(handler, /await pickDocumentFile\(\)/, 'the flow never opens a file picker')
+    assert.match(handler, /if \(!file\) return/, 'a dismissed picker must leave the dashboard untouched')
+    assert.match(handler, /await ingestDocumentFile\(file\)/, 'the upload is not parsed')
+    assert.match(handler, /exportPptxFromHtml\(cleanedHtml/, 'slides are not built from the uploaded file')
+    assert.ok(
+      !/createNewProject\(\)/.test(handler),
+      'the PPTX flow creates a blank project again instead of using the upload'
+    )
   })
 
-  it('routes every PDF read through the shared loader', () => {
-    // Three hand-rolled copies of the parsing loop used to drift apart; only the
-    // shared helper may touch pdfjs now.
+  it('keeps the chat view out of the dashboard PPTX path', () => {
+    const chat = readFileSync(join(ROOT, 'src/components/Mobile/MobileChatView.tsx'), 'utf8')
+    assert.ok(
+      !/initialPptxExport/.test(chat),
+      'MobileChatView handles a dashboard PPTX hand-off again - it should upload directly'
+    )
+    assert.ok(
+      !/initialPptxExport/.test(editor()),
+      'Editor.tsx still routes Generate PPTX through the chat view'
+    )
+  })
+
+  it('routes every file read through the shared ingestion module', () => {
+    // Hand-rolled copies of the pick/parse logic used to drift apart; only the
+    // shared helpers may touch pdfjs, mammoth, or build a file input now.
     const source = editor()
     assert.ok(
       !/(?:from|import\()\s*['"]pdfjs-dist/.test(source),
@@ -389,5 +481,21 @@ describe('mobile import wiring (source checks)', () => {
       !/getTextContent\(\)/.test(source),
       'Editor.tsx parses PDF pages again - use extractPdfAsHtml instead'
     )
+    assert.ok(
+      !/import\(\s*['"]mammoth['"]\s*\)/.test(source),
+      'Editor.tsx parses .docx directly again - use ingestDocumentFile instead'
+    )
+    assert.ok(
+      !/createElement\(['"]input['"]\)/.test(source),
+      'Editor.tsx hand-rolls a file picker again - use pickDocumentFile instead'
+    )
+  })
+
+  it('cleans up the picker element even when the dialog is dismissed', () => {
+    // A cancelled import used to leak a detached <input> on every attempt.
+    const source = readFileSync(join(ROOT, 'src/utils/documentIngest.ts'), 'utf8')
+    assert.match(source, /addEventListener\('cancel'/, 'no cancel handling')
+    assert.match(source, /removeChild\(input\)/, 'the input element is never removed')
+    assert.match(source, /removeEventListener\('focus'/, 'the focus fallback listener leaks')
   })
 })
