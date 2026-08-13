@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "pretest": "node scripts/copy-pdf-worker.mjs",
-    "test": "node --test \"tests/**/*.test.mts\""
+    "test": "node --import ./tests/ts-resolve.mjs --test \"tests/**/*.test.mts\""
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

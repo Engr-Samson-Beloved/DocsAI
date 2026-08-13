@@ -35,6 +35,7 @@ import { exportPresentationPptx } from '../../utils/pptxExporter'
 import { mapHeadingsToContentPages } from '../../utils/printPagination'
 import { buildTocPageHtml } from '../../utils/documentAudit'
 import { extractPdfAsHtml, detectDocumentKind, DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
+import { REPORT_DOCX, REPORT_STYLE, headingConvention } from '../../utils/houseStyle'
 import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
@@ -101,63 +102,82 @@ const SEMINAR_TEMPLATE = `
 <div data-type="page" data-cover="true">
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
-  <h1 style="text-align: center; line-height: 1.5; font-size: 1.5rem; text-transform: uppercase;"><strong>[Insert Seminar Topic Here]</strong></h1>
+  <p style="text-align: center; font-weight: bold; font-size: 1rem; text-transform: uppercase;">YABA COLLEGE OF TECHNOLOGY</p>
   <div data-type="yabatech-logo"></div>
+  <h1 style="text-align: center; line-height: 1.5; font-size: 1.25rem; text-transform: uppercase;"><strong>[Insert Seminar Topic Here]</strong></h1>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
-  <p style="text-align: center; text-transform: uppercase; font-weight: bold; font-size: 0.95rem;">A SEMINAR REPORT</p>
-  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">PRESENTED TO</p>
-  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">THE DEPARTMENT OF COMPUTER ENGINEERING<br>SCHOOL OF ENGINEERING<br>YABA COLLEGE OF TECHNOLOGY, YABA.</p>
+  <p style="text-align: center; font-size: 0.95rem; text-transform: uppercase;">A SEMINAR REPORT PRESENTED TO:</p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">THE DEPARTMENT OF COMPUTER ENGINEERING</p>
+  <p style="text-align: center; font-size: 0.95rem; text-transform: uppercase;">SCHOOL OF ENGINEERING</p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
-  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">BY</p>
-  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">[STUDENT NAME]<br>[MATRIC NUMBER]</p>
+  <p style="text-align: center; font-size: 0.95rem; text-transform: uppercase;">BY:</p>
+  <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">[STUDENT NAME]</p>
+  <p style="text-align: center; font-size: 0.95rem; text-transform: uppercase;">[MATRIC NUMBER]</p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
-  <p style="text-align: center; font-size: 0.85rem; line-height: 1.6; text-transform: uppercase; max-width: 600px; margin: 0 auto;">A SEMINAR REPORT SUBMITTED IN PARTIAL FULFILMENT OF THE REQUIREMENTS FOR THE AWARD OF THE HIGHER NATIONAL DIPLOMA (HND) IN COMPUTER ENGINEERING</p>
+  <p style="text-align: center; font-size: 0.9rem; line-height: 1.6; text-transform: uppercase;">A SEMINAR REPORT SUBMITTED IN PARTIAL FULFILMENT OF THE REQUIREMENT FOR THE AWARD OF THE HIGHER NATIONAL DIPLOMA (HND) IN COMPUTER ENGINEERING</p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
-  <p style="text-align: center; font-size: 0.9rem; text-transform: uppercase;">SUPERVISED BY</p>
+  <p style="text-align: center; font-size: 0.95rem; text-transform: uppercase;">SUPERVISED BY</p>
   <p style="text-align: center; font-weight: bold; font-size: 0.95rem; text-transform: uppercase;">[SUPERVISOR NAME]</p>
   <p style="text-align: center;"><strong>&nbsp;</strong></p>
   <p style="text-align: center; font-weight: bold; font-size: 0.95rem;">2025/2026</p>
 </div>
 <div data-type="page">
-  <h2>Chapter 1.</h2>
-  <h3>1.1. Introduction</h3>
-  <p>Start writing your seminar introduction here...</p>
-  <h3>1.2. Problem Definition and Motivation</h3>
-  <p>Define the core problem and research motivation here...</p>
-  <h3>1.4. Advantages and Limitations</h3>
-  <p>Detail the key advantages and technical limitations of the proposed approach...</p>
+  <h1>ABSTRACT</h1>
+  <p>Summarise the problem, what the seminar examines, the approach taken and the main findings, in a single unbroken paragraph...</p>
+  <p><strong>Keywords:</strong> [four to six comma-separated terms]</p>
 </div>
 <div data-type="page">
-  <h2>Chapter 2</h2>
-  <h3>Literature Review/Related work</h3>
-  <p>Perform a thorough literature survey here...</p>
-  <h3>2.1. Summary of exit works</h3>
-  <p>Summarize relevant existing/exit works and state-of-the-art literature...</p>
-  <h3>2.2. Overview of previous research</h3>
-  <p>Provide a comprehensive overview of historical research findings...</p>
-  <h3>Research Gaps</h3>
-  <p>Identify the key research gaps in existing systems...</p>
+  <h1>LIST OF FIGURES</h1>
+  <p>Figure 2.1: [Caption of the first figure]</p>
 </div>
 <div data-type="page">
-  <h2>Chapter 3</h2>
-  <h3>Methodology/Working Principle</h3>
-  <p>Describe the research design or experimental methodology here...</p>
-  <h3>3.1. Core Concepts: Theoretical Background</h3>
-  <p>Explain the theoretical background and fundamental concepts...</p>
-  <h3>3.2. Working Principle/Process Flow</h3>
-  <p>Provide a detailed description of the process flow or system architecture...</p>
-  <h3>3.3. Techniques/Tool Used</h3>
-  <p>Enumerate and describe the research techniques or engineering tools utilized...</p>
+  <h1>LIST OF TABLES</h1>
+  <p>Table 2.1: [Caption of the first table]</p>
 </div>
 <div data-type="page">
-  <h2>Chapter 4</h2>
-  <h3>4.1. Summary of key takeaways and main findings</h3>
-  <p>Summarize the key takeaways and major experimental findings of the seminar...</p>
-  <h3>4.2. Future Scope</h3>
-  <p>Detail potential areas of future extension and development...</p>
+  <h1>INTRODUCTION</h1>
+  <h2>1.0 Background of the Study</h2>
+  <p>Set out the context and why the topic matters...</p>
+  <h2>1.1 Statement of the Problem</h2>
+  <p>Define the specific problem this seminar addresses...</p>
+  <h2>1.2 Aim and Objectives</h2>
+  <p>State the aim, then list the specific objectives...</p>
+  <h2>1.3 Scope of the Study</h2>
+  <p>Bound what the seminar covers and what it excludes...</p>
 </div>
 <div data-type="page">
-  <h2>References</h2>
+  <h1>[TOPIC AREA AND ENABLING TECHNOLOGY]</h1>
+  <h2>2.1 Overview of [the technology]</h2>
+  <p>Explain what it is and how it works...</p>
+  <h2>2.2 Components of [the system]</h2>
+  <p>Introduce the constituent parts...</p>
+  <h3>2.2.1 [First component]</h3>
+  <p>Describe the component and its role...</p>
+  <h3>2.2.2 [Second component]</h3>
+  <p>Describe the component and its role...</p>
+  <h2>2.3 [Related technology] in [the application domain]</h2>
+  <p>Relate the enabling technology to the problem domain...</p>
+</div>
+<div data-type="page">
+  <h1>ANALYSIS OF APPLICATIONS, ADVANTAGES AND CHALLENGES</h1>
+  <h2>3.1 Applications of [the technology]</h2>
+  <p>Describe real deployments and use cases...</p>
+  <h2>3.2 Advantages of [the approach]</h2>
+  <p>Set out the measurable benefits...</p>
+  <h2>3.3 Limitations and Challenges</h2>
+  <p>State the constraints honestly, with evidence...</p>
+  <h2>3.4 [Topic] and the Future of [the field]</h2>
+  <p>Discuss the trajectory and what changes next...</p>
+</div>
+<div data-type="page">
+  <h1>SUMMARY AND CONCLUSION</h1>
+  <h2>4.1 Summary</h2>
+  <p>Restate what the seminar covered and what it established...</p>
+  <h2>4.2 Conclusion</h2>
+  <p>Close with the judgement the evidence supports...</p>
+</div>
+<div data-type="page">
+  <h1>REFERENCES</h1>
   <p>[Insert your bibliography citations in the latest APA style here]</p>
 </div>
 `
@@ -3555,7 +3575,7 @@ export default function Editor() {
                     leader: LeaderType.DOT
                   }
                 ],
-                spacing: { after: 120, line: 360 }
+                spacing: { after: 120, line: REPORT_DOCX.lineSpacing }
               })
             )
           } else if (node.type === 'heading') {
@@ -3567,25 +3587,27 @@ export default function Editor() {
               inReferencesSection = false
             }
 
-            const runs = (node.content || []).map((childNode: any) => {
-              const marks = childNode.marks || []
-              return new TextRun({
-                text: toTitleCase((childNode.text || '').replace(/\*\*/g, '')),
-                bold: true,
-                color: "000000", // black / uncolored
-                italics: marks.some((m: any) => m.type === 'italic'),
-                underline: marks.some((m: any) => m.type === 'underline') ? {} : undefined,
-                strike: marks.some((m: any) => m.type === 'strike'),
-                font: 'Times New Roman'
+            // House style: h1 chapter titles are CENTERED ALL CAPS with no
+            // "CHAPTER TWO" line; h2/h3 keep their numbering and sit left.
+            const rawHeading = (node.content || []).map((c: any) => c.text || '').join('')
+            const format = headingConvention(level, rawHeading.replace(/\*\*/g, ''))
+
+            const runs = [
+              new TextRun({
+                text: format.text,
+                bold: format.bold,
+                size: format.sizeHalfPt,
+                color: REPORT_STYLE.headings.color,
+                font: REPORT_STYLE.font.family,
               })
-            })
+            ]
 
             children.push(
               new Paragraph({
                 children: runs,
                 heading: getHeadingLevel(level),
-                alignment: align,
-                spacing: { before: 240, after: 120, line: 360 }
+                alignment: format.align === 'center' ? AlignmentType.CENTER : AlignmentType.LEFT,
+                spacing: { before: 240, after: 120, line: REPORT_DOCX.lineSpacing }
               })
             )
           } else if (node.type === 'paragraph') {
@@ -3624,7 +3646,7 @@ export default function Editor() {
                       leader: LeaderType.DOT
                     }
                   ],
-                  spacing: { after: 120, line: 360 }
+                  spacing: { after: 120, line: REPORT_DOCX.lineSpacing }
                 })
               )
             } else {
@@ -3682,17 +3704,24 @@ export default function Editor() {
                 }
               }
 
-              // Academic formatting: justified text with first-line indent for body paragraphs
+              // House style: references hang, body paragraphs are flush. The
+              // approved report uses no first-line indent (the exporter used
+              // 0.5in), and body copy is justified and double-spaced.
               const paraIndent = inReferencesSection
-                ? { left: 720, hanging: 720 }
-                : (isCover || isToc) ? undefined : { firstLine: 720 }
+                ? REPORT_DOCX.referenceIndent
+                : (isCover || isToc || REPORT_DOCX.firstLineIndent === 0)
+                ? undefined
+                : { firstLine: REPORT_DOCX.firstLineIndent }
+
+              const bodyAlign =
+                isCover || isToc || inReferencesSection ? align : AlignmentType.JUSTIFIED
 
               children.push(
                 new Paragraph({
                   children: runs,
-                  alignment: align,
+                  alignment: bodyAlign,
                   indent: paraIndent,
-                  spacing: { before: spacingBefore, after: spacingAfter, line: 360 }
+                  spacing: { before: spacingBefore, after: spacingAfter, line: REPORT_DOCX.lineSpacing }
                 })
               )
             }
@@ -3742,7 +3771,7 @@ export default function Editor() {
                     children: runs,
                     bullet: isOrdered ? undefined : { level: 0 },
                     indent: isOrdered ? { left: 720 } : undefined,
-                    spacing: { after: 80, line: 360 }
+                    spacing: { after: 80, line: REPORT_DOCX.lineSpacing }
                   })
                 )
               })
@@ -3766,7 +3795,7 @@ export default function Editor() {
               new Paragraph({
                 children: runs,
                 indent: { left: 720 },
-                spacing: { before: 120, after: 120, line: 360 }
+                spacing: { before: 120, after: 120, line: REPORT_DOCX.lineSpacing }
               })
             )
           }
@@ -3782,16 +3811,33 @@ export default function Editor() {
       }
 
       const doc = new Document({
+        // Document defaults so body copy inherits the house style even where a
+        // run does not set them explicitly. Without this, docx falls back to its
+        // own default size rather than the approved 12pt.
+        styles: {
+          default: {
+            document: {
+              run: {
+                font: REPORT_STYLE.font.family,
+                size: REPORT_DOCX.bodyHalfPt,
+                color: '000000',
+              },
+              paragraph: {
+                spacing: { line: REPORT_DOCX.lineSpacing },
+              },
+            },
+          },
+        },
         sections: [
           {
             properties: {
               page: {
-                margin: {
-                  top: 1440,    // 1 inch (1440 twips)
-                  bottom: 1440,
-                  left: 1440,
-                  right: 1440
-                }
+                // A4, per the approved report. Previously unset, so Word used Letter.
+                size: {
+                  width: REPORT_DOCX.page.width,
+                  height: REPORT_DOCX.page.height,
+                },
+                margin: REPORT_DOCX.page.margin,
               },
               titlePage: true  // Suppress header/footer on cover page
             },
@@ -3808,7 +3854,7 @@ export default function Editor() {
                       })
                     ],
                     alignment: AlignmentType.RIGHT,
-                    spacing: { after: 120, line: 360 }
+                    spacing: { after: 120, line: REPORT_DOCX.lineSpacing }
                   })
                 ]
               })
@@ -3832,7 +3878,7 @@ export default function Editor() {
                       })
                     ],
                     alignment: AlignmentType.CENTER,
-                    spacing: { before: 120, line: 360 }
+                    spacing: { before: 120, line: REPORT_DOCX.lineSpacing }
                   })
                 ]
               })

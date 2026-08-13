@@ -38,6 +38,8 @@
  * is semantically required it is built from char codes.
  */
 
+import { DECK_STYLE } from './houseStyle'
+
 export interface PptxMetadata {
   title?: string
   studentName?: string
@@ -46,8 +48,17 @@ export interface PptxMetadata {
   supervisorName?: string
   academicLevel?: string
   institution?: string
+  /** e.g. "School of Engineering" - the approved title slide names it. */
+  school?: string
+  /** Academic session, e.g. "2025/2026". Shown on the title slide. */
+  session?: string
   docHeader?: string
   docFooter?: string
+}
+
+/** "COMPUTER ENGINEERING" -> "Computer Engineering" for the identity block. */
+function toTitleCase(text: string): string {
+  return text.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
 }
 
 export interface PptxOptions {
@@ -63,31 +74,33 @@ export interface PptxOptions {
 
 // --- Layout & theme (LAYOUT_16x9 = 13.333in x 7.5in) ---------------
 
-const SLIDE_W = 13.333
-const SLIDE_H = 7.5
+const SLIDE_W = DECK_STYLE.slide.widthIn
+const SLIDE_H = DECK_STYLE.slide.heightIn
 
-const MARGIN_X = 0.8
-const BODY_W = SLIDE_W - MARGIN_X * 2 // 11.73
-const BODY_TOP = 1.5
-const BODY_BOTTOM = 6.85 // footer sits below this
-const BODY_H = BODY_BOTTOM - BODY_TOP
+const MARGIN_X = DECK_STYLE.marginIn
+const BODY_W = DECK_STYLE.body.widthIn
+const BODY_TOP = DECK_STYLE.body.yIn
+const BODY_H = DECK_STYLE.body.heightIn
+const BODY_BOTTOM = BODY_TOP + BODY_H
 
-// Typography per the guideline's "TYPOGRAPHY AND VISUAL HIERARCHY" page:
-// Title 36-40pt, Section Heading 24-28pt, Body 18-22pt, never below 16pt.
-// Arial is one of the four fonts it names (Arial, Calibri, Helvetica, Segoe UI).
-const FONT = 'Arial'
-const TITLE_FONT = 36
-const HEADER_FONT = 24
+// Typography comes from the approved deck (sample/Smart_Energy_Management_RFID_
+// Seminar.pptx) via houseStyle, cross-checked against the guideline's
+// "TYPOGRAPHY AND VISUAL HIERARCHY" page: Title 36-40pt, Section Heading 24-28pt,
+// Body 18-22pt, floor 16pt. The approved deck sets slide headers at 36pt - the
+// exporter previously used 24pt, which reads as a subtitle from the back of a hall.
+const FONT = DECK_STYLE.font
+const TITLE_FONT = DECK_STYLE.titleSlide.title.sizePt
+const HEADER_FONT = DECK_STYLE.header.sizePt
 const SUBHEADER_FONT = 18
-const BODY_FONT_MAX = 22
-const BODY_FONT_MIN = 16
+const BODY_FONT_MAX = DECK_STYLE.bodyFont.maxPt
+const BODY_FONT_MIN = DECK_STYLE.bodyFont.minPt
 
 /**
  * Hard readability cap. Line-fitting alone would happily put nine short bullets
  * on one slide, which is a wall of text at presentation distance even though it
  * technically fits the box. Sub-headings count toward the total.
  */
-const MAX_BULLETS_PER_SLIDE = 6
+const MAX_BULLETS_PER_SLIDE = DECK_STYLE.deck.maxBulletsPerSlide
 
 const COLOR = {
   navy: '0F172A',
@@ -517,7 +530,7 @@ function summarizeProse(paragraphs: string[], limit: number, maxChars: number): 
 
 type BulletKind = 'point' | 'sub'
 
-interface Bullet {
+export interface Bullet {
   text: string
   kind: BulletKind
 }
@@ -560,6 +573,237 @@ function isReferenceSection(section: DocSection): boolean {
 
 function isCappedSection(section: DocSection): boolean {
   return /reference|bibliograph|appendix|appendices/.test(section.title.toLowerCase())
+}
+
+// --- Phase 3a: Role-based deck planning ------------------------------
+//
+// The guideline prescribes WHAT a seminar deck must cover, in order:
+//   Title -> Problem Statement -> Aim & Objectives -> Literature Review ->
+//   System Architecture -> Hardware Design -> Software Design ->
+//   Testing & Results -> Prototype -> Conclusion -> Questions
+//
+// Walking the chapters and summarising each in turn does not produce that. It
+// produces decks like "1.1 INTRODUCTION (CONTINUED)" followed by "2.1 SUMMARY OF
+// EXISTING WORKS (CONTINUED)" - no problem statement, no objectives, no results,
+// and the subsection numbering leaking into the slide titles.
+//
+// So the planner works the other way round: it searches the whole document for
+// the content that fills each required role, labels the slide by that role, and
+// DROPS material that earns no place. Slides are a summary of the argument, not
+// a compressed copy of the report.
+
+interface SlideRole {
+  id: string
+  /** Slide title. Deliberately the role, not the source heading. */
+  title: string
+  match: RegExp
+  /** 1 = named by the guideline's structure; 3 = only if budget remains. */
+  priority: 1 | 2 | 3
+  /** Ceiling on slides this role may claim when there is content to justify it. */
+  maxSlides: number
+}
+
+/**
+ * Canonical deck order. This array is the order slides appear in.
+ *
+ * Patterns anchor on the left only. These are stems, so a trailing \b would be
+ * wrong: /\bmethodolog\b/ cannot match "Methodology" because the boundary it
+ * demands after "methodolog" runs into "y". That silently dropped the
+ * Methodology slide - a priority-1 role - while priority-3 roles took its place.
+ */
+const SLIDE_ROLES: SlideRole[] = [
+  { id: 'problem', title: 'Problem Statement', priority: 1, maxSlides: 1,
+    match: /\b(problem|motivation|challenges? facing|need for|background of (the )?study)/i },
+  { id: 'aim', title: 'Aim & Objectives', priority: 1, maxSlides: 1,
+    match: /\b(aims?\b|objective|purpose of (the )?study)/i },
+  { id: 'scope', title: 'Scope & Significance', priority: 3, maxSlides: 1,
+    match: /\b(scope|significan|justification|relevance)/i },
+  { id: 'literature', title: 'Literature Review', priority: 2, maxSlides: 2,
+    match: /\b(literature|related works?|existing (works?|systems?)|previous (works?|studies))/i },
+  { id: 'concepts', title: 'Theoretical Background', priority: 3, maxSlides: 1,
+    match: /\b(core concepts?|theoretical|fundamental|principle)/i },
+  { id: 'gap', title: 'Research Gap', priority: 2, maxSlides: 1,
+    match: /\b(research gaps?|gaps? in|limitations? of existing|open (issues|problems))/i },
+  { id: 'methodology', title: 'Methodology', priority: 1, maxSlides: 1,
+    match: /\b(methodolog|approach|procedure|materials? and methods?|research design)/i },
+  { id: 'architecture', title: 'System Architecture', priority: 1, maxSlides: 2,
+    match: /\b(architectur|system design|block diagram|data ?flow|framework|model design)/i },
+  { id: 'hardware', title: 'Hardware Design', priority: 2, maxSlides: 1,
+    match: /\b(hardware|circuit|sensor|components? used)/i },
+  { id: 'software', title: 'Software Design', priority: 2, maxSlides: 1,
+    match: /\b(software|algorithm|flowchart|pseudo ?code|program logic|implementation)/i },
+  { id: 'results', title: 'Testing & Results', priority: 1, maxSlides: 2,
+    match: /\b(results?\b|testing|evaluation|performance|finding|key takeaway|discussion)/i },
+  { id: 'application', title: 'Applications & Benefits', priority: 3, maxSlides: 1,
+    match: /\b(application|benefit|advantage|use cases?)/i },
+  { id: 'challenges', title: 'Challenges & Limitations', priority: 2, maxSlides: 1,
+    match: /\b(challenge|limitation|drawback|constraint)/i },
+  { id: 'conclusion', title: 'Conclusion', priority: 1, maxSlides: 1,
+    match: /\b(conclusion|concluding)/i },
+  { id: 'recommendation', title: 'Recommendations & Future Work', priority: 2, maxSlides: 1,
+    match: /\b(recommend|future (work|scope|direction|research))/i },
+]
+
+interface ContentUnit extends Subsection {
+  chapterNum: string | null
+  sectionTitle: string
+  words: number
+}
+
+function flattenUnits(sections: DocSection[]): ContentUnit[] {
+  const units: ContentUnit[] = []
+  for (const section of sections) {
+    if (section.kind === 'back') continue // references are handled separately
+    for (const sub of section.subsections) {
+      const words =
+        sub.paragraphs.reduce((n, p) => n + p.split(/\s+/).length, 0) +
+        sub.listItems.reduce((n, p) => n + p.split(/\s+/).length, 0)
+      if (words < 15) continue // too thin to say anything on a slide
+      units.push({ ...sub, chapterNum: section.chapterNum, sectionTitle: section.title, words })
+    }
+  }
+  return units
+}
+
+/** How well a block of content answers a given slide role. */
+function roleScore(role: SlideRole, unit: ContentUnit): number {
+  let score = 0
+  if (role.match.test(unit.heading)) score += 10
+  if (role.match.test(unit.sectionTitle)) score += 4
+  // A weak signal from the prose itself, so an unnamed subsection can still land.
+  if (role.match.test(unit.paragraphs.join(' ').slice(0, 800))) score += 1
+  return score
+}
+
+function assignUnits(units: ContentUnit[]): Map<string, ContentUnit[]> {
+  const byRole = new Map<string, ContentUnit[]>()
+
+  for (const unit of units) {
+    let best: SlideRole | null = null
+    let bestScore = 0
+    for (const role of SLIDE_ROLES) {
+      const score = roleScore(role, unit)
+      if (score > bestScore) {
+        bestScore = score
+        best = role
+      }
+    }
+    // Below this, only the weak prose signal fired - not enough to claim a slide.
+    if (!best || bestScore < 4) continue
+
+    const list = byRole.get(best.id)
+    if (list) list.push(unit)
+    else byRole.set(best.id, [unit])
+  }
+
+  return byRole
+}
+
+function normalizeHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^\d+(\.\d+)*\s*/, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * True when a source heading just restates the slide title. "PROBLEM STATEMENT"
+ * should not open with a "Problem Definition and Motivation" bullet - the title
+ * already said it, and the bullet costs a line of the body box.
+ */
+function echoesTitle(heading: string, roleTitle: string): boolean {
+  const h = normalizeHeading(heading)
+  const t = normalizeHeading(roleTitle)
+  if (!h) return true
+  if (h.includes(t) || t.includes(h)) return true
+
+  const titleWords = new Set(t.split(' ').filter(w => w.length > 3))
+  if (titleWords.size === 0) return false
+  const headingWords = h.split(' ')
+  const shared = headingWords.filter(w => titleWords.has(w)).length
+  return shared / titleWords.size >= 0.5
+}
+
+/** "Chapter Two" when a role's content all comes from one chapter. */
+function chapterLabel(units: ContentUnit[]): string | undefined {
+  const nums = new Set(units.map(u => u.chapterNum).filter(Boolean))
+  if (nums.size !== 1) return undefined
+  const num = [...nums][0] as string
+  return 'Chapter ' + num.charAt(0) + num.slice(1).toLowerCase()
+}
+
+/**
+ * Builds a deck around the guideline's required slides. Returns [] when the
+ * document does not look like a seminar report, so the caller can fall back to
+ * proportional chapter coverage.
+ */
+function planRoleSlides(sections: DocSection[], budget: number): SlideSpec[] {
+  const byRole = assignUnits(flattenUnits(sections))
+  const present = SLIDE_ROLES.filter(r => (byRole.get(r.id)?.length ?? 0) > 0)
+
+  // Too few recognisable roles: this is not a structured report.
+  if (present.length < 3) return []
+
+  // One slide per role, most important first, until the budget runs out.
+  const quota = new Map<string, number>()
+  let left = budget
+  for (const priority of [1, 2, 3] as const) {
+    for (const role of present) {
+      if (left <= 0) break
+      if (role.priority !== priority) continue
+      quota.set(role.id, 1)
+      left--
+    }
+  }
+
+  // Spend anything left on roles with enough material to justify a second slide.
+  let grew = true
+  while (left > 0 && grew) {
+    grew = false
+    for (const role of present) {
+      if (left <= 0) break
+      const current = quota.get(role.id) ?? 0
+      if (current === 0 || current >= role.maxSlides) continue
+      const words = (byRole.get(role.id) ?? []).reduce((n, u) => n + u.words, 0)
+      if (words < 220 * (current + 1)) continue
+      quota.set(role.id, current + 1)
+      left--
+      grew = true
+    }
+  }
+
+  const specs: SlideSpec[] = []
+  for (const role of present) {
+    const slots = quota.get(role.id) ?? 0
+    if (slots === 0) continue
+
+    const units = byRole.get(role.id) ?? []
+
+    // Sub-headings only earn a line when the slide merges several subsections,
+    // and never when they just echo the slide title.
+    const sourced = units.map(u => ({
+      ...u,
+      heading: units.length > 1 && !echoesTitle(u.heading, role.title) ? u.heading : '',
+    }))
+
+    const bullets = bulletsFrom(sourced, slots, false)
+    if (bullets.length === 0) continue
+
+    const label = chapterLabel(units)
+    const { chunks } = packBullets(bullets, slots)
+    chunks.forEach((chunk, ci) => {
+      specs.push({
+        headerText: role.title.toUpperCase(),
+        subHeaderText: ci === 0 ? label : label ? label + ' (cont.)' : 'continued',
+        bullets: chunk,
+        variant: 'bullets',
+      })
+    })
+  }
+
+  return specs
 }
 
 /**
@@ -612,7 +856,7 @@ function lineCapacity(fontSize: number): number {
  * Packs bullets into at most `maxSlides` slides without overflowing the body box,
  * stepping the font down before giving up any content.
  */
-function packBullets(bullets: Bullet[], maxSlides: number): { chunks: Bullet[][]; fontSize: number } {
+export function packBullets(bullets: Bullet[], maxSlides: number): { chunks: Bullet[][]; fontSize: number } {
   const chunkAt = (fontSize: number, stopAt: number) => {
     const capacity = lineCapacity(fontSize)
     const chunks: Bullet[][] = []
@@ -706,6 +950,31 @@ export function buildSlideSpecs(sections: DocSection[], contentBudget: number): 
   const usable = sections.filter(s => volumeOf(s) > 0 || s.tables.length > 0)
   if (usable.length === 0) return []
 
+  const referenceSection = usable.find(isReferenceSection)
+  // Hold a slide back for references so the planner cannot spend the whole budget.
+  const roleBudget = referenceSection ? contentBudget - 1 : contentBudget
+
+  const roleSpecs = planRoleSlides(usable, roleBudget)
+  if (roleSpecs.length > 0) {
+    if (referenceSection) {
+      const refBullets = bulletsFrom(referenceSection.subsections, 1, true)
+      if (refBullets.length > 0) {
+        roleSpecs.push({
+          headerText: 'REFERENCES',
+          bullets: refBullets.slice(0, 7),
+          variant: 'references',
+        })
+      }
+    }
+    return roleSpecs
+  }
+
+  // Unstructured document: fall back to proportional coverage of its chapters.
+  return buildProportionalSpecs(usable, contentBudget)
+}
+
+function buildProportionalSpecs(usable: DocSection[], contentBudget: number): SlideSpec[] {
+
   // Tables each claim a slide up front; the rest of the budget goes to prose.
   const tableSlideCount = usable.reduce((n, s) => n + Math.min(s.tables.length, 2), 0)
   const proseBudget = Math.max(usable.length, contentBudget - Math.min(tableSlideCount, 3))
@@ -783,15 +1052,18 @@ function paintContentChrome(
   department: string
 ) {
   slide.background = { color: COLOR.ground }
-  slide.addShape('rect' as any, { x: 0, y: 0, w: '100%', h: 1.1, fill: { color: COLOR.navy } })
-  slide.addShape('rect' as any, { x: 0.55, y: 0.22, w: 0.08, h: 0.66, fill: { color: COLOR.indigo } })
+
+  // Header band sized to clear the approved deck's 36pt slide title.
+  const bandH = spec.subHeaderText ? 1.45 : 1.25
+  slide.addShape('rect' as any, { x: 0, y: 0, w: '100%', h: bandH, fill: { color: COLOR.navy } })
+  slide.addShape('rect' as any, { x: 0.25, y: 0.3, w: 0.09, h: bandH - 0.6, fill: { color: COLOR.indigo } })
 
   slide.addText(spec.headerText.toUpperCase(), {
-    x: 0.85,
-    y: 0.14,
-    w: 9.6,
-    h: spec.subHeaderText ? 0.42 : 0.7,
-    fontSize: spec.subHeaderText ? HEADER_FONT - 4 : HEADER_FONT,
+    x: DECK_STYLE.header.xIn,
+    y: DECK_STYLE.header.yIn - 0.18,
+    w: DECK_STYLE.header.widthIn - 1.9, // clear of the slide counter
+    h: DECK_STYLE.header.heightIn,
+    fontSize: HEADER_FONT,
     bold: true,
     color: COLOR.white,
     fontFace: FONT,
@@ -801,10 +1073,10 @@ function paintContentChrome(
 
   if (spec.subHeaderText) {
     slide.addText(spec.subHeaderText, {
-      x: 0.85,
-      y: 0.55,
-      w: 9.6,
-      h: 0.4,
+      x: DECK_STYLE.header.xIn,
+      y: DECK_STYLE.header.yIn + 0.62,
+      w: DECK_STYLE.header.widthIn - 1.9,
+      h: 0.36,
       fontSize: SUBHEADER_FONT,
       italic: true,
       color: COLOR.indigoLight,
@@ -855,6 +1127,7 @@ export async function exportPresentationPptx(
   const department = meta.department || 'COMPUTER ENGINEERING'
   const supervisor = meta.supervisorName || 'SUPERVISOR NAME'
   const institution = meta.institution || 'YABA COLLEGE OF TECHNOLOGY'
+  const session = meta.session || '2025/2026'
 
   const sections = extractSections(fullHtml)
   if (sections.length === 0) {
@@ -879,48 +1152,59 @@ export async function exportPresentationPptx(
   s1.background = { color: COLOR.navy }
   s1.addShape('rect' as any, { x: 0, y: 0, w: '100%', h: 0.12, fill: { color: COLOR.indigo } })
 
-  s1.addText(institution.toUpperCase(), {
-    x: MARGIN_X,
-    y: 0.6,
-    w: BODY_W,
-    h: 0.4,
-    fontSize: 13,
-    bold: true,
-    color: COLOR.mutedLight,
-    align: 'center',
-    fontFace: FONT,
-  })
+  // Title slide geometry copied from the approved deck: title block high on the
+  // slide, a report-presentation subtitle, then the identity block beneath it.
+  const ts = DECK_STYLE.titleSlide
 
   s1.addText(titleText.toUpperCase(), {
-    x: MARGIN_X,
-    y: 1.5,
-    w: BODY_W,
-    h: 2.2,
-    fontSize: TITLE_FONT,
+    x: ts.title.xIn,
+    y: ts.title.yIn,
+    w: ts.title.widthIn,
+    h: ts.title.heightIn,
+    fontSize: ts.title.sizePt,
     bold: true,
     color: COLOR.white,
     align: 'center',
     fontFace: FONT,
-    lineSpacing: 44,
+    lineSpacing: 42,
     fit: 'shrink',
   })
 
-  s1.addShape('rect' as any, { x: (SLIDE_W - 4) / 2, y: 3.9, w: 4.0, h: 0.04, fill: { color: COLOR.indigo } })
+  s1.addText(ts.subtitleText, {
+    x: ts.subtitle.xIn,
+    y: ts.subtitle.yIn,
+    w: ts.subtitle.widthIn,
+    h: ts.subtitle.heightIn,
+    fontSize: ts.subtitle.sizePt,
+    color: COLOR.indigoLight,
+    align: 'center',
+    fontFace: FONT,
+  })
 
-  s1.addText(
-    'Presented by: ' + studentName + '  |  ' + matricNo + '\nDepartment of ' + department + '\nSupervisor: ' + supervisor,
-    {
-      x: MARGIN_X,
-      y: 4.3,
-      w: BODY_W,
-      h: 1.8,
-      fontSize: 15,
-      color: COLOR.dim,
-      align: 'center',
-      fontFace: FONT,
-      lineSpacing: 24,
-    }
-  )
+  s1.addShape('rect' as any, { x: (SLIDE_W - 4) / 2, y: ts.subtitle.yIn + 0.62, w: 4.0, h: 0.04, fill: { color: COLOR.indigo } })
+
+  // Identity block, in the approved deck's order.
+  const identity = [
+    studentName,
+    'Matric No: ' + matricNo,
+    'Department of ' + toTitleCase(department) + ', ' + (meta.school?.trim() || 'School of Engineering'),
+    institution.replace(/\b\w+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()),
+    'Supervisor: ' + supervisor,
+    (meta.academicLevel || 'HND') + ' ' + toTitleCase(department) + '  |  Session ' + (session || '2025/2026'),
+  ]
+
+  s1.addText(identity.join('\n'), {
+    x: ts.details.xIn,
+    y: ts.details.yIn,
+    w: ts.details.widthIn,
+    h: ts.details.heightIn,
+    fontSize: ts.details.sizePt,
+    color: COLOR.dim,
+    align: 'center',
+    fontFace: FONT,
+    lineSpacing: 30,
+    fit: 'shrink',
+  })
 
   // --- Slide 2: Agenda ---
   let slideNo = 2
