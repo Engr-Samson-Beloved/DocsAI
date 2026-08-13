@@ -53,6 +53,20 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         if (session && session.access_token) {
           localStorage.setItem('wordpi-session-token', session.access_token)
           localStorage.setItem('wordpi-user-email', email)
+
+          // Offline mode: no cloud backend is configured, so documents stay on
+          // this device. Say so rather than implying a cloud backup exists.
+          if (data.localMode) {
+            localStorage.setItem('wordpi-local-mode', 'true')
+            setSuccessMsg('Signed in offline. No cloud backend is configured, so your documents stay on this device only.')
+            setTimeout(() => {
+              onSuccess(email)
+              onClose()
+            }, 2200)
+            return
+          }
+
+          localStorage.removeItem('wordpi-local-mode')
           onSuccess(email)
           onClose()
         } else {

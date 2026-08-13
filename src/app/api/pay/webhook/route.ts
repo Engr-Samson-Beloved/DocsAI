@@ -6,22 +6,56 @@ export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text()
     const signature = req.headers.get('x-korapay-signature')
-    
+
     const webhookSecret = process.env.KORAPAY_WEBHOOK_SECRET || process.env.KORAPAY_SECRET_KEY
 
-    if (webhookSecret && signature) {
-      const computedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rawBody)
-        .digest('hex')
+    // A webhook grants paid access, so it is only ever trusted when it proves it
+    // came from Korapay. Previously a request that simply omitted the signature
+    // header skipped verification entirely and could activate any subscription.
+    if (!webhookSecret) {
+      console.error('[Korapay Webhook] No webhook secret configured; refusing to process.')
+      return NextResponse.json(
+        { error: 'Webhook secret is not configured on this server.' },
+        { status: 500 }
+      )
+    }
 
-      if (computedSignature !== signature) {
-        console.error('[Korapay Webhook] Invalid HMAC signature mismatch!')
-        return NextResponse.json(
-          { error: 'Invalid webhook signature' },
-          { status: 401 }
-        )
+    if (!signature) {
+      console.error('[Korapay Webhook] Rejected request with no x-korapay-signature header.')
+      return NextResponse.json(
+        { error: 'Missing webhook signature' },
+        { status: 401 }
+      )
+    }
+
+    // Korapay signs the `data` object, but accept a whole-envelope signature
+    // too — both require the secret, so tolerating either is safe and keeps the
+    // endpoint working if the signing convention differs.
+    const signingCandidates: string[] = [rawBody]
+    try {
+      const parsedForSigning = JSON.parse(rawBody)
+      if (parsedForSigning && parsedForSigning.data !== undefined) {
+        signingCandidates.unshift(JSON.stringify(parsedForSigning.data))
       }
+    } catch {
+      return NextResponse.json({ error: 'Malformed webhook payload' }, { status: 400 })
+    }
+
+    const provided = Buffer.from(signature, 'utf8')
+    const signatureMatches = signingCandidates.some(candidate => {
+      const computed = Buffer.from(
+        crypto.createHmac('sha256', webhookSecret).update(candidate).digest('hex'),
+        'utf8'
+      )
+      return provided.length === computed.length && crypto.timingSafeEqual(provided, computed)
+    })
+
+    if (!signatureMatches) {
+      console.error('[Korapay Webhook] Invalid HMAC signature mismatch!')
+      return NextResponse.json(
+        { error: 'Invalid webhook signature' },
+        { status: 401 }
+      )
     }
 
     const payload = JSON.parse(rawBody)

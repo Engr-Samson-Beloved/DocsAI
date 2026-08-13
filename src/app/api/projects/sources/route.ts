@@ -17,15 +17,63 @@ function getBearerToken(req: NextRequest): string | undefined {
   return undefined
 }
 
-// Ensure storage directories exist
-function ensureDirs() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true })
+/**
+ * Identifies the caller so disk-backed sources stay partitioned per user.
+ * Mirrors the owner resolution used for projects.
+ */
+async function resolveOwner(req: NextRequest): Promise<{
+  ownerKey: string
+  supabase: ReturnType<typeof getSupabaseClient>
+  token?: string
+  user: { id: string; email?: string } | null
+  unauthorized: boolean
+}> {
+  const token = getBearerToken(req)
+  const supabase = getSupabaseClient(token)
+
+  if (token && token.startsWith('local-token-')) {
+    const encoded = token.split('-').slice(3).join('-')
+    try {
+      const email = Buffer.from(encoded, 'base64').toString('utf-8').trim().toLowerCase()
+      if (email) {
+        return { ownerKey: `local:${email}`, supabase: null, token, user: null, unauthorized: false }
+      }
+    } catch {
+      // fall through to guest
+    }
+    return { ownerKey: 'guest', supabase: null, token, user: null, unauthorized: false }
   }
-  if (!fs.existsSync(SOURCES_DIR)) {
-    fs.mkdirSync(SOURCES_DIR, { recursive: true })
+
+  if (supabase && token) {
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error || !user) {
+      return { ownerKey: 'guest', supabase, token, user: null, unauthorized: true }
+    }
+    return {
+      ownerKey: `user:${user.id}`,
+      supabase,
+      token,
+      user: { id: user.id, email: user.email },
+      unauthorized: false
+    }
+  }
+
+  return { ownerKey: 'guest', supabase, token, user: null, unauthorized: false }
+}
+
+// Ensure storage directories exist without throwing on read-only filesystems
+function ensureDirs(): boolean {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+    if (!fs.existsSync(SOURCES_DIR)) fs.mkdirSync(SOURCES_DIR, { recursive: true })
+    return true
+  } catch (e) {
+    console.warn('Local disk storage is unavailable (read-only filesystem?):', e)
+    return false
   }
 }
+
+const ALLOW_LEGACY_SHARED = process.env.ALLOW_LEGACY_SHARED_PROJECTS === 'true'
 
 // GET: Retrieve sources for a specific project
 export async function GET(req: NextRequest) {
@@ -37,9 +85,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Project ID is required' }, { status: 400 })
     }
 
-    const token = getBearerToken(req)
-    const supabase = getSupabaseClient(token)
-    if (supabase && token) {
+    const { ownerKey, supabase, token, user, unauthorized } = await resolveOwner(req)
+
+    if (unauthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    if (supabase && token && user) {
       const { data, error } = await supabase
         .from('project_sources')
         .select('*')
@@ -66,22 +118,38 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(sources)
     }
 
-    // Fallback: Retrieve sources from local disk
-    ensureDirs()
-    const files = fs.readdirSync(SOURCES_DIR)
+    // Fallback: only this owner's sources from local disk
+    if (!ensureDirs()) return NextResponse.json([])
+
+    let files: string[] = []
+    try {
+      files = fs.readdirSync(SOURCES_DIR)
+    } catch (e) {
+      console.warn('Could not list local sources directory:', e)
+      return NextResponse.json([])
+    }
+
     const sources = files
       .filter(f => f.endsWith('.json'))
       .map(file => {
         try {
-          const filePath = path.join(SOURCES_DIR, file)
-          const raw = fs.readFileSync(filePath, 'utf-8')
+          const raw = fs.readFileSync(path.join(SOURCES_DIR, file), 'utf-8')
           return JSON.parse(raw)
         } catch (e) {
           console.error(`Failed to read source file: ${file}`, e)
           return null
         }
       })
-      .filter(s => s !== null && s.projectId === projectId)
+      .filter(s => {
+        if (!s || s.projectId !== projectId) return false
+        if (s._owner === undefined) return ALLOW_LEGACY_SHARED
+        return s._owner === ownerKey
+      })
+      .map(source => {
+        const clean = { ...source }
+        delete clean._owner
+        return clean
+      })
 
     return NextResponse.json(sources)
   } catch (error: any) {
@@ -98,22 +166,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid source data' }, { status: 400 })
     }
 
-    // Always save locally first (acts as local cache/fallback)
-    ensureDirs()
-    const filePath = path.join(SOURCES_DIR, `${source.id}.json`)
-    fs.writeFileSync(filePath, JSON.stringify(source, null, 2), 'utf-8')
+    const { ownerKey, supabase, token, user, unauthorized } = await resolveOwner(req)
 
-    // Sync to Supabase if active and token is provided
-    const token = getBearerToken(req)
-    const supabase = getSupabaseClient(token)
-    if (supabase && token) {
-      // Validate user token
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (userError || !user) {
-        console.error('Failed to authenticate token:', userError)
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+    if (unauthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
+    let persisted = false
+
+    // Cloud first so a read-only filesystem cannot block the durable write
+    if (supabase && token && user) {
       const mappedSource = {
         id: source.id, // Primary key matches local IndexedDB auto-increment id
         project_id: source.projectId,
@@ -124,14 +186,38 @@ export async function POST(req: NextRequest) {
         added_at: source.addedAt
       }
 
-      const { error } = await supabase
-        .from('project_sources')
-        .upsert(mappedSource)
-
+      const { error } = await supabase.from('project_sources').upsert(mappedSource)
       if (error) {
         console.error('Failed to sync source to Supabase:', error)
-        // Do not fail since local storage succeeded
+      } else {
+        persisted = true
       }
+    }
+
+    if (ensureDirs()) {
+      const filePath = path.join(SOURCES_DIR, `${source.id}.json`)
+      try {
+        if (fs.existsSync(filePath)) {
+          const existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (existing._owner !== undefined && existing._owner !== ownerKey) {
+            return NextResponse.json(
+              { error: 'This source belongs to another account.' },
+              { status: 403 }
+            )
+          }
+        }
+        fs.writeFileSync(filePath, JSON.stringify({ ...source, _owner: ownerKey }, null, 2), 'utf-8')
+        persisted = true
+      } catch (e) {
+        console.warn('Local source cache write failed:', e)
+      }
+    }
+
+    if (!persisted) {
+      return NextResponse.json(
+        { error: 'Could not persist the source to cloud storage or local disk.' },
+        { status: 503 }
+      )
     }
 
     return NextResponse.json({ success: true })
@@ -151,24 +237,31 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Source ID is required' }, { status: 400 })
     }
 
-    // Always delete locally first
-    ensureDirs()
-    const filePath = path.join(SOURCES_DIR, `${id}.json`)
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath)
+    const { ownerKey, supabase, token, user, unauthorized } = await resolveOwner(req)
+
+    if (unauthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Delete from Supabase if active and token is provided
-    const token = getBearerToken(req)
-    const supabase = getSupabaseClient(token)
-    if (supabase && token) {
-      // Validate user token
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (userError || !user) {
-        console.error('Failed to authenticate token:', userError)
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (ensureDirs()) {
+      const filePath = path.join(SOURCES_DIR, `${id}.json`)
+      try {
+        if (fs.existsSync(filePath)) {
+          const existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (existing._owner !== undefined && existing._owner !== ownerKey) {
+            return NextResponse.json(
+              { error: 'This source belongs to another account.' },
+              { status: 403 }
+            )
+          }
+          fs.unlinkSync(filePath)
+        }
+      } catch (e) {
+        console.warn('Local source delete failed:', e)
       }
+    }
 
+    if (supabase && token && user) {
       const { error } = await supabase
         .from('project_sources')
         .delete()

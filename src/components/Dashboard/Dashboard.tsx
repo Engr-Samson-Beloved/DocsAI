@@ -3,11 +3,9 @@
 import React, { useState } from 'react'
 import { PricingModal } from '../Subscription/PricingModal'
 import {
-  Plus,
   Search,
   LayoutGrid,
   List as ListIcon,
-  Calendar,
   Edit3,
   Trash2,
   Folder,
@@ -16,8 +14,7 @@ import {
   Menu,
   MoreVertical,
   ChevronDown,
-  User,
-  Settings,
+  Upload,
   LogOut,
   HelpCircle,
   Crown,
@@ -54,6 +51,25 @@ interface DashboardProps {
   onOpenAuth: () => void
   onOpenPricingModal?: () => void
   onImportDocument?: () => void
+  onGeneratePptx?: () => void
+  onHumanizeText?: () => void
+  isCloudSynced?: boolean
+}
+
+// Pull the plain text out of stored Tiptap JSON so search can look inside documents
+const extractPlainText = (contentStr: string): string => {
+  try {
+    const json = JSON.parse(contentStr)
+    let text = ''
+    const walk = (node: any) => {
+      if (node.text) text += node.text + ' '
+      if (node.content) node.content.forEach(walk)
+    }
+    walk(json)
+    return text.toLowerCase()
+  } catch {
+    return ''
+  }
 }
 
 // Subcomponent to render a miniature version of the document content
@@ -122,12 +138,14 @@ export default function Dashboard({
   onSignOut,
   onOpenAuth,
   onOpenPricingModal,
-  onImportDocument
+  onImportDocument,
+  onGeneratePptx,
+  onHumanizeText,
+  isCloudSynced
 }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'updated' | 'title' | 'words'>('updated')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const [ownerFilter, setOwnerFilter] = useState<'anyone' | 'me' | 'notme'>('anyone')
 
   // Menu toggles
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
@@ -142,15 +160,17 @@ export default function Dashboard({
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
-  // Filter and sort projects
+  // Filter and sort projects. Search covers the document body too, not just
+  // the title — people look for a phrase they remember writing.
   const filteredProjects = projects
     .filter(p => {
-      const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            p.documentType.toLowerCase().includes(searchQuery.toLowerCase())
-      if (ownerFilter === 'notme') {
-        return false // Simulate not owned
-      }
-      return matchesSearch
+      const query = searchQuery.trim().toLowerCase()
+      if (!query) return true
+      return (
+        p.title.toLowerCase().includes(query) ||
+        p.documentType.toLowerCase().includes(query) ||
+        extractPlainText(p.content).includes(query)
+      )
     })
     .sort((a, b) => {
       if (sortBy === 'title') {
@@ -177,7 +197,7 @@ export default function Dashboard({
           </button>
           
           {/* Brand Logo & Name */}
-          <div className="flex items-center gap-2 ml-1 cursor-pointer" onClick={() => window.location.reload()}>
+          <div className="flex items-center gap-2 ml-1 select-none">
             <img src="/WordPI.png" alt="WordPiLot Logo" className="w-7 h-7 object-contain rounded-md" />
             <span className="font-bold text-lg tracking-tight select-none">
               <span className="text-[#1B1F23] dark:text-[#E5E7EB]">Word</span>
@@ -241,19 +261,24 @@ export default function Dashboard({
             {showAppGridDropdown && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setShowAppGridDropdown(false)}></div>
-                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-2xl shadow-xl p-4 grid grid-cols-3 gap-4 z-30 animate-in fade-in duration-150">
-                  <div className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-xl cursor-pointer">
-                    <div className="w-9 h-9 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">D</div>
-                    <span className="text-[10px] text-zinc-600 dark:text-zinc-350">Docs</span>
+                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-2xl shadow-xl p-4 z-30 animate-in fade-in duration-150">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="flex flex-col items-center gap-1 p-2 bg-blue-50 dark:bg-blue-950/30 rounded-xl">
+                      <div className="w-9 h-9 bg-blue-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">D</div>
+                      <span className="text-[10px] text-zinc-600 dark:text-zinc-350 font-semibold">Docs</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 p-2 rounded-xl opacity-50" title="Not available yet">
+                      <div className="w-9 h-9 bg-green-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">S</div>
+                      <span className="text-[10px] text-zinc-600 dark:text-zinc-350">Sheets</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 p-2 rounded-xl opacity-50" title="Not available yet">
+                      <div className="w-9 h-9 bg-amber-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">P</div>
+                      <span className="text-[10px] text-zinc-600 dark:text-zinc-350">Slides</span>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-xl opacity-60 cursor-not-allowed">
-                    <div className="w-9 h-9 bg-green-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">S</div>
-                    <span className="text-[10px] text-zinc-600 dark:text-zinc-350">Sheets</span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-xl opacity-60 cursor-not-allowed">
-                    <div className="w-9 h-9 bg-amber-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">P</div>
-                    <span className="text-[10px] text-zinc-600 dark:text-zinc-350">Slides</span>
-                  </div>
+                  <p className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800 text-[10px] text-zinc-400 text-center">
+                    Sheets and Slides are not available yet.
+                  </p>
                 </div>
               </>
             )}
@@ -279,13 +304,21 @@ export default function Dashboard({
                   </div>
                   {userEmail ? (
                     <>
-                      <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Active User</h4>
+                      <h4 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">Signed in</h4>
                       <p className="text-[11px] text-zinc-450 dark:text-zinc-500 truncate max-w-full px-2">{userEmail}</p>
-                      
-                      <div className="mt-2.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 rounded-full flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
-                        <span>Cloud Backup Sync Active</span>
-                      </div>
+
+                      {/* Reflects the real sync state rather than always claiming success */}
+                      {isCloudSynced ? (
+                        <div className="mt-2.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40 rounded-full flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400 font-bold">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                          <span>Cloud backup active</span>
+                        </div>
+                      ) : (
+                        <div className="mt-2.5 px-3 py-1 bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40 rounded-full flex items-center gap-1.5 text-[10px] text-amber-700 dark:text-amber-400 font-bold">
+                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+                          <span>Saved on this device only</span>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>
@@ -304,14 +337,22 @@ export default function Dashboard({
                   <div className="w-full border-t border-zinc-150 dark:border-zinc-800 my-3"></div>
                   
                   <div className="w-full flex flex-col gap-1 text-left text-xs text-zinc-600 dark:text-zinc-350">
-                    <button className="flex items-center gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer">
-                      <Settings className="w-3.5 h-3.5" />
-                      <span>Settings</span>
-                    </button>
-                    <button className="flex items-center gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer">
+                    {onOpenPricingModal && (
+                      <button
+                        onClick={() => { onOpenPricingModal(); setShowProfileDropdown(false) }}
+                        className="flex items-center gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer"
+                      >
+                        <Crown className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Plan & billing</span>
+                      </button>
+                    )}
+                    <a
+                      href="mailto:support@docuai.app"
+                      className="flex items-center gap-2 p-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer"
+                    >
                       <HelpCircle className="w-3.5 h-3.5" />
-                      <span>Help & Feedback</span>
-                    </button>
+                      <span>Help & feedback</span>
+                    </a>
                     {userEmail && (
                       <button 
                         onClick={() => { onSignOut(); setShowProfileDropdown(false) }}
@@ -348,25 +389,44 @@ export default function Dashboard({
                 <FileText className="w-4.5 h-4.5" />
                 <span>Docs</span>
               </button>
-              <button className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-not-allowed opacity-60 text-left w-full">
+              <button disabled className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-not-allowed opacity-50 text-left w-full" title="Not available yet">
                 <LayoutGrid className="w-4.5 h-4.5 text-green-500" />
                 <span>Sheets</span>
+                <span className="ml-auto text-[9px] font-bold uppercase tracking-wide text-zinc-400">Soon</span>
               </button>
-              <button className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-not-allowed opacity-60 text-left w-full">
+              <button disabled className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-not-allowed opacity-50 text-left w-full" title="Not available yet">
                 <LayoutGrid className="w-4.5 h-4.5 text-amber-500" />
                 <span>Slides</span>
+                <span className="ml-auto text-[9px] font-bold uppercase tracking-wide text-zinc-400">Soon</span>
               </button>
-              
+
               <div className="border-t border-zinc-150 dark:border-zinc-800 my-2"></div>
-              
-              <button className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer text-left w-full">
-                <Settings className="w-4.5 h-4.5 text-zinc-400" />
-                <span>General Settings</span>
-              </button>
-              <button className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer text-left w-full">
+
+              {onImportDocument && (
+                <button
+                  onClick={() => { onImportDocument(); setShowHamburgerDrawer(false) }}
+                  className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer text-left w-full"
+                >
+                  <Upload className="w-4.5 h-4.5 text-zinc-400" />
+                  <span>Import a document</span>
+                </button>
+              )}
+              {onOpenPricingModal && (
+                <button
+                  onClick={() => { onOpenPricingModal(); setShowHamburgerDrawer(false) }}
+                  className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer text-left w-full"
+                >
+                  <Crown className="w-4.5 h-4.5 text-amber-500" />
+                  <span>Plan & billing</span>
+                </button>
+              )}
+              <a
+                href="mailto:support@docuai.app"
+                className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer text-left w-full"
+              >
                 <HelpCircle className="w-4.5 h-4.5 text-zinc-400" />
-                <span>Help & Help Docs</span>
-              </button>
+                <span>Help & feedback</span>
+              </a>
             </div>
             <div className="text-[10px] text-zinc-400 dark:text-zinc-550 border-t border-zinc-150 dark:border-zinc-800 pt-3">
               Version 1.0.0 (WordPI Docs)
@@ -384,16 +444,6 @@ export default function Dashboard({
             {/* Template Gallery Header */}
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-zinc-800 dark:text-zinc-200 text-sm">Start a new document</span>
-              <div className="flex items-center gap-3 font-semibold text-zinc-550 dark:text-zinc-400">
-                <button className="flex items-center gap-1 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer">
-                  <span>Template gallery</span>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-                <div className="w-px h-4 bg-zinc-300 dark:bg-zinc-850"></div>
-                <button className="p-1.5 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-full transition-colors cursor-pointer">
-                  <MoreVertical className="w-4 h-4" />
-                </button>
-              </div>
             </div>
 
             {/* Template Gallery Cards */}
@@ -453,8 +503,8 @@ export default function Dashboard({
 
               {/* Generate PPTX Card */}
               <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                <button
+                  onClick={() => onGeneratePptx ? onGeneratePptx() : onCreateProject()}
                   className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-amber-500 dark:hover:border-amber-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
                 >
                   <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold text-xl">
@@ -467,8 +517,8 @@ export default function Dashboard({
 
               {/* Humanize Text Card */}
               <div className="flex flex-col gap-1.5">
-                <button 
-                  onClick={() => onCreateProjectWithTemplate('Custom')}
+                <button
+                  onClick={() => onHumanizeText ? onHumanizeText() : onCreateProject()}
                   className="aspect-[1/1.4] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-purple-500 dark:hover:border-purple-600 rounded-xs cursor-pointer transition-all p-1.5 flex flex-col items-center justify-center shadow-sm hover:shadow-md group"
                 >
                   <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-xl">
@@ -476,7 +526,7 @@ export default function Dashboard({
                   </div>
                 </button>
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Humanize Text</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Bypass AI Detector</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Rewrite to sound human</span>
               </div>
 
             </div>
@@ -493,43 +543,10 @@ export default function Dashboard({
             
             <div className="flex items-center gap-4 text-xs font-semibold text-zinc-550 dark:text-zinc-400">
               
-              {/* Owned by Dropdown */}
-              <div className="relative">
-                <button 
-                  onClick={() => setActiveMenuProjectId(activeMenuProjectId === 'owner' ? null : 'owner')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-lg cursor-pointer"
-                >
-                  <span>
-                    {ownerFilter === 'anyone' ? 'Owned by anyone' : ownerFilter === 'me' ? 'Owned by me' : 'Not owned by me'}
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-                {activeMenuProjectId === 'owner' && (
-                  <>
-                    <div className="fixed inset-0 z-20" onClick={() => setActiveMenuProjectId(null)}></div>
-                    <div className="absolute right-0 mt-1 w-44 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-850 rounded-xl shadow-lg z-30 py-1.5 animate-in fade-in duration-100">
-                      <button 
-                        onClick={() => { setOwnerFilter('anyone'); setActiveMenuProjectId(null) }}
-                        className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
-                      >
-                        Owned by anyone
-                      </button>
-                      <button 
-                        onClick={() => { setOwnerFilter('me'); setActiveMenuProjectId(null) }}
-                        className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
-                      >
-                        Owned by me
-                      </button>
-                      <button 
-                        onClick={() => { setOwnerFilter('notme'); setActiveMenuProjectId(null) }}
-                        className="w-full text-left px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-850 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
-                      >
-                        Not owned by me
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              {/* Document count */}
+              <span className="text-zinc-450 dark:text-zinc-500 font-medium">
+                {filteredProjects.length} {filteredProjects.length === 1 ? 'document' : 'documents'}
+              </span>
 
               {/* View mode toggle */}
               <div className="flex items-center bg-zinc-200/60 dark:bg-zinc-900 p-0.5 rounded-lg border border-zinc-250/30 dark:border-zinc-850">
@@ -553,10 +570,13 @@ export default function Dashboard({
               <div className="relative">
                 <button
                   onClick={() => setActiveMenuProjectId(activeMenuProjectId === 'sort' ? null : 'sort')}
-                  className="p-2 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-full transition-colors cursor-pointer"
-                  title="Sorting"
+                  className="flex items-center gap-1 px-2.5 py-1.5 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-lg transition-colors cursor-pointer"
+                  title="Change sort order"
                 >
-                  <span className="font-mono text-xs select-none">A-Z</span>
+                  <span className="select-none">
+                    {sortBy === 'updated' ? 'Last modified' : sortBy === 'title' ? 'Title A–Z' : 'Word count'}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5" />
                 </button>
                 {activeMenuProjectId === 'sort' && (
                   <>
@@ -585,14 +605,16 @@ export default function Dashboard({
                 )}
               </div>
 
-              {/* Folder Selector */}
-              <button 
-                onClick={onCreateProject}
-                className="p-2 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-full transition-colors cursor-pointer"
-                title="Open file picker"
-              >
-                <Folder className="w-4 h-4" />
-              </button>
+              {/* Import an existing document */}
+              {onImportDocument && (
+                <button
+                  onClick={onImportDocument}
+                  className="p-2 hover:bg-zinc-200/50 dark:hover:bg-zinc-850 rounded-full transition-colors cursor-pointer"
+                  title="Import a document from your device"
+                >
+                  <Upload className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -689,7 +711,7 @@ export default function Dashboard({
                   <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/60 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
                     <th className="p-4 pl-6">Title</th>
                     <th className="p-4">Type</th>
-                    <th className="p-4">Owner</th>
+                    <th className="p-4">Words</th>
                     <th className="p-4">Modified</th>
                     <th className="p-4 pr-6 text-right">Actions</th>
                   </tr>
@@ -723,7 +745,7 @@ export default function Dashboard({
                         </span>
                       </td>
                       <td className="p-4 text-zinc-500 dark:text-zinc-400 font-medium">
-                        me
+                        {(project.wordCount || 0).toLocaleString()}
                       </td>
                       <td className="p-4 text-zinc-500 dark:text-zinc-400 font-medium">
                         {formatDate(project.updatedAt)}

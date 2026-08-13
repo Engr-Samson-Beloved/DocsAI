@@ -7,16 +7,17 @@ import {
   Crown,
   ArrowLeft,
   Coins,
-  ShieldCheck,
   CheckCircle2,
-  TrendingUp,
+  AlertCircle,
+  ExternalLink,
+  Lock,
   CreditCard
 } from 'lucide-react'
 import {
   PLAN_DETAILS,
   UserSubscription,
   getSubscription,
-  saveSubscription
+  verifyPaymentCallback
 } from '../../utils/subscription'
 
 interface PricingViewProps {
@@ -37,10 +38,12 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [userTokens, setUserTokens] = useState<number>(0)
   const [loadingTier, setLoadingTier] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [redirectingUrl, setRedirectingUrl] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadSubscriptionAndTokens()
-  }, [userEmail])
+  // Guests cannot be charged: the payment has to be linked to an account or the
+  // subscription has nowhere to land once Korapay confirms it.
+  const isGuest = !userEmail || userEmail.includes('guest')
 
   const loadSubscriptionAndTokens = async () => {
     const sub = await getSubscription(userEmail)
@@ -52,58 +55,62 @@ export const PricingView: React.FC<PricingViewProps> = ({
     }
   }
 
+  // Korapay sends the user back to /?payment=success&reference=...&tier=...
+  // If they land here rather than on the dashboard, settle the charge in place.
+  const settleReturningPayment = async () => {
+    const result = await verifyPaymentCallback(userEmail)
+    if (!result.checked) return
+
+    if (result.success && result.subscription) {
+      setCurrentSub(result.subscription)
+      if (onSubscriptionUpdated) onSubscriptionUpdated(result.subscription)
+      setSuccessMessage(result.message)
+    } else {
+      setErrorMessage(result.message)
+    }
+  }
+
+  useEffect(() => {
+    loadSubscriptionAndTokens()
+    settleReturningPayment()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userEmail])
+
   const handleSelectPlan = async (tier: 'basic' | 'pro' | 'enterprise') => {
-    if (!userEmail && onOpenAuth) {
-      onOpenAuth()
+    setErrorMessage(null)
+    setSuccessMessage(null)
+    setRedirectingUrl(null)
+
+    if (isGuest) {
+      setErrorMessage('Sign in required: create an account or sign in first so your payment stays linked to your email.')
+      if (onOpenAuth) {
+        setTimeout(() => onOpenAuth(), 1200)
+      }
       return
     }
 
     setLoadingTier(tier)
-    setSuccessMessage(null)
 
-    // Simulate instant plan activation cleanly without Korapay branding
-    setTimeout(async () => {
-      const expirationDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-      const amounts = { basic: 5000, pro: 7000, enterprise: 10000 }
-      
-      const newSub: UserSubscription = {
-        user_id: userEmail || 'guest',
-        email: userEmail || 'guest@docuai.app',
-        plan_tier: tier,
-        amount: amounts[tier],
-        status: 'active',
-        expiration_date: expirationDate,
-        updated_at: new Date().toISOString()
+    try {
+      const res = await fetch('/api/pay/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: userEmail, planTier: tier, userId: userEmail })
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || !data.success || !data.checkoutUrl) {
+        throw new Error(data.error || 'Could not start the payment. Please try again.')
       }
 
-      await saveSubscription(newSub)
-      setCurrentSub(newSub)
-      if (onSubscriptionUpdated) onSubscriptionUpdated(newSub)
-
+      setRedirectingUrl(data.checkoutUrl)
+      window.location.href = data.checkoutUrl
+    } catch (err: any) {
+      console.error('Subscription initialization failed:', err)
+      setErrorMessage(err.message || 'Payment initialization failed. Please try again.')
       setLoadingTier(null)
-      setSuccessMessage(`🎉 Success! You have successfully activated the ${PLAN_DETAILS[tier].name}. Enjoy full AI features!`)
-    }, 600)
-  }
-
-  const handleFundTokens = (tokenAmount: number, cost: number) => {
-    if (!userEmail && onOpenAuth) {
-      onOpenAuth()
-      return
     }
-
-    setLoadingTier(`token_${tokenAmount}`)
-    setSuccessMessage(null)
-
-    setTimeout(() => {
-      const newBalance = userTokens + tokenAmount
-      setUserTokens(newBalance)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`wordpi_tokens_${userEmail || 'guest'}`, newBalance.toString())
-      }
-
-      setLoadingTier(null)
-      setSuccessMessage(`🪙 Success! Added ${tokenAmount} AI Tokens to your account balance. Current total: ${newBalance} Tokens.`)
-    }, 600)
   }
 
   return (
@@ -160,11 +167,51 @@ export const PricingView: React.FC<PricingViewProps> = ({
           </div>
         </div>
 
+        {/* Sign-in requirement for guests */}
+        {isGuest && (
+          <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-2.5 text-xs text-indigo-900 dark:text-indigo-200 text-left">
+              <Lock className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span><strong>Sign in required.</strong> Your subscription is linked to your email, so you need an account before paying.</span>
+            </div>
+            {onOpenAuth && (
+              <button
+                onClick={onOpenAuth}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shrink-0 cursor-pointer transition-colors shadow-sm active:scale-95"
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Success / Info Message */}
         {successMessage && (
           <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-2xl p-4 flex items-center gap-3 text-xs font-bold animate-in fade-in duration-200 shadow-sm">
             <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-500" />
             <span>{successMessage}</span>
+          </div>
+        )}
+
+        {/* Error Message */}
+        {errorMessage && (
+          <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 rounded-2xl p-4 flex items-center gap-3 text-xs font-bold animate-in fade-in duration-200 shadow-sm">
+            <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Checkout redirect notice */}
+        {redirectingUrl && (
+          <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-300 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs font-bold animate-in fade-in duration-200 shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin shrink-0" />
+              <span>Taking you to the secure checkout page…</span>
+            </div>
+            <a href={redirectingUrl} className="underline flex items-center gap-1 shrink-0">
+              <span>Open manually</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
         )}
 
@@ -228,10 +275,27 @@ export const PricingView: React.FC<PricingViewProps> = ({
               
               <button
                 onClick={() => handleSelectPlan('basic')}
-                disabled={loadingTier === 'basic' || (currentSub?.status === 'active' && currentSub?.plan_tier === 'basic')}
-                className="w-full py-3 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-900 rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'basic')}
+                className="w-full py-3 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-900 rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loadingTier === 'basic' ? 'Activating...' : currentSub?.plan_tier === 'basic' && currentSub?.status === 'active' ? 'Current Plan' : 'Select Basic Plan'}
+                {loadingTier === 'basic' ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <span>Starting checkout…</span>
+                  </>
+                ) : currentSub?.plan_tier === 'basic' && currentSub?.status === 'active' ? (
+                  <span>Current Plan</span>
+                ) : isGuest ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Sign in to pay ₦5,000</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Pay ₦5,000</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -251,7 +315,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
                   <span className="text-xs text-zinc-400 font-semibold">/ month</span>
                 </div>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  200 AI generations per day. Built for Master's thesis & multi-chapter academic projects.
+                  200 AI generations per day. Built for Master&apos;s thesis &amp; multi-chapter academic projects.
                 </p>
                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2 text-xs">
                   <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
@@ -275,10 +339,27 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
               <button
                 onClick={() => handleSelectPlan('pro')}
-                disabled={loadingTier === 'pro' || (currentSub?.status === 'active' && currentSub?.plan_tier === 'pro')}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50"
+                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'pro')}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loadingTier === 'pro' ? 'Activating...' : currentSub?.plan_tier === 'pro' && currentSub?.status === 'active' ? 'Current Plan' : 'Select Pro Plan'}
+                {loadingTier === 'pro' ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Starting checkout…</span>
+                  </>
+                ) : currentSub?.plan_tier === 'pro' && currentSub?.status === 'active' ? (
+                  <span>Current Plan</span>
+                ) : isGuest ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Sign in to pay ₦7,000</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 fill-current" />
+                    <span>Pay ₦7,000</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -312,10 +393,27 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
               <button
                 onClick={() => handleSelectPlan('enterprise')}
-                disabled={loadingTier === 'enterprise' || (currentSub?.status === 'active' && currentSub?.plan_tier === 'enterprise')}
-                className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50"
+                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'enterprise')}
+                className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loadingTier === 'enterprise' ? 'Activating...' : currentSub?.plan_tier === 'enterprise' && currentSub?.status === 'active' ? 'Current Plan' : 'Select Enterprise Plan'}
+                {loadingTier === 'enterprise' ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Starting checkout…</span>
+                  </>
+                ) : currentSub?.plan_tier === 'enterprise' && currentSub?.status === 'active' ? (
+                  <span>Current Plan</span>
+                ) : isGuest ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Sign in to pay ₦10,000</span>
+                  </>
+                ) : (
+                  <>
+                    <Crown className="w-3.5 h-3.5" />
+                    <span>Pay ₦10,000</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -329,8 +427,17 @@ export const PricingView: React.FC<PricingViewProps> = ({
             <div className="text-center max-w-xl mx-auto space-y-1">
               <h3 className="text-base font-bold">Pay As You Go Token Bundles</h3>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                No monthly commitment! Tokens never expire and give you 1 AI generation per token.
+                No monthly commitment. Tokens never expire and give you 1 AI generation per token.
               </p>
+            </div>
+
+            {/* Token bundles are not purchasable yet: nothing in the app spends a
+                token, so selling them would take money for an inert balance. */}
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-2xl p-4 flex items-start gap-3 max-w-xl mx-auto text-left">
+              <Coins className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-800 dark:text-amber-300">
+                <strong className="font-bold">Coming soon.</strong> Token bundles aren&apos;t on sale yet. Until they are, a monthly plan is the way to raise your daily generation limit.
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -348,11 +455,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 </div>
 
                 <button
-                  onClick={() => handleFundTokens(50, 1000)}
-                  disabled={loadingTier === 'token_50'}
-                  className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
+                  disabled
+                  className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 rounded-2xl text-xs font-bold cursor-not-allowed"
                 >
-                  {loadingTier === 'token_50' ? 'Funding...' : 'Fund 50 Tokens (₦1,000)'}
+                  Coming soon
                 </button>
               </div>
 
@@ -373,11 +479,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 </div>
 
                 <button
-                  onClick={() => handleFundTokens(200, 3000)}
-                  disabled={loadingTier === 'token_200'}
-                  className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md"
+                  disabled
+                  className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 rounded-2xl text-xs font-bold cursor-not-allowed"
                 >
-                  {loadingTier === 'token_200' ? 'Funding...' : 'Fund 200 Tokens (₦3,000)'}
+                  Coming soon
                 </button>
               </div>
 
@@ -394,11 +499,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 </div>
 
                 <button
-                  onClick={() => handleFundTokens(500, 6000)}
-                  disabled={loadingTier === 'token_500'}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-sm"
+                  disabled
+                  className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 rounded-2xl text-xs font-bold cursor-not-allowed"
                 >
-                  {loadingTier === 'token_500' ? 'Funding...' : 'Fund 500 Tokens (₦6,000)'}
+                  Coming soon
                 </button>
               </div>
 

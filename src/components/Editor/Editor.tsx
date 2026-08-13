@@ -28,7 +28,7 @@ import {
   clearAllLocalData
 } from '../../utils/db'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
-import { getSubscription } from '../../utils/subscription'
+import { getSubscription, verifyPaymentCallback, checkAiQuota, incrementDailyUsage } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
 import { exportPdfReact } from '../../utils/reactPdf'
 import { exportPresentationPptx } from '../../utils/pptxExporter'
@@ -77,7 +77,8 @@ import {
   LogOut,
   SlidersHorizontal,
   ChevronDown,
-  Menu
+  Menu,
+  X
 } from 'lucide-react'
 
 // Default template content for the editor
@@ -1459,6 +1460,11 @@ export default function Editor() {
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [showPricingView, setShowPricingView] = useState(false)
   const [userSubscription, setUserSubscription] = useState<any>(null)
+  const [paymentNotice, setPaymentNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+  const [quotaNotice, setQuotaNotice] = useState<string | null>(null)
+  const [hintNotice, setHintNotice] = useState<string | null>(null)
+  // True only when a real cloud backend is holding the documents
+  const [isCloudSynced, setIsCloudSynced] = useState(false)
   const [showHeaderProfileDropdown, setShowHeaderProfileDropdown] = useState(false)
   const headerProfileRef = useRef<HTMLDivElement | null>(null)
   const [showMobileToolsMenu, setShowMobileToolsMenu] = useState(false)
@@ -1476,35 +1482,112 @@ export default function Editor() {
   }, [])
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedEmail = localStorage.getItem('wordpi-user-email')
-      if (savedEmail) {
-        setUserEmail(savedEmail)
-        syncProjects().then(list => {
-          if (list) setProjects(list)
-        })
-        getSubscription(savedEmail).then(sub => setUserSubscription(sub))
-      } else {
-        getSubscription(null).then(sub => setUserSubscription(sub))
-      }
+    if (typeof window === 'undefined') return
+
+    const savedEmail = localStorage.getItem('wordpi-user-email')
+    if (savedEmail) {
+      setUserEmail(savedEmail)
+      setIsCloudSynced(localStorage.getItem('wordpi-local-mode') !== 'true')
+      syncProjects().then(list => {
+        if (list) setProjects(list)
+      })
+      getSubscription(savedEmail).then(sub => setUserSubscription(sub))
+    } else {
+      getSubscription(null).then(sub => setUserSubscription(sub))
     }
+
+    // Korapay returns the user to /?payment=success&reference=... Settle that
+    // charge here, on whatever screen they land on, so a completed payment is
+    // never silently dropped.
+    verifyPaymentCallback(savedEmail).then(result => {
+      if (!result.checked) return
+      if (result.success && result.subscription) {
+        setUserSubscription(result.subscription)
+      }
+      setPaymentNotice({ tone: result.success ? 'success' : 'error', message: result.message })
+    })
   }, [])
 
-  const handleSignOut = () => {
+  // Auto-dismiss the payment banner once it has been read
+  useEffect(() => {
+    if (!paymentNotice) return
+    const timer = setTimeout(() => setPaymentNotice(null), 12000)
+    return () => clearTimeout(timer)
+  }, [paymentNotice])
+
+  useEffect(() => {
+    if (!hintNotice) return
+    const timer = setTimeout(() => setHintNotice(null), 10000)
+    return () => clearTimeout(timer)
+  }, [hintNotice])
+
+  const handleSignOut = async () => {
+    // Documents live in IndexedDB on this device. Leaving them behind meant the
+    // next person to sign in on the same browser inherited them — and had them
+    // uploaded into their account by the next sync.
+    const confirmed = window.confirm(
+      'Sign out and remove your documents from this device?\n\nYour work stays in your account and will come back when you sign in again.'
+    )
+    if (!confirmed) return
+
+    setShowHeaderProfileDropdown(false)
+    setLoadingMessage('Backing up your work before signing out...')
+    setIsExporting(true)
+
+    try {
+      // Final flush so nothing edited since the last sync is lost
+      await syncProjects()
+    } catch (e) {
+      console.error('Final sync before sign-out failed:', e)
+      const proceed = window.confirm(
+        'We could not back up your latest changes to the cloud. Sign out anyway and remove local documents?'
+      )
+      if (!proceed) {
+        setIsExporting(false)
+        return
+      }
+    }
+
+    try {
+      await clearAllLocalData()
+    } catch (e) {
+      console.error('Failed to clear local data on sign-out:', e)
+    }
+
     localStorage.removeItem('wordpi-session-token')
     localStorage.removeItem('wordpi-user-email')
+    localStorage.removeItem('wordpi-local-mode')
     localStorage.removeItem('docuai_user_subscription')
+    localStorage.removeItem(STORAGE_KEY_ACTIVE_ID)
+
     setUserEmail(null)
     setUserSubscription(null)
-    setShowHeaderProfileDropdown(false)
+    setProjects([])
+    setActiveProjectId(null)
+    setDocumentTitle('Untitled Document')
+    setDocHeader('')
+    setDocFooter('')
+    setProjectSources([])
+    window.history.pushState({}, '', '/')
+    setShowDashboard(true)
+    setShowPricingView(false)
+    setIsExporting(false)
   }
 
   const handleAuthSuccess = (email: string) => {
     setUserEmail(email)
+    setIsCloudSynced(localStorage.getItem('wordpi-local-mode') !== 'true')
     syncProjects().then(list => {
       setProjects(list || [])
     })
     getSubscription(email).then(sub => setUserSubscription(sub))
+  }
+
+  // "Humanize Text" from the dashboard: open a fresh document and point the
+  // user at the tool that does the work, rather than silently creating a blank.
+  const handleDashboardHumanize = () => {
+    createNewProject()
+    setHintNotice('Paste or type the text you want rewritten, select it, then choose AI ▸ Humanize Selection.')
   }
 
   // Import document and styling modal states
@@ -1623,11 +1706,24 @@ export default function Editor() {
     }
   }
 
+  /**
+   * Blank documents all used to be called "Untitled Document", which left the
+   * dashboard full of indistinguishable cards. Number them instead.
+   */
+  const nextUntitledTitle = (): string => {
+    const base = 'Untitled Document'
+    const taken = new Set(projects.map(p => p.title.trim().toLowerCase()))
+    if (!taken.has(base.toLowerCase())) return base
+    let n = 2
+    while (taken.has(`${base} ${n}`.toLowerCase())) n++
+    return `${base} ${n}`
+  }
+
   // Create a blank project directly without popup
   const createNewProject = () => {
-    const finalTitle = 'Untitled Document'
+    const finalTitle = nextUntitledTitle()
     const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-    
+
     // Set active states
     setActiveProjectId(newProjId)
     setPendingTemplate(null)
@@ -1638,32 +1734,34 @@ export default function Editor() {
     window.history.pushState({}, '', `/?project=${newProjId}`)
     setShowDashboard(false)
     setProjectSources([])
-    
+
     // Set defaults
     setWizardDocType('Custom')
     setWizardFontFamily('default')
     setWizardLineSpacing('1.5')
     setWizardTopic(finalTitle)
-    
+
     const templateContent = `<div data-type="page"><h1>${finalTitle}</h1><p>Start writing your document here...</p></div>`
     const formattedHtml = ensurePaginatedHtml(templateContent, finalTitle)
 
+    // Apply content and styling before snapshotting, so what gets persisted is
+    // what the user actually sees rather than an unstyled pre-timeout version.
     if (editor) {
       editor.commands.setContent(formattedHtml)
-      setTimeout(() => {
-        editor.chain().focus().selectAll().unsetFontFamily().setLineHeight('1.5').run()
-        runPagination(editor)
-      }, 150)
+      editor.chain().selectAll().unsetFontFamily().setLineHeight('1.5').run()
+      editor.commands.focus('start')
+      setTimeout(() => runPagination(editor), 150)
     }
 
+    const seededText = editor ? editor.getText() : ''
     const newProj: Project = {
       id: newProjId,
       title: finalTitle,
       content: JSON.stringify(editor ? editor.getJSON() : {}),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      wordCount: 0,
-      charCount: 0,
+      wordCount: seededText.trim() ? seededText.trim().split(/\s+/).length : 0,
+      charCount: seededText.length,
       documentType: 'Custom',
       academicLevel: 'Undergraduate',
       academicTone: 'Analytical',
@@ -1737,28 +1835,31 @@ export default function Editor() {
     setWizardLineSpacing(lineSpacing)
     setWizardTopic(finalTitle)
 
+    // Style the template before snapshotting it. Applying the font and line
+    // height inside a timeout meant the saved copy had none of the formatting
+    // until the user's first edit.
     if (editor) {
       editor.commands.setContent(formattedHtml)
-      setTimeout(() => {
-        let chain = editor.chain().focus().selectAll()
-        if (fontFamily === 'default') {
-          chain = chain.unsetFontFamily()
-        } else {
-          chain = chain.setFontFamily(fontFamily)
-        }
-        chain.setLineHeight(lineSpacing).run()
-        runPagination(editor)
-      }, 150)
+      let chain = editor.chain().selectAll()
+      if (fontFamily === 'default') {
+        chain = chain.unsetFontFamily()
+      } else {
+        chain = chain.setFontFamily(fontFamily)
+      }
+      chain.setLineHeight(lineSpacing).run()
+      editor.commands.focus('start')
+      setTimeout(() => runPagination(editor), 150)
     }
 
+    const seededText = editor ? editor.getText() : ''
     const newProj: Project = {
       id: newProjId,
       title: finalTitle,
       content: JSON.stringify(editor ? editor.getJSON() : {}),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      wordCount: editor ? (editor.getText().trim() ? editor.getText().trim().split(/\s+/).length : 0) : 0,
-      charCount: editor ? editor.getText().length : 0,
+      wordCount: seededText.trim() ? seededText.trim().split(/\s+/).length : 0,
+      charCount: seededText.length,
       documentType: type,
       academicLevel: 'Undergraduate',
       academicTone: 'Analytical',
@@ -4068,14 +4169,15 @@ export default function Editor() {
         }
 
         // Save the project
+        const importedText = editor ? editor.getText() : ''
         const newProj: Project = {
           id: newProjId,
           title: cleanName,
           content: JSON.stringify(editor ? editor.getJSON() : {}),
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          wordCount: 0,
-          charCount: 0,
+          wordCount: importedText.trim() ? importedText.trim().split(/\s+/).length : 0,
+          charCount: importedText.length,
           documentType: 'Custom',
           academicLevel: 'Undergraduate',
           academicTone: 'Analytical',
@@ -4172,11 +4274,33 @@ export default function Editor() {
   }
 
   // Phase 2 AI Prompt execution (Streams response from WordPI AI route proxy)
+  /**
+   * Gate an AI generation on the caller's remaining daily quota. Returns false
+   * when the limit is spent, after surfacing the upgrade prompt.
+   */
+  const consumeAiQuota = async (): Promise<boolean> => {
+    try {
+      const quota = await checkAiQuota(userEmail)
+      if (!quota.allowed) {
+        setQuotaNotice(quota.message)
+        return false
+      }
+      incrementDailyUsage(userEmail || 'guest')
+      return true
+    } catch (e) {
+      // Never hard-block writing because the quota lookup itself failed
+      console.error('Quota check failed, allowing generation:', e)
+      return true
+    }
+  }
+
   const handleAiAction = async (action: string, promptOverride?: string) => {
+    if (!(await consumeAiQuota())) return
+
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
     setActiveAiModel('')
-    
+
     // Select editor text if highlighted to provide context
     const { from, to } = editor.state.selection
     const selectedText = editor.state.doc.textBetween(from, to, ' ')
@@ -4482,6 +4606,8 @@ export default function Editor() {
   const handlePopupAiAction = async (presetPrompt?: string) => {
     const finalPrompt = presetPrompt || popupPrompt
     if (!finalPrompt.trim()) return
+
+    if (!(await consumeAiQuota())) return
 
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
@@ -4803,8 +4929,12 @@ export default function Editor() {
   }
 
   const handleWizardComplete = async (choice: 'import' | 'ai_blueprint' | 'blank') => {
+    // Check the quota before creating the project, so a blocked generation does
+    // not leave an empty document stranded in the dashboard.
+    if (choice === 'ai_blueprint' && !(await consumeAiQuota())) return
+
     const finalTitle = wizardTopic.trim() || 'Untitled Project'
-    
+
     // Generate new project ID
     const newProjId = 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
     
@@ -5168,6 +5298,8 @@ export default function Editor() {
   }
 
   const generateFullDocumentBlueprint = async () => {
+    if (!(await consumeAiQuota())) return
+
     const finalTitle = documentTitle.trim() || 'Untitled Project'
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
@@ -5412,7 +5544,65 @@ export default function Editor() {
           </div>
         </div>
       )}
-      
+
+      {/* Payment outcome banner — shown wherever the Korapay redirect lands */}
+      {paymentNotice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className={`flex items-start gap-3 p-3.5 rounded-2xl shadow-xl border text-xs font-semibold ${
+            paymentNotice.tone === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+              : 'bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+          } backdrop-blur-sm`}>
+            <span className="flex-1 leading-relaxed">{paymentNotice.message}</span>
+            <button
+              onClick={() => setPaymentNotice(null)}
+              className="p-0.5 opacity-60 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Daily generation limit reached */}
+      {quotaNotice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start gap-3 p-3.5 rounded-2xl shadow-xl border bg-amber-50 dark:bg-amber-950/80 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-semibold backdrop-blur-sm">
+            <span className="flex-1 leading-relaxed">{quotaNotice}</span>
+            <button
+              onClick={() => { setQuotaNotice(null); setShowPricingView(true) }}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg shrink-0 cursor-pointer transition-colors"
+            >
+              Upgrade
+            </button>
+            <button
+              onClick={() => setQuotaNotice(null)}
+              className="p-0.5 opacity-60 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Contextual hint (e.g. how to humanize a selection) */}
+      {hintNotice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[92vw] max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start gap-3 p-3.5 rounded-2xl shadow-xl border bg-indigo-50 dark:bg-indigo-950/80 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 text-xs font-semibold backdrop-blur-sm">
+            <span className="flex-1 leading-relaxed">{hintNotice}</span>
+            <button
+              onClick={() => setHintNotice(null)}
+              className="p-0.5 opacity-60 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {showPricingView ? (
         <PricingView
           onBack={() => setShowPricingView(false)}
@@ -5456,6 +5646,11 @@ export default function Editor() {
               setPendingTemplate(type)
             }}
             onImportDocument={handleDashboardImport}
+            onGeneratePptx={() => {
+              createNewProject()
+              setPendingPptx(true)
+            }}
+            onHumanizeText={handleDashboardHumanize}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5463,6 +5658,7 @@ export default function Editor() {
             onSignOut={handleSignOut}
             onOpenAuth={() => setShowAuthModal(true)}
             onOpenPricingModal={() => setShowPricingView(true)}
+            isCloudSynced={isCloudSynced}
           />
         )
       ) : (
