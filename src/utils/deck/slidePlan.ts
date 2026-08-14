@@ -83,6 +83,15 @@ export interface PlannedSlide {
   layout: SlideLayout
   title: string
   /**
+   * The rhetorical job this slide does: problem, objectives, comparison,
+   * findings, limitations, conclusion and so on.
+   *
+   * Recorded so the gate can verify that every role the SOURCE contains has a
+   * slide. A deck missing its problem statement looks fine until someone asks
+   * what the seminar is about.
+   */
+  role?: string
+  /**
    * One line under the deck title, on the title slide only.
    *
    * There is no `eyebrow`. It carried "Chapter Two" above every title, which
