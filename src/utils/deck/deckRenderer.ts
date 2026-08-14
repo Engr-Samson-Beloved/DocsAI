@@ -29,11 +29,11 @@
 
 import {
   SLIDE_W, SLIDE_H, LAYOUT_NAME, MARGIN, SAFE, BODY, EYEBROW, TITLE, COUNTER, FOOTER,
-  COLUMN_L, COLUMN_R, HERO, rows, assertOnCanvas, type Box,
+  COLUMN_L, COLUMN_R, HERO, rows, assertOnCanvas, FILL_LIMIT, type Box,
 } from './layout'
 import type { PresentationSpec } from './presentationSpec'
 import type { PlannedSlide, SlidePlan, SlideLayout } from './slidePlan'
-import { fitBullets, estimateHeightIn, type FitLever } from './fitBudget'
+import { fitBullets, estimateHeightIn, estimateLines, type FitLever } from './fitBudget'
 import { compressSentence } from './summarize'
 import { wordCount } from './textNormalize'
 
@@ -207,6 +207,8 @@ class SlideRecorder {
       color: string
       background?: string
       bullet?: boolean
+      align?: 'left' | 'center' | 'right'
+      valign?: 'top' | 'middle' | 'bottom'
     }
   ) {
     const clean = items
@@ -240,7 +242,8 @@ class SlideRecorder {
         fontSize: style.fontPt,
         fontFace: style.fontFace,
         color: style.color,
-        valign: 'top',
+        align: style.align ?? 'left',
+        valign: style.valign ?? 'top',
         lineSpacingMultiple: 1.25,
         paraSpaceAfter: style.fontPt * 0.45,
         margin: 0,
@@ -476,6 +479,9 @@ function paintClosingSlide(rec: SlideRecorder, plan: SlidePlan, spec: Presentati
       fontFace: spec.bodyFace,
       color: spec.palette.inverseMuted,
       bullet: false,
+      // Centred to match the "THANK YOU" above it. Left-aligned detail under a
+      // centred heading read as an alignment mistake.
+      align: 'center',
     }
   )
 }
@@ -491,13 +497,24 @@ function paintBullets(rec: SlideRecorder, slide: PlannedSlide, spec: Presentatio
 
 function paintComparison(rec: SlideRecorder, slide: PlannedSlide, spec: PresentationSpec) {
   const columns = slide.columns ?? []
-  const boxes = [COLUMN_L, COLUMN_R]
+
+  // Both cards take the height the FULLER column needs, so they stay a matched
+  // pair while neither runs on past its text. Stretching both to the full body
+  // height left a third of each card empty.
+  const pad = 0.28
+  const needed = columns.map(column =>
+    estimateHeightIn(
+      column.bullets.map(text => ({ text, fontPt: spec.type.body.minPt, fontFace: spec.bodyFace })),
+      COLUMN_L.w - pad * 2
+    )
+  )
+  const cardH = Math.min(COLUMN_L.h, 0.6 + pad * 2 + Math.max(0, ...needed) * 1.18)
+  const boxes = [COLUMN_L, COLUMN_R].map(b => ({ ...b, h: cardH }))
 
   columns.slice(0, 2).forEach((column, i) => {
     const box = boxes[i]
     rec.card(`compare-card-${i}`, box, spec.palette.tint)
 
-    const pad = 0.28
     const headBox: Box = { x: box.x + pad, y: box.y + pad, w: box.w - pad * 2, h: 0.6 }
     rec.text(`compare-head-${i}`, headBox, column.heading.toUpperCase(), {
       role: 'body',
@@ -583,15 +600,61 @@ function paintProcess(rec: SlideRecorder, slide: PlannedSlide, spec: Presentatio
   const steps = (slide.steps ?? []).slice(0, 5)
   if (steps.length === 0) return
 
-  const boxes = rows(BODY, steps.length, 0.14)
+  // Size the cards to their content and centre the stack, rather than dividing
+  // the whole body box between them. Three steps spread over 5.35in produced
+  // 1.7in-tall cards holding two lines of text each, with a third of every card
+  // empty - the deck read as under-filled even though nothing overflowed.
+  //
+  // The height is derived from the SAME geometry the painter below uses. An
+  // earlier version estimated it from a magic constant instead, and the cards
+  // came out 0.05in too short for a two-line body - which the overflow check
+  // caught, exactly as it should have.
+  const gap = 0.16
+  const padX = 0.2
+  const badge = 0.44
+  const badgeGap = 0.25
+  const titleFrac = 0.44
+  const bodyGap = 0.15
+
+  const textW = BODY.w - (padX + badge + badgeGap) - padX
+  const bodyLineIn = (spec.type.caption.maxPt * 1.25) / 72
+  const titleLineIn = (spec.type.body.minPt * 1.25) / 72
+
+  const required = steps.map(step => {
+    const lines = step.body.trim()
+      ? estimateLines(step.body, textW, spec.type.caption.maxPt, spec.bodyFace)
+      : 0
+    // bodyBox height is cardH * (1 - titleFrac) - bodyGap, and must hold the
+    // text within FILL_LIMIT.
+    // A little headroom so the card is not sized to sit exactly on the 92%
+    // limit, which leaves no room for a rounding difference either way.
+    const headroom = 0.04
+    const forBody =
+      lines > 0 ? ((lines * bodyLineIn) / FILL_LIMIT + bodyGap + headroom) / (1 - titleFrac) : 0
+    const forTitle = (titleLineIn / FILL_LIMIT + headroom) / titleFrac
+    return Math.max(forBody, forTitle, 0.8)
+  })
+
+  const available = (BODY.h - gap * (steps.length - 1)) / steps.length
+  const cardH = Math.min(available, Math.max(...required))
+  const stackH = cardH * steps.length + gap * (steps.length - 1)
+  const top = BODY.y + Math.max(0, (BODY.h - stackH) / 2)
+
+  const boxes = steps.map((_, i) => ({
+    x: BODY.x,
+    y: top + i * (cardH + gap),
+    w: BODY.w,
+    h: cardH,
+  }))
 
   steps.forEach((step, i) => {
     const box = boxes[i]
     rec.card(`step-card-${i}`, box, spec.palette.tint)
 
-    const badge: Box = { x: box.x + 0.2, y: box.y + (box.h - 0.44) / 2, w: 0.44, h: 0.44 }
-    rec.card(`step-badge-${i}`, badge, spec.palette.accent)
-    rec.text(`step-number-${i}`, badge, String(i + 1), {
+    // Same constants the height calculation above used, so the two cannot drift.
+    const badgeBox: Box = { x: box.x + padX, y: box.y + (box.h - badge) / 2, w: badge, h: badge }
+    rec.card(`step-badge-${i}`, badgeBox, spec.palette.accent)
+    rec.text(`step-number-${i}`, badgeBox, String(i + 1), {
       role: 'caption',
       fontPt: spec.type.caption.maxPt,
       fontFace: spec.headingFace,
@@ -602,15 +665,15 @@ function paintProcess(rec: SlideRecorder, slide: PlannedSlide, spec: Presentatio
       background: spec.palette.accent,
     })
 
-    const textX = badge.x + badge.w + 0.25
-    const textW = box.x + box.w - textX - 0.2
+    const textX = badgeBox.x + badgeBox.w + badgeGap
+    const colW = box.x + box.w - textX - padX
 
     const hasBody = !!step.body.trim()
     const titleBox: Box = {
       x: textX,
-      y: box.y + (hasBody ? 0.1 : 0),
-      w: textW,
-      h: hasBody ? box.h * 0.44 : box.h,
+      y: box.y,
+      w: colW,
+      h: hasBody ? box.h * titleFrac : box.h,
     }
     rec.text(`step-title-${i}`, titleBox, step.title, {
       role: 'body',
@@ -626,8 +689,8 @@ function paintProcess(rec: SlideRecorder, slide: PlannedSlide, spec: Presentatio
       const bodyBox: Box = {
         x: textX,
         y: titleBox.y + titleBox.h,
-        w: textW,
-        h: box.h - titleBox.h - 0.15,
+        w: colW,
+        h: box.h - titleBox.h - bodyGap,
       }
       rec.text(`step-body-${i}`, bodyBox, step.body, {
         role: 'caption',
@@ -638,6 +701,43 @@ function paintProcess(rec: SlideRecorder, slide: PlannedSlide, spec: Presentatio
         background: spec.palette.tint,
       })
     }
+  })
+}
+
+/**
+ * A chapter divider: inverted ground, the chapter name, and what it covers.
+ *
+ * Distinct from every other layout by design - a divider that looks like a
+ * content slide does not signal a change of chapter, which is the only reason
+ * it exists.
+ */
+function paintSection(rec: SlideRecorder, slide: PlannedSlide, spec: PresentationSpec) {
+  rec.setBackground(spec.palette.inverse)
+
+  const titleBox: Box = { x: HERO.x, y: HERO.y + 0.7, w: HERO.w, h: 1.1 }
+  rec.text('section-title', titleBox, slide.title, {
+    role: 'title',
+    fontPt: spec.type.title.minPt,
+    fontFace: spec.headingFace,
+    color: spec.palette.inverseInk,
+    bold: true,
+    align: 'center',
+    valign: 'middle',
+  })
+
+  const listBox: Box = {
+    x: HERO.x + HERO.w * 0.2,
+    y: titleBox.y + titleBox.h + 0.35,
+    w: HERO.w * 0.6,
+    h: HERO.h - titleBox.h - 1.05,
+  }
+  rec.bullets('section-covers', listBox, slide.bullets ?? [], {
+    role: 'body',
+    fontPt: spec.type.body.minPt,
+    fontFace: spec.bodyFace,
+    color: spec.palette.inverseMuted,
+    bullet: false,
+    align: 'center',
   })
 }
 
@@ -734,7 +834,8 @@ export async function renderDeck(plan: SlidePlan, spec: PresentationSpec): Promi
 
   slides.forEach((slide, i) => {
     const slideNo = i + 1
-    const isInverse = slide.layout === 'title' || slide.layout === 'closing'
+    const isInverse =
+      slide.layout === 'title' || slide.layout === 'closing' || slide.layout === 'section'
     const background = isInverse ? spec.palette.inverse : spec.palette.ground
 
     const raw = pptx.addSlide()
@@ -746,6 +847,9 @@ export async function renderDeck(plan: SlidePlan, spec: PresentationSpec): Promi
       paintTitleSlide(rec, plan, spec)
     } else if (slide.layout === 'closing') {
       paintClosingSlide(rec, plan, spec)
+    } else if (slide.layout === 'section') {
+      // A divider carries no counter or eyebrow; it IS the signpost.
+      paintSection(rec, slide, spec)
     } else {
       paintChrome(rec, slide, spec, slideNo, total, plan.metadata.footer)
 

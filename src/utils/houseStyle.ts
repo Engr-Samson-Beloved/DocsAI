@@ -1,4 +1,4 @@
-/**
+﻿/**
  * houseStyle.ts
  * ------------------------------------------------------------------
  * THE single source of truth for how generated work is formatted.
@@ -209,128 +209,16 @@ export function headingConvention(level: number, rawText: string): HeadingFormat
 // ===================================================================
 // DECK (.pptx)
 // ===================================================================
-
-/**
- * Geometry and type measured from the approved deck. Its slide headers are
- * 36pt (not the 24pt the exporter used), the content column starts at 0.60in
- * and runs 12.13in wide, and body text sits at 19-20pt.
- */
-export const DECK_STYLE = {
-  /**
-   * 13.333 x 7.5in - PowerPoint's true widescreen canvas, and the size both
-   * approved decks in /sample use.
-   *
-   * `layout` is the name of a CUSTOM layout the exporter registers, NOT a
-   * pptxgenjs preset. The preset called 'LAYOUT_16x9' is 10 x 5.625in; the deck
-   * shipped with that token while every coordinate below was measured against
-   * 13.333 x 7.5, so roughly 2.7in of every slide (page numbers, footers and the
-   * right quarter of the body column) rendered off-canvas. Keep this name
-   * distinct from any preset so the mix-up cannot recur.
-   */
-  slide: { widthIn: 13.333, heightIn: 7.5, layout: 'WORDPI_WIDE' as const },
-
-  /** Full-bleed content column. */
-  marginIn: 0.6,
-  get contentWidthIn() {
-    return this.slide.widthIn - this.marginIn * 2 // 12.13
-  },
-
-  header: { xIn: 0.6, yIn: 0.38, widthIn: 12.13, heightIn: 0.75, sizePt: 36 },
-
-  /** Body box when the slide is a single column. */
-  body: { xIn: 0.6, yIn: 1.5, widthIn: 12.13, heightIn: 4.7 },
-
-  /** Body box when a key-points sidebar is present (approved slide 2). */
-  bodyWithSidebar: { xIn: 0.6, yIn: 1.5, widthIn: 7.5, heightIn: 4.7 },
-
-  /**
-   * Sidebar cards: 3.80in wide at x=8.78, 1.00in tall, 1.18in apart, each a
-   * bold 20pt label over a 16pt detail line.
-   */
-  sidebar: {
-    xIn: 8.78,
-    widthIn: 3.8,
-    cardHeightIn: 1.0,
-    firstYIn: 1.6,
-    strideIn: 1.18,
-    labelPt: 20,
-    detailPt: 16,
-    maxCards: 4,
-  },
-
-  titleSlide: {
-    title: { xIn: 0.9, yIn: 0.7, widthIn: 11.5, heightIn: 2.4, sizePt: 34 },
-    subtitle: { xIn: 0.9, yIn: 3.25, widthIn: 11.5, heightIn: 0.4, sizePt: 22 },
-    details: { xIn: 0.9, yIn: 3.9, widthIn: 11.5, heightIn: 2.6, sizePt: 18 },
-    subtitleText: 'A SEMINAR REPORT PRESENTATION',
-  },
-
-  /**
-   * Body type. The guideline (FROM SLIDES TO SUCCESS, p.11) allows 18-22pt with
-   * a 16pt floor; the approved deck sits at 19-20pt. Start at 20 and step down.
-   */
-  bodyFont: { maxPt: 20, minPt: 16 },
-
-  /** Slide count and density. Guideline: 12-15 slides, one main idea per slide. */
-  deck: { minSlides: 12, maxSlides: 15, maxBulletsPerSlide: 6 },
-
-  /**
-   * Numbered-step rows (approved deck: objectives laid out as numbered badges
-   * rather than a bullet list). A filled circle carries the number, with the
-   * step text set beside it.
-   */
-  steps: {
-    badgeIn: 0.46,
-    firstYIn: 3.2,
-    strideIn: 0.72,
-    textXIn: 1.25,
-    textWidthIn: 11.4,
-    numberPt: 18,
-    textPt: 18,
-    maxSteps: 5,
-  },
-
-  /**
-   * Two-panel comparison (approved deck: "STATIC, RULE-BASED CONTROL" beside
-   * "LEARNING-BASED CONTROL"), each panel a rounded card with a caption strip.
-   */
-  comparison: {
-    yIn: 1.5,
-    heightIn: 4.5,
-    leftXIn: 0.6,
-    leftWidthIn: 5.6,
-    rightXIn: 7.15,
-    rightWidthIn: 5.55,
-    padIn: 0.35,
-    captionPt: 22,
-    bodyPt: 18,
-  },
-
-  /**
-   * Heading/body type pairing measured from both approved decks: Arial carries
-   * the headings, Calibri the body. The exporter previously set Arial for
-   * everything, which reads flatter than the accredited samples.
-   */
-  font: 'Arial',
-  headingFont: 'Arial',
-  bodyFont2: 'Calibri',
-} as const
-
-/**
- * Slide titles in the approved deck are role/topic labels in ALL CAPS
- * ("BACKGROUND AND MOTIVATION", "PROBLEM, AIM AND SCOPE", "SYSTEM ARCHITECTURE",
- * "LIMITATIONS AND CHALLENGES", "CONCLUSION AND FUTURE OUTLOOK") - never the
- * report's raw numbered sub-heading. This list is the observed running order and
- * the reference for the exporter's role planner.
- */
-export const APPROVED_DECK_ORDER = [
-  'BACKGROUND AND MOTIVATION',
-  'PROBLEM, AIM AND SCOPE',
-  'SYSTEM COMPONENTS',
-  'SYSTEM ARCHITECTURE',
-  'COMPARISON OF TECHNOLOGIES',
-  'APPLICATIONS',
-  'ADVANTAGES',
-  'LIMITATIONS AND CHALLENGES',
-  'CONCLUSION AND FUTURE OUTLOOK',
-] as const
+//
+// Deck geometry and typography used to live here as DECK_STYLE. They now live
+// in two purpose-built modules, because a deck has two different kinds of
+// constant and mixing them is what let the canvas mismatch hide:
+//
+//   src/utils/deck/layout.ts            geometry (canvas, margins, safe area,
+//                                       every derived box, the on-canvas guard)
+//   src/utils/deck/presentationSpec.ts  the house standard as swappable DATA
+//                                       (font allow-list, size bands, palette,
+//                                       contrast pairs, deck rules)
+//
+// Keeping a second set of deck coordinates here would recreate the original
+// defect: two sources of truth for where a shape goes, silently disagreeing.

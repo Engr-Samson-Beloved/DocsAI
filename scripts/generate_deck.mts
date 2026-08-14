@@ -12,9 +12,29 @@
  *   node --import ./tests/ts-resolve.mjs scripts/generate_deck.mts <source.pdf> [outDir] [--llm] [--visual]
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { basename, join, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+/**
+ * Loads GEMINI_API_KEY from .env.local, the way Next.js would.
+ *
+ * The harness runs outside Next, so nothing else populates process.env, and
+ * --llm would silently fall back to the deterministic summariser - reporting a
+ * pass for a path that never actually ran.
+ */
+function loadEnvLocal() {
+  for (const file of ['.env.local', '.env']) {
+    if (!existsSync(file)) continue
+    for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/i)
+      if (!m) continue
+      const value = m[2].trim().replace(/^["']|["']$/g, '')
+      if (value && !process.env[m[1]]) process.env[m[1]] = value
+    }
+  }
+}
+loadEnvLocal()
 
 // The extraction path is browser code: it refuses to run without `window` and
 // resolves its pdf.js worker over the network. Both are stubbed here so the
@@ -50,8 +70,19 @@ mkdirSync(outDir, { recursive: true })
 
 console.log(`\n[1/6] extracting ${source}`)
 const bytes = readFileSync(source)
-const html = await extractPdfAsHtml(new File([bytes], basename(source), { type: 'application/pdf' }))
-console.log(`      ${html.length} chars of structured HTML`)
+const kind = extname(source).toLowerCase()
+
+let html: string
+if (kind === '.docx') {
+  // DOCX carries real heading styles, so mammoth's h1/h2/h3 output feeds the
+  // same tree builder the PDF path uses - no separate code path.
+  const mammoth: any = await import('mammoth')
+  const result = await (mammoth.default ?? mammoth).convertToHtml({ buffer: bytes })
+  html = result.value
+} else {
+  html = await extractPdfAsHtml(new File([bytes], basename(source), { type: 'application/pdf' }))
+}
+console.log(`      ${kind} -> ${html.length} chars of structured HTML`)
 
 // --- 2. Structure tree --------------------------------------------------
 
@@ -96,11 +127,18 @@ for (const decision of diagnostics.decisions) console.log(`      - ${decision}`)
 
 console.log('[4/6] validating the slide plan')
 let plan = draftPlan
+let summariser: 'llm' | 'deterministic' = 'deterministic'
 
 if (flags.has('--llm')) {
   const refined = await refinePlanWithLlm(plan, { spec: DEFAULT_SPEC })
   for (const line of refined.log) console.log(`      ${line}`)
   plan = refined.plan
+  summariser = refined.used
+  // Keep the deterministic draft so the two can be read side by side.
+  writeFileSync(
+    join(outDir, `${basename(source).replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').toLowerCase()}.deterministic.json`),
+    JSON.stringify(draftPlan, null, 2)
+  )
 }
 
 const validation = validateSlidePlan(plan, DEFAULT_SPEC)
@@ -156,6 +194,7 @@ const content = report.slides.filter(s => s.layout !== 'title' && s.layout !== '
 const nonBullet = content.filter(s => s.layout !== 'bullets' && s.layout !== 'references')
 
 console.log('\n--- deck summary ---')
+console.log(`summariser   ${summariser}`)
 console.log(`title        ${validPlan.metadata.title}`)
 console.log(`slides       ${report.slideCount}`)
 console.log(`layouts      ${[...new Set(report.slides.map(s => s.layout))].join(', ')}`)

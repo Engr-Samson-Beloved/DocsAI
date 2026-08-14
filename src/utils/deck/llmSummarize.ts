@@ -22,8 +22,22 @@ import type { PresentationSpec } from './presentationSpec'
 import type { SlidePlan, PlannedSlide } from './slidePlan'
 import { validateSlidePlan, SLIDE_PLAN_JSON_SCHEMA, CONTENT_LAYOUTS } from './slidePlan'
 
-/** Matches the failover list used by the app's /api/generate route. */
-const PRIORITIZED_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+/**
+ * Failover list, verified against the models API rather than copied.
+ *
+ * The app's /api/generate route still lists gemini-2.0-flash and
+ * gemini-1.5-flash; both now return 404 ("no longer available"), so a run that
+ * needed to fail over had no working fallback left. `gemini-flash-latest` is an
+ * alias, which keeps this list from going stale the same way again.
+ */
+const PRIORITIZED_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite']
+
+/** The slice of the Gemini client this module uses. */
+export interface GenerativeClient {
+  getGenerativeModel(config: unknown): {
+    generateContent(prompt: string): Promise<{ response?: { text?: () => string } }>
+  }
+}
 
 export interface LlmOptions {
   spec: PresentationSpec
@@ -31,6 +45,15 @@ export interface LlmOptions {
   /** Set false to skip the model entirely (tests, offline builds). */
   enabled?: boolean
   log?: (message: string) => void
+  /**
+   * Seam for tests: supply a client instead of constructing a real one.
+   *
+   * The repair-retry and fallback paths only run when a model misbehaves, and
+   * a real model cannot be relied on to misbehave on demand. Without this hook
+   * those branches would ship untested, which for error handling is the same
+   * as shipping them broken.
+   */
+  clientFactory?: (apiKey: string) => Promise<GenerativeClient>
 }
 
 const SYSTEM_RULES = `You rewrite an academic seminar report into presentation slides.
@@ -49,8 +72,14 @@ Hard rules for every bullet:
 
 Other rules:
 - 3 to 6 bullets per slide.
+- Some slides carry "sourceSentences". Those slides are UNDER-FILLED: the
+  deterministic summariser could not shorten those sentences without breaking
+  them. Rewrite them into complete, self-contained claims and RETURN AT LEAST
+  THREE bullets for such a slide. Use only what the source sentences say; do not
+  add facts. Do not return "sourceSentences" in your response.
 - "notes" must be 40-70 words of speaker guidance: what to say, the one number
-  or name to emphasise, and the likely examiner question.
+  or name to emphasise, and the likely examiner question. Fewer than 40 words is
+  a failure; count them.
 - "takeaway" is one sentence, the spoken hook for the slide.
 - Return the SAME number of slides, in the SAME order, with the SAME layouts,
   titles, eyebrows and sourceRefs as the draft.
@@ -78,12 +107,16 @@ export async function refinePlanWithLlm(
     return { plan: draft, used: 'deterministic', log }
   }
 
-  let client: any
+  let client: GenerativeClient
   try {
-    const mod = await import('@google/generative-ai')
-    client = new mod.GoogleGenerativeAI(apiKey)
+    if (options.clientFactory) {
+      client = await options.clientFactory(apiKey)
+    } else {
+      const mod = await import('@google/generative-ai')
+      client = new mod.GoogleGenerativeAI(apiKey) as unknown as GenerativeClient
+    }
   } catch (err) {
-    note(`summariser: deterministic (@google/generative-ai unavailable: ${describe(err)})`)
+    note(`summariser: deterministic (client unavailable: ${describe(err)})`)
     return { plan: draft, used: 'deterministic', log }
   }
 
@@ -162,6 +195,8 @@ function toDraftShape(slide: PlannedSlide) {
     notes: slide.notes,
     takeaway: slide.takeaway,
     sourceRefs: slide.sourceRefs,
+    // Present only on under-filled slides; see PlannedSlide.sourceSentences.
+    sourceSentences: slide.sourceSentences,
   }
 }
 
@@ -201,6 +236,8 @@ function mergeWithDraft(draft: SlidePlan, response: unknown): SlidePlan {
         table: original.table,
         citations: original.citations,
         sourceRefs: original.sourceRefs,
+        // Consumed by the prompt; never rendered.
+        sourceSentences: undefined,
       }
     }),
   }

@@ -242,6 +242,26 @@ const AUXILIARIES = new Set(
     .split(/\s+/)
 )
 
+/**
+ * Stricter than `hasVerb`: a FINITE verb, one that can head a clause.
+ *
+ * `hasVerb` accepts an `-ing` form, which is right for "is the bullet a total
+ * fragment?" but wrong for "does this clause have a predicate?" - a bare
+ * participle is not a predicate. It counted "underlying" in "the same
+ * underlying philosophy" as a verb, so "Flexibility means that the same
+ * underlying philosophy" read as complete when it plainly is not.
+ */
+export function hasFiniteVerb(text: string): boolean {
+  const words = text.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter(Boolean)
+
+  for (const w of words) {
+    if (AUXILIARIES.has(w)) return true
+    // Past tense / third person singular. -ing is deliberately excluded.
+    if (w.length > 4 && /(?:ed|ises|izes|ates|ifies)$/.test(w)) return true
+  }
+  return false
+}
+
 function hasVerb(text: string): boolean {
   const words = text.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter(Boolean)
   if (words.length === 0) return false

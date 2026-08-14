@@ -412,7 +412,122 @@ export function blocksToHtml(blocks: PdfBlock[]): string {
   return html
 }
 
-/** End-to-end for one page: positioned runs in, structured HTML out. */
+// --- Multi-column pages -------------------------------------------------
+
+/**
+ * Finds the gutter of a two-column page, or null for a single-column one.
+ *
+ * Line grouping is by baseline, so on a two-column page the left and right
+ * columns share Y values and get merged into one "line" spanning the gutter.
+ * The wide gap in the middle then looks exactly like a column separator, and
+ * the entire body is misread as a table - on a synthesized two-column paper
+ * that produced three tables and ZERO sentences.
+ *
+ * The guards below are what keep this from firing on a real table:
+ *   - the gutter must be the ONLY wide empty band in the middle of the page,
+ *     so a three-column table (two gaps) is rejected;
+ *   - each side must be at least 30% of the content width, so narrow cells
+ *     are rejected;
+ *   - both sides need real depth, so a one-off two-cell row is rejected.
+ */
+export function detectGutter(items: RawTextItem[]): { split: number } | null {
+  // Low enough to catch a sparse column page, while the per-side minimum of 8
+  // runs below still rules out a page that merely has a wide gap in it.
+  if (items.length < 14) return null
+
+  const left = Math.min(...items.map(i => i.x))
+  const right = Math.max(...items.map(i => i.x + i.width))
+  const width = right - left
+  if (width <= 0) return null
+
+  const BUCKET = 3
+  const buckets = Math.ceil(width / BUCKET)
+  const occupied = new Array<boolean>(buckets).fill(false)
+
+  for (const item of items) {
+    const from = Math.max(0, Math.floor((item.x - left) / BUCKET))
+    const to = Math.min(buckets - 1, Math.ceil((item.x + item.width - left) / BUCKET))
+    for (let b = from; b <= to; b++) occupied[b] = true
+  }
+
+  // Empty bands wholly inside the central 25%-75% of the content width.
+  const from = Math.floor(buckets * 0.25)
+  const to = Math.ceil(buckets * 0.75)
+
+  const bands: { start: number; end: number }[] = []
+  let run = -1
+  for (let b = from; b <= to; b++) {
+    if (!occupied[b]) {
+      if (run === -1) run = b
+    } else if (run !== -1) {
+      bands.push({ start: run, end: b - 1 })
+      run = -1
+    }
+  }
+  if (run !== -1) bands.push({ start: run, end: to })
+
+  const wide = bands.filter(b => (b.end - b.start + 1) * BUCKET >= 15)
+  // Exactly one wide gutter, or this is a table rather than a column layout.
+  if (wide.length !== 1) return null
+
+  const gutter = wide[0]
+  const split = left + ((gutter.start + gutter.end + 1) / 2) * BUCKET
+
+  const leftItems = items.filter(i => i.x + i.width <= split)
+  const rightItems = items.filter(i => i.x >= split)
+
+  if ((split - left) / width < 0.3 || (right - split) / width < 0.3) return null
+
+  // Depth, not just count. A sparse page is still a column layout if both sides
+  // run down a comparable stretch of the page; a table row that happens to have
+  // a wide gap does not. This replaces a flat per-side item minimum, which
+  // rejected genuine but sparse column pages (a references page with only a few
+  // lines per side) while offering no extra protection against tables.
+  if (leftItems.length < 4 || rightItems.length < 4) return null
+
+  // Depth is measured against the extent of the COLUMNED REGION, not the whole
+  // page. Full-width elements - a spanning heading, a reference list at the
+  // foot - stretch the page's extent without belonging to either column, and
+  // measuring against that made a perfectly balanced pair of columns look
+  // shallow and get rejected.
+  const extent = (group: RawTextItem[]) => {
+    const ys = group.map(i => i.y)
+    return { top: Math.max(...ys), bottom: Math.min(...ys) }
+  }
+  const l = extent(leftItems)
+  const r = extent(rightItems)
+  const regionSpan = Math.max(l.top, r.top) - Math.min(l.bottom, r.bottom)
+
+  if (regionSpan > 0) {
+    const shallower = Math.min(l.top - l.bottom, r.top - r.bottom)
+    if (shallower / regionSpan < 0.35) return null
+  }
+  // Some straddling is normal and expected - spanning headings, rules and
+  // reference entries are full-width by design and are emitted separately. Only
+  // a page where most content crosses the gutter is not a column layout.
+  if (items.length - leftItems.length - rightItems.length > items.length * 0.35) return null
+
+  return { split }
+}
+
+/**
+ * End-to-end for one page: positioned runs in, structured HTML out.
+ *
+ * A two-column page is processed one column at a time, in reading order - the
+ * whole left column, then the whole right - which is how such a page is read
+ * and how its prose actually flows.
+ */
 export function pageItemsToHtml(items: RawTextItem[], page = 1): string {
-  return blocksToHtml(buildBlocks(groupIntoLines(items, page), page))
+  const gutter = detectGutter(items)
+  if (!gutter) return blocksToHtml(buildBlocks(groupIntoLines(items, page), page))
+
+  // Full-width runs (spanning headings, rules) are kept ahead of the columns.
+  const spanning = items.filter(i => i.x < gutter.split && i.x + i.width > gutter.split)
+  const leftItems = items.filter(i => i.x + i.width <= gutter.split)
+  const rightItems = items.filter(i => i.x >= gutter.split)
+
+  return [spanning, leftItems, rightItems]
+    .filter(group => group.length > 0)
+    .map(group => blocksToHtml(buildBlocks(groupIntoLines(group, page), page)))
+    .join('')
 }

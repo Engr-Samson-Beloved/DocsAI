@@ -67,31 +67,231 @@ const CONTRAST_PAIRS: [RegExp, RegExp][] = [
 ]
 
 /**
- * Extracts a process from ordinal stage sentences: "The first stage is network
- * discovery and topology mapping." -> { title: 'Network discovery and topology
- * mapping', body: <the following sentence, compressed> }.
+ * Recovers an ordered sequence from a section, with LABELS THAT MEAN SOMETHING.
+ *
+ * A process layout has to earn its place. The first version of this code fell
+ * back to relabelling a section's bullets as "Step 1 … Step 5" whenever the
+ * deck was short of non-bullet slides - which is decoration, not information:
+ * the reader learns nothing from "Step 3" that the bullet did not already say.
+ * That fallback is gone. Each strategy below keys on structure the document
+ * actually states, and each derives a label from the source text.
+ *
+ * Returns [] when the section is genuinely just a list of points. A bullets
+ * slide is the honest rendering of a list of points.
  */
 export function extractSteps(sentences: string[]): SlideStep[] {
+  return (
+    extractOrdinalStages(sentences) ||
+    extractPhaseTimeline(sentences) ||
+    extractEnumeratedComponents(sentences) ||
+    []
+  )
+}
+
+/** "The first stage is network discovery and topology mapping." */
+function extractOrdinalStages(sentences: string[]): SlideStep[] | null {
   const steps: SlideStep[] = []
 
   for (const ordinal of ORDINALS) {
-    const pattern = new RegExp(`\\b${ordinal}\\b[^.]*\\b(stage|step|phase)\\b`, 'i')
+    const pattern = new RegExp(`\\b${ordinal}\\b[^.]*\\b(stage|step)\\b`, 'i')
     const index = sentences.findIndex(s => pattern.test(s))
     if (index === -1) continue
 
     const sentence = sentences[index]
-    // Take what follows "is"/"involves"/":" as the step's name.
     const m = sentence.match(/\b(?:is|involves|covers|concerns|begins with)\b\s+(.+)$/i)
     const rawTitle = m ? m[1] : sentence.replace(pattern, '').replace(/^[\s,:-]+/, '')
     const title = compressSentence(rawTitle, 6)
     if (!title) continue
 
-    const body = compressSentence(sentences[index + 1] ?? '', 12)
+    steps.push({ title, body: compressSentence(sentences[index + 1] ?? '', 12) })
+    if (steps.length >= 5) break
+  }
+
+  return steps.length >= 3 ? steps : null
+}
+
+const PHASE_ORDINALS = ['initial', 'first', 'second', 'third', 'fourth', 'fifth', 'final']
+
+/**
+ * A chronology: "The initial phase, roughly 2008 to 2012, was characterised by
+ * foundational work..." -> { title: '2008-2012', body: '...' }.
+ *
+ * The period is the label, because the period is what the sequence conveys.
+ * Rendering this as bullets loses the one thing it is telling the reader: that
+ * the field moved through eras in order.
+ */
+function extractPhaseTimeline(sentences: string[]): SlideStep[] | null {
+  const steps: SlideStep[] = []
+  const used = new Set<number>()
+
+  for (const ordinal of PHASE_ORDINALS) {
+    const pattern = new RegExp(`\\b${ordinal}\\b[^.]{0,60}\\bphase\\b`, 'i')
+    const index = sentences.findIndex((s, i) => !used.has(i) && pattern.test(s))
+    if (index === -1) continue
+    used.add(index)
+
+    const sentence = sentences[index]
+
+    // Prefer a real period as the label.
+    const span = sentence.match(/\b((?:19|20)\d{2})\s*(?:to|-|–|—|until)\s*((?:19|20)\d{2})\b/)
+    const single = sentence.match(/\b(?:since|from|after)\s+((?:19|20)\d{2})\b/)
+    const title = span
+      ? `${span[1]}-${span[2]}`
+      : single
+      ? `${single[1]} onward`
+      : /\bcurrent\b/i.test(sentence)
+      ? `${capitalise(ordinal)} phase (current)`
+      : `${capitalise(ordinal)} phase`
+
+    // The body is what happened in that period - not the period again. The
+    // label already carries the years, so a body of "Initial phase, roughly
+    // 2008 to 2012" says nothing twice.
+    const body = predicateOf(sentence, /^.*?\bphase\b/i)
+    if (!body) continue
+
     steps.push({ title, body })
     if (steps.length >= 5) break
   }
 
-  return steps.length >= 3 ? steps : []
+  return steps.length >= 3 ? steps : null
+}
+
+/**
+ * An enumerated structure: "The SDN architecture is organised into three
+ * distinct planes" followed by "The data plane...", "The control plane...",
+ * "The application plane...".
+ *
+ * The layers and their order are the content. Flattened into bullets the
+ * reader has to reconstruct the stack themselves.
+ */
+function extractEnumeratedComponents(sentences: string[]): SlideStep[] | null {
+  const lead = sentences.find(s =>
+    /\b(?:organi[sz]ed|divided|separated|composed|structured)\s+(?:in)?to\b|\b(?:consists?|comprises?)\s+of\b/i.test(s)
+  )
+  if (!lead) return null
+
+  // The noun being enumerated: "...into three distinct planes" -> "plane".
+  const noun = lead.match(
+    /\b(?:in)?to\s+(?:\w+\s+)?(?:distinct\s+|main\s+|key\s+|separate\s+|broad\s+)?([a-z]+?)s\b/i
+  )
+  if (!noun) return null
+  const singular = noun[1].toLowerCase()
+  if (singular.length < 4) return null
+
+  const steps: SlideStep[] = []
+  const seen = new Set<string>()
+
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i]
+    if (sentence === lead) continue
+
+    // "The data plane, also called ..." / "The application plane sits above ..."
+    const m = sentence.match(
+      new RegExp(`^(?:The\\s+)?([A-Za-z][\\w-]*(?:\\s+[a-z][\\w-]*)?)\\s+${singular}\\b`, 'i')
+    )
+    if (!m) continue
+
+    const name = m[1].trim().toLowerCase()
+    if (seen.has(name)) continue
+    // Guard against "each plane", "every plane", "this plane".
+    if (/^(each|every|this|that|these|those|both|any|one|another|same|other)$/.test(name)) continue
+    seen.add(name)
+
+    const title = `${capitalise(name)} ${singular}`
+    // A step with no body is worse than no step: the card renders as a bare
+    // label floating in empty space, which is what "Application plane" did.
+    const body = predicateOf(sentence, new RegExp(`^.*?${singular}\\b`, 'i'))
+    if (!body) continue
+
+    steps.push({ title, body })
+    if (steps.length >= 5) break
+  }
+
+  return steps.length >= 3 ? steps : null
+}
+
+/**
+ * Extracts the PREDICATE of a sentence once its subject has become the step's
+ * title, so the body reads as a statement rather than a severed fragment.
+ *
+ * "The data plane, also called the infrastructure layer, consists of the
+ * physical devices" became "Called the infrastructure layer, consists of the
+ * physical devices" - the appositive was left dangling where the subject used
+ * to be. Both the appositive and the linking verb are removed so the body
+ * starts on the verb that carries the meaning.
+ */
+function predicateOf(sentence: string, subjectPattern: RegExp): string {
+  let rest = sentence.replace(subjectPattern, '').replace(/^[\s,:;-]+/, '')
+
+  // ", also called the infrastructure layer," / ", known as the control layer,"
+  rest = rest.replace(
+    /^(?:also\s+)?(?:called|known\s+as|referred\s+to\s+as|termed|named)\s+[^,]{2,60},\s*/i,
+    ''
+  )
+  // ", roughly 2008 to 2012," / ", spanning approximately 2012 to 2016,"
+  rest = rest.replace(
+    /^(?:roughly|approximately|spanning|covering|from|between)\s+[^,]{2,40},\s*/i,
+    ''
+  )
+  // Leading linking verbs: "was characterised by", "is defined by", "saw".
+  rest = rest.replace(
+    /^(?:was|were|is|are)\s+(?:characteri[sz]ed|defined|marked|dominated|distinguished)\s+by\s+/i,
+    ''
+  )
+  rest = rest.replace(/^(?:saw|brought|produced)\s+/i, '')
+  rest = rest.replace(/^(?:and|of|which)\s+/i, '')
+  // A bare copula left at the front reads as a severed clause ("Is embodied by
+  // the SDN controller"); dropping it leaves a clean participle.
+  rest = rest.replace(/^(?:is|are|was|were)\s+/i, '')
+
+  return shortenPredicate(rest, 14)
+}
+
+/**
+ * Shortens a card body.
+ *
+ * A step body is descriptive text on a card, not a claim that has to stand
+ * alone, so it may be cut at a coordinating conjunction - which the bullet
+ * shortener deliberately refuses to do. Using the bullet rules here returned
+ * nothing for "sits above the control layer and consists of network
+ * applications that interact with the controller", and the card rendered as a
+ * bare label with empty space under it.
+ */
+function shortenPredicate(text: string, maxWords: number): string {
+  const clean = text.replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim()
+  if (!clean) return ''
+
+  const capitalise1 = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  if (countWords(clean) <= maxWords) return capitalise1(clean)
+
+  // Prefer a clause boundary, then a coordinating/relative boundary.
+  for (const sep of [', ', '; ', ': ', ' and ', ' which ', ' that ', ' while ']) {
+    const at = clean.indexOf(sep)
+    if (at > 0) {
+      const head = clean.slice(0, at).trim()
+      if (countWords(head) >= 4 && countWords(head) <= maxWords) return capitalise1(head)
+    }
+  }
+
+  // Otherwise trim to the budget and back off any trailing function word.
+  const words = clean.split(/\s+/).slice(0, maxWords)
+  while (
+    words.length > 4 &&
+    /^(a|an|the|of|to|in|for|on|with|by|as|at|from|and|or|that|which|its|their|this|these)$/i.test(
+      words[words.length - 1]
+    )
+  ) {
+    words.pop()
+  }
+  return words.length >= 4 ? capitalise1(words.join(' ')) : ''
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 /**
@@ -163,6 +363,8 @@ interface SlideGroup {
   sections: DocSectionNode[]
   /** Set when the group is a contrast pair destined for a comparison layout. */
   comparison?: boolean
+  /** Set when thin neighbours were combined so they could fill one slide. */
+  merged?: boolean
 }
 
 /**
@@ -205,6 +407,67 @@ function sameParent(a: DocSectionNode, b: DocSectionNode): boolean {
   return !!a.id && !!b.id && parent(a.id) === parent(b.id) && parent(a.id) !== ''
 }
 
+/**
+ * A section thin enough that it cannot fill a slide on its own.
+ *
+ * Measured in usable sentences rather than words: the summariser rejects
+ * anything it cannot shorten honestly, so a 200-word section of dense,
+ * unshortenable prose yields as little as a 60-word one.
+ */
+function usableSentences(group: SlideGroup): number {
+  return group.sections.reduce(
+    (n, s) => n + s.sentences.filter(x => x.trim().length >= 25).length,
+    0
+  )
+}
+
+/** Combined length, used to stop a merge producing an overstuffed slide. */
+function groupWords(group: SlideGroup): number {
+  return group.sections.reduce((n, s) => n + s.wordCount, 0)
+}
+
+/**
+ * Merges neighbouring thin sections so they are summarised TOGETHER.
+ *
+ * This is the fix for the deck's worst remaining weakness. The strict "never
+ * cut mid-thought" rule means a thin section can yield one bullet, and a
+ * one-bullet slide reads as broken even though nothing on it is wrong. Merging
+ * before summarisation - rather than padding afterwards - lets the summariser
+ * choose the best six bullets from a larger pool, which is both fuller and
+ * better than two half-empty slides.
+ *
+ * Only adjacent sections from the SAME chapter merge, so provenance stays
+ * truthful and the eyebrow can still name one chapter.
+ */
+function mergeThinGroups(groups: SlideGroup[]): SlideGroup[] {
+  const MIN_SENTENCES = 8
+  const MAX_MERGED_WORDS = 520
+
+  const out: SlideGroup[] = []
+
+  for (const group of groups) {
+    const previous = out[out.length - 1]
+
+    const canMerge =
+      previous &&
+      !previous.comparison &&
+      !group.comparison &&
+      previous.sections[0].chapter === group.sections[0].chapter &&
+      previous.sections[0].kind === group.sections[0].kind &&
+      (usableSentences(previous) < MIN_SENTENCES || usableSentences(group) < MIN_SENTENCES) &&
+      groupWords(previous) + groupWords(group) <= MAX_MERGED_WORDS
+
+    if (canMerge) {
+      previous.sections = [...previous.sections, ...group.sections]
+      previous.merged = true
+    } else {
+      out.push({ ...group, sections: [...group.sections] })
+    }
+  }
+
+  return out
+}
+
 // --- Section importance -------------------------------------------------
 
 function importanceOf(section: DocSectionNode): number {
@@ -243,7 +506,11 @@ export function shortenCitation(entry: string, maxChars = 78): string {
   if (!text) return ''
 
   const m = text.match(/^(.+?)\s*\((\d{4}[a-z]?)\)\.?\s*(.+?)(?:\.\s|$)/)
-  if (!m) return text.length <= maxChars ? text : ''
+  // Strict: no author-year, not a citation. The permissive version passed
+  // short non-citations straight through, which is how "(Listed in APA 7th
+  // Edition format)" and "programmable networks. ACM SIGCOMM…" reached the
+  // references slide as if they were sources.
+  if (!m) return ''
 
   const [, authorsRaw, year, titleRaw] = m
 
@@ -314,11 +581,15 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
     s => s.kind !== 'back' && (s.sentences.length > 0 || s.tables.length > 0)
   )
 
-  const groups = groupSections(bodySections)
+  const groups = mergeThinGroups(groupSections(bodySections))
   for (const g of groups) {
     if (g.comparison) {
       decisions.push(
         `merged §${g.sections[0].id} and §${g.sections[1].id} into one comparison slide`
+      )
+    } else if (g.merged) {
+      decisions.push(
+        `merged thin sections ${g.sections.map(s => `§${s.id || s.heading}`).join(' + ')} onto one slide`
       )
     }
   }
@@ -343,6 +614,9 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
     if (slide) contentSlides.push(slide)
   }
 
+  // Order matters: fold under-filled slides away BEFORE harvesting tables, so a
+  // table is never inserted next to a slide that is about to disappear.
+  mergeUnderfilledSlides(contentSlides, spec, decisions)
   harvestTables(contentSlides, selected, spec, decisions)
   ensureLayoutVariety(contentSlides, spec, decisions)
 
@@ -365,11 +639,20 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
   if (droppedSections.length > 0) {
     decisions.push(`dropped ${droppedSections.length} section(s) to stay within ${maxTotal} slides`)
   }
+  // A deck under the spec minimum is padded with CHAPTER DIVIDERS rather than
+  // by loosening the bullet rules. A divider is real structure - it names a
+  // chapter the document actually has - so it adds navigation for the audience
+  // instead of filler, and it is the one place where extra slides do not mean
+  // extra claims to defend.
   if (slides.length < spec.deck.minSlides) {
-    decisions.push(
-      `deck is ${slides.length} slides, under the spec minimum of ${spec.deck.minSlides}; ` +
-        `the document does not carry enough distinct sections to fill it`
-    )
+    const added = insertChapterDividers(slides, spec.deck.minSlides)
+    if (added > 0) decisions.push(`inserted ${added} chapter divider slide(s) to reach the ${spec.deck.minSlides}-slide minimum`)
+    if (slides.length < spec.deck.minSlides) {
+      decisions.push(
+        `deck is ${slides.length} slides, under the spec minimum of ${spec.deck.minSlides}; ` +
+          `the document does not carry enough distinct sections to fill it`
+      )
+    }
   }
 
   return {
@@ -421,9 +704,17 @@ function buildSlide(
   const sections = group.sections
   const primary = sections[0]
   const sentences = sections.flatMap(s => s.sentences)
-  const title = (sections.length > 1
-    ? `${primary.heading} vs ${sections[1].heading}`
-    : primary.heading
+  // "vs" only where the document genuinely draws a contrast. Merged thin
+  // sections are joined with "&"; three or more keep the leading heading rather
+  // than growing an unreadable chain.
+  const title = (
+    sections.length === 1
+      ? primary.heading
+      : group.comparison
+      ? `${primary.heading} vs ${sections[1].heading}`
+      : sections.length === 2
+      ? `${primary.heading} & ${sections[1].heading}`
+      : primary.heading
   ).toUpperCase()
 
   const base = {
@@ -448,17 +739,34 @@ function buildSlide(
   // 2. A real table in the source beats prose about it.
   const table = sections.map(s => s.tables).flat().map(normalizeTable).find(Boolean)
   if (table) {
-    decisions.push(`${base.title}: table layout (source table with ${table.rows.length} rows)`)
-    return { ...base, layout: 'table', table, notes, takeaway }
+    // The caption describes the TABLE; the section heading describes the prose
+    // the table displaced. Titling the slide "User Interface / Mobile
+    // Application" over a table of RFID frequency ranges is simply wrong.
+    const captioned = tableHeading(table, '')
+    const title = captioned ? captioned.toUpperCase().slice(0, 58) : base.title
+    decisions.push(`${title}: table layout (source table with ${table.rows.length} rows)`)
+    return {
+      ...base,
+      title,
+      eyebrow: tableEyebrow(table, sections),
+      layout: 'table',
+      // The caption is now the title; repeating it above the grid is noise.
+      table: { ...table, caption: undefined },
+      notes,
+      takeaway,
+    }
   }
 
-  // 3. An explicit sequence of stages.
-  if (PROCESS_SIGNALS.test(sentences.join(' '))) {
-    const steps = extractSteps(sentences)
-    if (steps.length >= 3) {
-      decisions.push(`${base.title}: process layout (${steps.length} stages)`)
-      return { ...base, layout: 'process', steps, notes, takeaway }
-    }
+  // 3. An ordered sequence the document itself states: numbered stages, a
+  //    chronology of phases, or an enumerated set of layers/components.
+  //    extractSteps returns [] unless one of those is genuinely present, so it
+  //    is safe to always ask rather than gating on a keyword.
+  const steps = extractSteps(sentences)
+  if (steps.length >= 3) {
+    decisions.push(
+      `${base.title}: process layout (${steps.length} x ${steps.map(s => s.title).join(' / ')})`
+    )
+    return { ...base, layout: 'process', steps, notes, takeaway }
   }
 
   // 4. A headline figure.
@@ -479,7 +787,18 @@ function buildSlide(
   })
   if (bullets.length === 0) return null
 
-  return { ...base, layout: 'bullets', bullets, notes, takeaway }
+  // Under-filled: hand the model the source so it can REWRITE what the rule
+  // based compressor could only reject. Capped, because the whole section is
+  // not needed to write three more bullets.
+  const sourceSentences =
+    bullets.length < 3
+      ? sentences.filter(s => s.trim().length >= 25).slice(0, 12)
+      : undefined
+  if (sourceSentences) {
+    decisions.push(`${base.title}: only ${bullets.length} bullet(s); source attached for the model to rewrite`)
+  }
+
+  return { ...base, layout: 'bullets', bullets, notes, takeaway, sourceSentences }
 }
 
 /** Tables that a comparison slide will not itself display, capped at two. */
@@ -511,31 +830,43 @@ function harvestTables(
   decisions: string[]
 ): void {
   let added = 0
+  // The same table can be reachable from more than one section after merging,
+  // which put the identical grid on two slides. Keyed on content, not identity.
+  const seenTables = new Set<string>()
 
   for (const group of groups) {
     if (added >= MAX_HARVESTED_TABLES) break
 
-    const sourceIndex = slides.findIndex(s => sameRefs(s.sourceRefs, sourceRefsFor(group.sections)))
+    const refs = sourceRefsFor(group.sections)
+    // Recomputed per insertion: a previous splice shifts every later index, and
+    // carrying a running offset instead placed tables under the wrong slide.
+    const sourceIndex = slides.findIndex(s => sameRefs(s.sourceRefs, refs))
     if (sourceIndex === -1) continue
     if (slides[sourceIndex].layout === 'table') continue
 
     for (const raw of group.sections.flatMap(s => s.tables)) {
       if (added >= MAX_HARVESTED_TABLES) break
+
       const table = normalizeTable(raw)
       if (!table) continue
 
-      const heading = table.caption || `${group.sections[0].heading} at a glance`
+      const key = [table.headers.join('|'), ...table.rows.map(r => r.join('|'))].join('#')
+      if (seenTables.has(key)) continue
+      seenTables.add(key)
+
+      const heading = tableHeading(table, group.sections[0].heading)
       const sentences = group.sections.flatMap(s => s.sentences)
       const takeaway = deriveTakeaway(sentences, heading)
 
-      slides.splice(sourceIndex + 1 + added, 0, {
+      const insertAt = slides.findIndex(s => sameRefs(s.sourceRefs, refs))
+      slides.splice(insertAt + 1, 0, {
         layout: 'table',
         title: heading.toUpperCase().slice(0, 58),
-        eyebrow: eyebrowFor(group.sections),
+        eyebrow: tableEyebrow(table, group.sections),
         table,
         notes: buildSpeakerNotes({ spec, heading, takeaway, sentences }),
         takeaway,
-        sourceRefs: sourceRefsFor(group.sections),
+        sourceRefs: refs,
       })
       added++
       decisions.push(`harvested a ${table.rows.length}-row table from §${group.sections[0].id} onto its own slide`)
@@ -543,8 +874,81 @@ function harvestTables(
   }
 }
 
+/** Caption without its "Table 2.2:" label, which the slide title does not need. */
+function tableHeading(table: DocTable, fallback: string): string {
+  const caption = (table.caption ?? '').replace(/^\s*table\s*\d+(\.\d+)?\s*[:.\-]\s*/i, '').trim()
+  return caption || `${fallback} at a glance`
+}
+
+/**
+ * A table's eyebrow, and no eyebrow at all when the evidence conflicts.
+ *
+ * A caption reading "Table 2.2" places the table in Chapter Two. When that
+ * disagrees with the chapter of the section the parser attached it to - which
+ * happens in DOCX, where a table can be lifted away from its heading - neither
+ * source is trustworthy enough to print, so nothing is claimed. Asserting the
+ * wrong chapter is the defect the provenance check exists to stop.
+ */
+function tableEyebrow(table: DocTable, sections: DocSectionNode[]): string | undefined {
+  const derived = eyebrowFor(sections)
+  const captioned = (table.caption ?? '').match(/^\s*table\s*(\d+)\./i)
+  if (!captioned || !derived) return derived
+
+  const words: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  }
+  const claimed = derived.toLowerCase().replace('chapter ', '')
+  const claimedNum = words[claimed] ?? Number.parseInt(claimed, 10)
+
+  return claimedNum === Number.parseInt(captioned[1], 10) ? derived : undefined
+}
+
 function sameRefs(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
+}
+
+/**
+ * Last resort for a slide the summariser could not fill: fold it into a
+ * neighbour from the same chapter, or drop it.
+ *
+ * The pre-summarisation merge works on sentence counts, which is a proxy. This
+ * runs on the ACTUAL bullet yield, so it catches the case the proxy misses -
+ * a section with plenty of sentences, almost all of which the compressor
+ * rightly refuses to shorten.
+ */
+function mergeUnderfilledSlides(
+  slides: PlannedSlide[],
+  spec: PresentationSpec,
+  decisions: string[]
+): void {
+  for (let i = slides.length - 1; i >= 0; i--) {
+    const slide = slides[i]
+    if (slide.layout !== 'bullets') continue
+    if ((slide.bullets?.length ?? 0) >= 2) continue
+
+    const isHost = (other: PlannedSlide | undefined) =>
+      !!other &&
+      other.layout === 'bullets' &&
+      other.eyebrow === slide.eyebrow &&
+      (other.bullets?.length ?? 0) + (slide.bullets?.length ?? 0) <= spec.deck.maxBulletsPerSlide
+
+    const before = slides[i - 1]
+    const after = slides[i + 1]
+    const host = isHost(before) ? before : isHost(after) ? after : null
+
+    if (host) {
+      const merged = isHost(before)
+        ? [...(host.bullets ?? []), ...(slide.bullets ?? [])]
+        : [...(slide.bullets ?? []), ...(host.bullets ?? [])]
+      host.bullets = merged
+      host.sourceRefs = [...new Set([...host.sourceRefs, ...slide.sourceRefs])]
+      decisions.push(`folded under-filled "${slide.title}" into "${host.title}"`)
+    } else {
+      decisions.push(`dropped under-filled "${slide.title}" (${slide.bullets?.length ?? 0} bullet(s), no neighbour to merge with)`)
+    }
+
+    slides.splice(i, 1)
+  }
 }
 
 /**
@@ -560,28 +964,74 @@ function ensureLayoutVariety(slides: PlannedSlide[], spec: PresentationSpec, dec
 
   if (nonBullet() >= target) return
 
-  for (const slide of slides) {
-    if (nonBullet() >= target) break
-    if (slide.layout !== 'bullets' || !slide.bullets) continue
+  // Deliberately no promotion pass.
+  //
+  // This used to relabel a slide's bullets as "Step 1 ... Step 5" whenever the
+  // deck was short of non-bullet layouts. That is decoration masquerading as
+  // structure: "Step 3" tells the reader nothing the bullet did not, and it
+  // asserts a sequence the document never claimed. A layout has to be earned by
+  // content that is genuinely a table, a contrast or an ordered sequence, so a
+  // shortfall is reported and left alone.
+  decisions.push(
+    `only ${nonBullet()} of ${slides.length} content slides use a non-bullet layout ` +
+      `(target ${target}); the source did not provide enough tables, contrasts or sequences, ` +
+      `and inventing one would not help the reader`
+  )
+}
 
-    // Four or more short bullets read well as a numbered process.
-    if (slide.bullets.length >= 4 && slide.bullets.every(b => b.length <= 70)) {
-      slide.steps = slide.bullets.slice(0, 5).map((b, i) => ({
-        title: `Step ${i + 1}`,
-        body: b,
-      }))
-      slide.layout = 'process'
-      slide.bullets = undefined
-      decisions.push(`${slide.title}: promoted to a process layout to meet the variety rule`)
-    }
+/**
+ * Inserts a divider before the first slide of each chapter, in document order,
+ * until the deck reaches `target`. Returns how many were added.
+ *
+ * The divider carries the chapter's own name and the sections that follow it,
+ * so it is derived entirely from the source. Chapters are visited in order, so
+ * a deck one slide short gets a divider at Chapter One rather than an
+ * arbitrary one somewhere in the middle.
+ */
+function insertChapterDividers(slides: PlannedSlide[], target: number): number {
+  const firstOfChapter = new Map<string, number>()
+
+  slides.forEach((slide, i) => {
+    if (!slide.eyebrow || !/^chapter /i.test(slide.eyebrow)) return
+    if (!firstOfChapter.has(slide.eyebrow)) firstOfChapter.set(slide.eyebrow, i)
+  })
+
+  let added = 0
+  // Insert from the back so earlier indices stay valid.
+  const targets = [...firstOfChapter.entries()].sort((a, b) => b[1] - a[1])
+
+  for (const [eyebrow, index] of targets) {
+    if (slides.length >= target) break
+
+    // What this chapter covers, taken from the titles that follow it.
+    const covers = slides
+      .filter(s => s.eyebrow === eyebrow && s.layout !== 'section')
+      .map(s => titleCaseWords(s.title))
+      .slice(0, 4)
+    if (covers.length === 0) continue
+
+    slides.splice(index, 0, {
+      layout: 'section',
+      title: eyebrow.toUpperCase(),
+      bullets: covers,
+      notes:
+        `Signpost the change of chapter before you move on. Say in one sentence what ${eyebrow} ` +
+        `establishes and why it follows from the last chapter, then name the ${covers.length} ` +
+        `areas listed here so the panel knows what is coming. Keep this to about fifteen seconds ` +
+        `and do not read the list aloud verbatim.`,
+      takeaway: `${eyebrow} covers ${covers.slice(0, 2).join(' and ')}`,
+      sourceRefs: [eyebrow.toLowerCase().replace('chapter ', '§')],
+    })
+    added++
   }
 
-  if (nonBullet() < target) {
-    decisions.push(
-      `only ${nonBullet()} of ${slides.length} content slides use a non-bullet layout ` +
-        `(target ${target}); the source did not provide enough tables, contrasts or sequences`
-    )
-  }
+  return added
+}
+
+/** "SUMMARY OF EXISTING WORKS" -> "Summary of existing works". */
+function titleCaseWords(text: string): string {
+  const lower = text.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
 }
 
 function buildTitleSlide(metadata: DeckMetadata): PlannedSlide {

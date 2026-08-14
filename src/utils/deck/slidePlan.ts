@@ -99,6 +99,18 @@ export interface PlannedSlide {
   takeaway?: string
   /** Provenance: which part of the source this was built from. Never empty. */
   sourceRefs: string[]
+  /**
+   * Source sentences behind this slide, attached ONLY when the deterministic
+   * summariser could not fill it.
+   *
+   * The rule-based compressor refuses to shorten a sentence it cannot shorten
+   * honestly, so a dense section can yield one bullet. A model can rewrite such
+   * a sentence rather than merely trimming it, but it needs the original to do
+   * that - without this it can only polish the one bullet that survived.
+   *
+   * Never rendered. Stripped before the plan reaches the renderer.
+   */
+  sourceSentences?: string[]
 }
 
 export interface DeckMetadata {
@@ -273,7 +285,13 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
 
     const cleaned: string[] = []
     for (const bullet of bullets) {
-      const flat = bullet.replace(/^[•‣▶▸*\-\s]+/, '').trim()
+      // Slide bullets take no terminal full stop. The deterministic summariser
+      // strips them; a model returns them, and mixing the two conventions in
+      // one deck looks like an oversight.
+      const flat = bullet
+        .replace(/^[•‣▶▸*\-\s]+/, '')
+        .replace(/\s*\.\s*$/, '')
+        .trim()
       if (!flat) continue
 
       let candidate = flat

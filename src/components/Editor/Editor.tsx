@@ -4021,15 +4021,21 @@ export default function Editor() {
    * owns the loading state and error reporting.
    */
   const exportPptxFromHtml = async (html: string, title: string) => {
+    // Values are passed through only when the user actually supplied them.
+    // The exporter reads the document's own cover page first and prompts for
+    // whatever is missing; filling the gaps with "STUDENT NAME" or a default
+    // institution here is how placeholder text reached finished slides, and
+    // how one job's details leaked into the next.
     await exportPresentationPptx(html, {
-      title: title || 'Academic Seminar Presentation',
-      studentName: coverDetails.studentName || 'STUDENT NAME',
-      matricNo: coverDetails.matricNo || 'MATRIC NUMBER',
-      department: coverDetails.department || 'COMPUTER ENGINEERING',
-      supervisorName: coverDetails.supervisorName || 'SUPERVISOR NAME',
-      academicLevel: wizardAcademicLevel || 'Undergraduate',
-      institution: coverDetails.institution || 'YABA COLLEGE OF TECHNOLOGY',
+      title,
+      studentName: coverDetails.studentName,
+      matricNo: coverDetails.matricNo,
+      department: coverDetails.department,
+      supervisorName: coverDetails.supervisorName,
+      academicLevel: wizardAcademicLevel,
+      institution: coverDetails.institution,
       docHeader,
+      // The footer is opt-in. It defaults to empty rather than to a product name.
       docFooter,
     })
   }

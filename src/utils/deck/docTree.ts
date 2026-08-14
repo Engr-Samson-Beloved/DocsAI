@@ -232,6 +232,14 @@ export function parseChapterNumber(heading: string): number | null {
   return null
 }
 
+/** "2.3 Traffic Engineering" -> 2. Null when the heading carries no number. */
+export function chapterOfHeading(heading: string): number | null {
+  const m = heading.trim().match(/^(\d{1,2})(?:\.\d+)*\.?\s+\S/)
+  if (!m) return null
+  const n = Number.parseInt(m[1], 10)
+  return n >= 1 && n <= 12 ? n : null
+}
+
 /** "2.3 Traffic Engineering" -> "2.3"; "CHAPTER TWO" -> "2". */
 function sectionId(heading: string, chapter: number | null): string {
   const numbered = heading.match(/^(\d+(?:\.\d+)*)/)
@@ -283,9 +291,18 @@ function newNode(heading: string, level: number, chapter: number | null): DocSec
 export function buildDocTree(html: string): DocTree {
   const blocks = scanHtmlBlocks(html)
 
-  const coverBlocks = blocks.filter(b => b.attrs['data-cover'] === 'true')
+  const explicitCover = blocks.filter(b => b.attrs['data-cover'] === 'true')
+
+  // A DOCX has no pages, so mammoth's HTML carries no page wrapper and nothing
+  // is ever marked data-cover. Without this the whole cover - title, name,
+  // matric number, supervisor - was parsed as body prose and the deck had no
+  // metadata at all. The cover is instead the run of blocks before the first
+  // real section heading, accepted only if it actually reads like one.
+  const coverBlocks = explicitCover.length > 0 ? explicitCover : inferCoverBlocks(blocks)
+  const coverSet = new Set(coverBlocks)
+
   const bodyBlocks = blocks.filter(
-    b => b.attrs['data-cover'] !== 'true' && b.attrs['data-toc'] !== 'true'
+    b => !coverSet.has(b) && b.attrs['data-cover'] !== 'true' && b.attrs['data-toc'] !== 'true'
   )
 
   const sections: DocSectionNode[] = []
@@ -328,6 +345,20 @@ export function buildDocTree(html: string): DocTree {
       const parsedChapter = parseChapterNumber(block.text)
       const clean = cleanHeading(block.text)
 
+      // "Table 2.1: Comparison of …" is a CAPTION, not a section heading, even
+      // when the document styles it as one. Treating it as a heading created a
+      // section per caption - each carrying a real table, each numbered from
+      // the running chapter counter - so the deck filled with duplicate table
+      // slides labelled with the wrong chapter.
+      const asCaption = block.text.match(CAPTION_RE)
+      if (asCaption && current) {
+        const label = `${asCaption[1]} ${asCaption[2]}`
+        const text = stripTrailingPageNumber(asCaption[3])
+        if (/^table/i.test(label)) pendingCaption = text
+        else current.figures.push({ label, caption: text })
+        continue
+      }
+
       if (BACK_MATTER.test(clean)) {
         if (current) push(current)
         current = null
@@ -363,7 +394,12 @@ export function buildDocTree(html: string): DocTree {
         continue
       }
 
-      open(block.text, level, chapter)
+      // A numbered heading states its own chapter, and that beats the running
+      // counter. Many reports write "CHAPTER ONE" once and then number every
+      // later section "2.1", "3.2" without another chapter heading; trusting
+      // the counter labelled all of them "Chapter One", which the provenance
+      // assertion correctly refused to ship.
+      open(block.text, level, chapterOfHeading(block.text) ?? chapter)
       continue
     }
 
@@ -428,7 +464,15 @@ export function buildDocTree(html: string): DocTree {
 
   return {
     sections,
-    references: references.flatMap(splitReferenceEntries),
+    // Joined into ONE blob before splitting.
+    //
+    // A PDF reference list uses a hanging indent, so a single citation arrives
+    // as several blocks and splitting each block separately cannot put them
+    // back together - it produced "…Computer Communication Review, 44(2), 87-"
+    // and "98. https://doi.org/…" as two separate "references". Rejoining first
+    // and splitting once on the author-year boundary is the only way to
+    // recover entry boundaries.
+    references: splitReferenceEntries(references.join(' ')),
     metadata: extractCover(coverBlocks.map(b => b.text).filter(Boolean)),
   }
 }
@@ -441,15 +485,65 @@ export function buildDocTree(html: string): DocTree {
  * the APA author-year signature, which is the only reliable boundary marker.
  */
 export function splitReferenceEntries(blob: string): string[] {
-  const text = blob.replace(/\s+/g, ' ').trim()
+  const text = blob
+    .replace(/\s+/g, ' ')
+    // Editorial notes that sit above the list are not citations.
+    .replace(/\(\s*listed\s+in\s+APA[^)]*\)/gi, '')
+    .trim()
   if (!text) return []
 
-  // A new entry starts at "Surname, X." following the end of a previous one.
-  const boundary = /(?<=[.)\]])\s+(?=[A-Z][A-Za-z'’\-]+,\s+[A-Z]\.)/g
+  // A new entry starts at "Surname, X." - but ONLY when what precedes it ends
+  // the previous entry: a full stop, a closing bracket, or the last digit of a
+  // page range or DOI.
+  //
+  // The lookbehind is what keeps the split out of the middle of an author list.
+  // Without it, "Al-Shabibi, A., … & Snow, B. (2014)" split at every author and
+  // the year filter kept only the tail, so the slide credited "Snow, B." for a
+  // seven-author paper.
+  const boundary = /(?<=[.\d)])\s+(?=[A-Z][A-Za-z'’\-]{1,}(?:,\s+[A-Z]\.|\s+et\s+al\.))/g
+
   return text
     .split(boundary)
     .map(s => s.trim())
-    .filter(s => s.length > 20)
+    // A real citation carries a year in parentheses. Anything shorter than that
+    // is a fragment of the previous entry, not an entry of its own.
+    .filter(s => s.length > 30 && /\((?:19|20)\d{2}[a-z]?\)/.test(s))
+}
+
+/**
+ * The leading blocks of a document that has no page markers, when they look
+ * like a cover page.
+ *
+ * Bounded by the first heading that opens the document proper (a chapter, or
+ * front matter such as ABSTRACT), and accepted only when the enclosed text
+ * carries at least three cover signals - otherwise a report that opens
+ * straight into prose would lose its first paragraphs.
+ */
+function inferCoverBlocks(blocks: HtmlBlock[]): HtmlBlock[] {
+  const stop = blocks.findIndex(b => {
+    if (!/^h[1-6]$/.test(b.tag)) return false
+    const clean = cleanHeading(b.text)
+    return parseChapterNumber(b.text) !== null || FRONT_MATTER.test(clean) || BACK_MATTER.test(clean)
+  })
+
+  const head = blocks.slice(0, stop === -1 ? Math.min(blocks.length, 30) : stop)
+  if (head.length === 0) return []
+
+  const text = head.map(b => b.text).join(' ').toLowerCase()
+  const signals = [
+    /\bsubmitted (to|in partial)\b/,
+    /\bin partial fulfil?lment\b/,
+    /\bmatric(?:ulation)?\s*(?:no|number)\b/,
+    /\bsupervis(?:or|ed by)\b/,
+    /\bdepartment of\b/,
+    /\bfaculty of\b/,
+    /\bschool of\b/,
+    /\bseminar (report|presentation|paper)\b/,
+    /\bpresented (by|to|at)\b/,
+    /\b(higher national diploma|hnd|b\.?sc|bachelor|master)\b/,
+  ].filter(re => re.test(text)).length
+
+  return signals >= 3 ? head : []
 }
 
 // --- Cover-page metadata ----------------------------------------------
@@ -604,6 +698,14 @@ function extractCoverTitle(
   const best = runs.sort((a, b) => b.join(' ').length - a.join(' ').length)[0]
   const joined = tidyTitle(best.join(' '))
   return joined.length >= 12 ? joined : null
+}
+
+/**
+ * Removes the page number a "List of Tables" entry drags along:
+ * "Classification of RFID Systems by Frequency Range 8" -> "… Frequency Range".
+ */
+function stripTrailingPageNumber(text: string): string {
+  return text.replace(/\s*\.{2,}\s*\d{1,3}\s*$/, '').replace(/\s+\d{1,3}\s*$/, '').trim()
 }
 
 /** ALL-CAPS cover titles are kept, but stray punctuation and runs are cleaned. */

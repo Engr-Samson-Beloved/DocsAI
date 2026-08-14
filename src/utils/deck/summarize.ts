@@ -25,7 +25,7 @@
  *   - one `takeaway` per slide, and 40-70 words of speaker notes
  */
 
-import { lintBullet, duplicateKey, wordCount, segmentSentences } from './textNormalize'
+import { lintBullet, duplicateKey, wordCount, segmentSentences, hasFiniteVerb } from './textNormalize'
 import type { PresentationSpec } from './presentationSpec'
 
 // --- Phrase-level compression ----------------------------------------
@@ -59,7 +59,7 @@ const PHRASE_COMPRESSIONS: [RegExp, string][] = [
 
 /** Openers that carry no information once the sentence stands alone on a slide. */
 const LEAD_INS =
-  /^(however|therefore|moreover|furthermore|in addition|additionally|consequently|subsequently|thus|hence|indeed|also|nevertheless|nonetheless|as a result|for instance|for example|in fact|in general|in particular|overall|finally|first(?:ly)?|second(?:ly)?|third(?:ly)?|fourth(?:ly)?|fifth(?:ly)?|lastly|on the other hand|that is|in other words|notably|importantly|crucially|significantly)\b[\s,:-]*/i
+  /^(however|therefore|moreover|furthermore|in addition|additionally|consequently|subsequently|thus|hence|indeed|also|nevertheless|nonetheless|as a result|for instance|for example|in fact|in general|in particular|overall|finally|first(?:ly)?|second(?:ly)?|third(?:ly)?|fourth(?:ly)?|fifth(?:ly)?|sixth(?:ly)?|seventh(?:ly)?|eighth(?:ly)?|lastly|on the other hand|that is|in other words|notably|importantly|crucially|significantly)\b[\s,:-]*/i
 
 /**
  * Words that open a subordinate or adverbial clause.
@@ -71,7 +71,28 @@ const LEAD_INS =
  * the previous pass happily printed as statements.
  */
 const SUBORDINATE_OPENER =
-  /^(as|by|in|on|at|for|with|within|without|from|to|into|through|throughout|during|across|among|amongst|between|before|after|since|until|unless|if|when|whenever|while|whilst|where|wherever|despite|given|following|according|regarding|concerning|upon|under|over|beyond|besides|toward|towards)\b/i
+  /^(as|by|in|on|at|for|with|within|without|from|to|into|through|throughout|during|across|among|amongst|between|before|after|since|until|unless|if|when|whenever|while|whilst|where|wherever|despite|given|following|according|regarding|concerning|upon|under|over|beyond|besides|toward|towards|rather than|instead of|as opposed to|apart from|aside from|other than)\b/i
+
+/**
+ * True when a subordinate clause is opened and never completed:
+ * "Flexibility means that the same underlying philosophy".
+ *
+ * `that`/`which`/`who` promise a predicate. When the trimmer or the
+ * relative-clause dropper removes it, what remains reads as a whole sentence -
+ * right length, right capitalisation, no trailing punctuation - and is
+ * meaningless. The tail after the last such connector must contain a verb.
+ */
+function hasDanglingSubordinate(text: string): boolean {
+  const m = text.match(/\b(that|which|who|where|whereby)\b\s+(.*)$/i)
+  if (!m) return false
+
+  const tail = m[2].trim()
+  if (!tail) return true
+  // A tail of one or two words is a fragment whatever its part of speech.
+  if (countWords(tail) < 3) return true
+
+  return !hasFiniteVerb(tail)
+}
 
 const HEDGES =
   /^(it is (?:important|crucial|worth|necessary|essential) to (?:note|remember|mention|state|emphasi[sz]e) that|it should be noted that|this (?:chapter|section|study|paper|work|project|seminar) (?:presents|discusses|describes|examines|explores|covers|outlines|introduces)|the (?:aim|purpose|objective) of this (?:chapter|section|study) is to)\b[\s:,-]*/i
@@ -123,7 +144,11 @@ function dropLeadingAdverbial(text: string): string {
 
 /** Drops a trailing relative clause, which is almost always elaboration. */
 function dropRelativeClause(text: string): string {
-  const m = text.match(/^(.{25,}?),\s+(which|who|where|whereby|thereby|although|though|while|whereas)\b.*$/i)
+  // Threshold kept low so a short subject followed by a relative clause is
+  // caught too: "The northbound API, which exposes the controller to
+  // applications" reduces to "Northbound API", which is then too short to be a
+  // bullet and is dropped - correctly, because its predicate was elsewhere.
+  const m = text.match(/^(.{10,}?),\s+(which|who|where|whereby|thereby|although|though|while|whereas)\b.*$/i)
   if (!m) return text
   // Keep it when the clause is where the numbers live.
   const tail = text.slice(m[1].length)
@@ -168,12 +193,40 @@ function reduceToWords(text: string, maxWords: number): string {
   const comma = head.lastIndexOf(',')
   if (comma > 0) {
     const candidate = head.slice(0, comma).trim()
-    if (countWords(candidate) >= 5) return candidate
+    if (countWords(candidate) >= 5 && !endsOnQualifier(candidate)) return candidate
   }
 
   // No honest way to shorten it.
   return ''
 }
+
+/**
+ * True when the final comma-separated segment is a qualifier rather than
+ * content: "Migrating to an SDN architecture, even partially".
+ *
+ * A comma is not a sentence boundary. Cutting there can leave text that looks
+ * grammatical and passes every surface lint - correct capitalisation, no
+ * trailing punctuation, under the word cap - while still being a participial
+ * phrase whose predicate was thrown away. A trailing qualifier is the reliable
+ * signal that the sentence was going somewhere else.
+ */
+function endsOnQualifier(text: string): boolean {
+  const last = text.split(',').pop()?.trim() ?? ''
+  return /^(even|especially|particularly|notably|including|such as|among|for example|for instance|if|when|while|though|although|albeit|whether|unless|rather|instead|as well)\b/i.test(
+    last
+  )
+}
+
+/**
+ * Sentences that only announce that content exists.
+ *
+ * "Several important research gaps remain" and "SDN is not without significant
+ * limitations" are true, fit the word budget, and pass every lint - and tell a
+ * panel nothing. They are the written equivalent of clearing your throat, and
+ * on a slide they displace a claim that would have said something.
+ */
+const ANNOUNCEMENT =
+  /^(?:there (?:are|is|remain)\b|(?:several|many|various|numerous)\b[\w\s'-]{0,40}\b(?:remain|exist|persist|follow|are discussed)\b|(?:a\s+)?(?:number|range|variety)\s+of\b[\w\s'-]{0,40}\b(?:exist|remain|follow)\b)|\bis not without\b|\bare (?:tangible|manifold|numerous|varied|clear)\b|\b(?:can|may) be (?:summari[sz]ed|outlined|described) as follows\b|\bas follows\s*$|\binclude the following\s*$/i
 
 /** True when the text stops on a word that cannot end a statement. */
 function endsMidThought(text: string): boolean {
@@ -201,6 +254,9 @@ export function compressSentence(sentence: string, maxWords = 14): string {
   // A bare pronoun subject with a copula means nothing once the slide isolates
   // it from the sentence before.
   if (PRONOUN_COPULA.test(s)) return ''
+
+  // A sentence that only announces that content follows.
+  if (ANNOUNCEMENT.test(s)) return ''
 
   for (const [pattern, replacement] of PHRASE_COMPRESSIONS) s = s.replace(pattern, replacement)
 
@@ -233,6 +289,7 @@ export function compressSentence(sentence: string, maxWords = 14): string {
   if (endsMidThought(s)) return ''
   if (/^(and|but|or|nor|yet|so|which|that|because|although|though|whereas)\b/i.test(s)) return ''
   if (SUBORDINATE_OPENER.test(s)) return ''
+  if (hasDanglingSubordinate(s)) return ''
 
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
@@ -483,7 +540,10 @@ export function buildSpeakerNotes(options: NotesOptions): string {
     return true
   }
 
-  push(`Open by making the point that ${lowerFirst(takeaway)}`)
+  // Phrased so the takeaway is quoted as-is. An earlier version wrote "make the
+  // point that ${lowerFirst(takeaway)}", which lowercased proper nouns into
+  // "make the point that xie et al. proposed...".
+  push(`Open on this point: ${takeaway}`)
   // The takeaway itself is now spoken; record its own fingerprint too, so the
   // supporting pass cannot re-add the same sentence in a slightly different
   // compression.
@@ -499,8 +559,7 @@ export function buildSpeakerNotes(options: NotesOptions): string {
 
   for (const sentence of supporting) {
     if (countWords(parts.join(' ')) >= min) break
-    const trimmed = compressSentence(sentence, 22) || sentence.slice(0, 140).trim()
-    push(trimmed)
+    push(compressSentence(sentence, 22) || shortenAtBoundary(sentence, 26))
   }
 
   push(likelyQuestion(heading))
@@ -527,8 +586,21 @@ function countWords(text: string): number {
   return wordCount(text)
 }
 
-function lowerFirst(text: string): string {
-  return text ? text.charAt(0).toLowerCase() + text.slice(1) : text
+/**
+ * Shortens a sentence for speaker notes at a clause or word boundary.
+ *
+ * A fixed character slice left notes ending "...affects productivity," which is
+ * the same mid-thought cut the bullets were fixed for; notes are read aloud, so
+ * they deserve the same treatment.
+ */
+function shortenAtBoundary(text: string, maxWords: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (countWords(clean) <= maxWords) return clean
+
+  const head = clean.split(/\s+/).slice(0, maxWords).join(' ')
+  const boundary = Math.max(head.lastIndexOf(', '), head.lastIndexOf('; '), head.lastIndexOf(': '))
+  const chosen = boundary > head.length * 0.5 ? head.slice(0, boundary) : head
+  return chosen.replace(/[\s,;:\-–—]+$/, '')
 }
 
 /** Re-exported so callers can segment ad-hoc prose without a second import. */
