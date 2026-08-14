@@ -1,4 +1,4 @@
-/**
+﻿/**
  * slidePlan.ts
  * ------------------------------------------------------------------
  * The contract between "what goes on the slides" and "how they are drawn".
@@ -17,7 +17,8 @@
  */
 
 import type { PresentationSpec } from './presentationSpec'
-import { lintBullet, duplicateKey, wordCount } from './textNormalize'
+import { duplicateKey, wordCount } from './textNormalize'
+import { isCompleteClaim, headSubject } from './claims'
 
 // --- Types -------------------------------------------------------------
 
@@ -56,9 +57,6 @@ export const STRUCTURAL_LAYOUTS: SlideLayout[] = ['title', 'closing']
 export const NON_BULLET_CONTENT: SlideLayout[] = [
   'cards', 'comparison', 'stat', 'process', 'diagram', 'table', 'quote',
 ]
-
-/** Layouts that are not a plain title-and-bullets slide, for the variety rule. */
-export const NON_BULLET_LAYOUTS: SlideLayout[] = ['comparison', 'stat', 'process', 'table', 'quote']
 
 export interface SlideColumn {
   heading: string
@@ -169,8 +167,10 @@ export const SLIDE_PLAN_JSON_SCHEMA = {
         required: ['layout', 'title', 'notes', 'sourceRefs'],
         properties: {
           layout: { type: 'string', enum: CONTENT_LAYOUTS },
+          // 2-6 words. The model may rewrite a title, and must name the
+          // subject rather than the section it came from.
           title: { type: 'string', minLength: 2, maxLength: 60 },
-          eyebrow: { type: 'string', maxLength: 40 },
+          caption: { type: 'string', maxLength: 160 },
           bullets: {
             type: 'array',
             maxItems: 6,
@@ -273,8 +273,11 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
   const rawSlides = Array.isArray(source.slides) ? source.slides : []
 
   const seen = new Set<string>()
+  /** Head noun phrases already used, so no slide states one subject twice. */
+  const usedSubjects = new Set<string>()
 
   rawSlides.forEach((rawSlide, index) => {
+    usedSubjects.clear()
     const s = (rawSlide ?? {}) as Partial<PlannedSlide>
     const title = isStr(s.title) ? s.title.trim() : ''
     const note = (field: string, problem: string, repaired: boolean) =>
@@ -308,7 +311,7 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
       // strips them; a model returns them, and mixing the two conventions in
       // one deck looks like an oversight.
       const flat = bullet
-        .replace(/^[•‣▶▸*\-\s]+/, '')
+        .replace(/^[â€¢â€£â–¶â–¸*\-\s]+/, '')
         .replace(/\s*\.\s*$/, '')
         .trim()
       if (!flat) continue
@@ -319,7 +322,7 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
           .split(/\s+/)
           .slice(0, spec.deck.maxWordsPerBullet)
           .join(' ')
-          .replace(/[\s,;:\-–—]+$/, '')
+          .replace(/[\s,;:\-â€“â€”]+$/, '')
         note('bullets', `"${flat.slice(0, 40)}..." exceeded ${spec.deck.maxWordsPerBullet} words; trimmed`, true)
       }
 
@@ -412,7 +415,8 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
     slides.push({
       layout,
       title,
-      eyebrow: isStr(s.eyebrow) ? s.eyebrow.trim() : undefined,
+      subtitle: isStr(s.subtitle) ? s.subtitle.trim() : undefined,
+      caption: isStr(s.caption) ? s.caption.trim() : undefined,
       bullets: bullets.length > 0 ? bullets : undefined,
       citations: citations.length > 0 ? citations : undefined,
       columns: columns && columns.length > 0 ? columns : undefined,
@@ -445,40 +449,13 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
     fatal: issues.filter(i => !i.repaired),
   }
 }
-
 /**
- * Asserts that a slide's eyebrow agrees with its provenance.
+ * Structural vocabulary is now banned outright rather than merely kept
+ * consistent (see titles.ts, BANNED_TITLE_PATTERNS).
  *
- * The shipped deck labelled "SCOPE & SIGNIFICANCE" as "Chapter Four" while its
- * text came from the conclusion. Because eyebrows are now derived from
- * `sourceRefs`, a mismatch means something reassigned content without
- * relabelling it, and that must fail the build rather than mislead a panel.
+ * `eyebrowMismatch` used to assert that a slide's "Chapter Two" label agreed
+ * with its provenance. That check is obsolete because the label itself is: a
+ * slide names its subject, so there is nothing left to disagree.
+ * `sourceRefs` is still carried and still checked for presence, but it is
+ * provenance for the build, not text for the audience.
  */
-export function eyebrowMismatch(slide: PlannedSlide): string | null {
-  if (!slide.eyebrow) return null
-
-  const claimed = slide.eyebrow.match(/chapter\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d+)/i)
-  if (!claimed) return null
-
-  const words: Record<string, number> = {
-    one: 1, two: 2, three: 3, four: 4, five: 5,
-    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-  }
-  const token = claimed[1].toLowerCase()
-  const claimedNum = words[token] ?? Number.parseInt(token, 10)
-
-  // Provenance refs look like "§2.3" or "p. 11"; the chapter is the leading
-  // number of a section ref.
-  const sectionRefs = slide.sourceRefs
-    .map(ref => ref.match(/§\s*(\d+)/))
-    .filter((m): m is RegExpMatchArray => m !== null)
-    .map(m => Number.parseInt(m[1], 10))
-
-  if (sectionRefs.length === 0) return null
-  if (sectionRefs.includes(claimedNum)) return null
-
-  return (
-    `eyebrow claims "${slide.eyebrow}" but the content comes from ` +
-    `section${sectionRefs.length > 1 ? 's' : ''} ${sectionRefs.map(n => `${n}.x`).join(', ')}`
-  )
-}

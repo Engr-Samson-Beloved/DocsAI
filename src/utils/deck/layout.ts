@@ -77,14 +77,34 @@ export const FILL_LIMIT = 0.92
 export const COUNTER_W = 1.4
 
 /**
- * Chrome sits inside EDGE_CLEARANCE on every side. QA check 1 requires each
- * text box to keep 0.5in from the slide edge, so the eyebrow and counter start
- * at y = 0.5 and the footer ends at y = 7.0 rather than hugging the trim.
+ * The title block's TOP and its minimum height. Its real height is MEASURED
+ * from the wrapped title at render time, and the body starts below whatever
+ * that measurement returns.
+ *
+ * A constant height is what caused the last regression: a title that wrapped to
+ * two lines inside a box fixed at 0.54in collided with the body beneath it.
+ * There is no eyebrow above it any more, so the block starts at the clearance
+ * line and the space the eyebrow occupied belongs to the title.
  */
-export const EYEBROW: Box = { x: MARGIN, y: EDGE_CLEARANCE, w: SAFE.w - COUNTER_W - 0.2, h: 0.28 }
-export const TITLE: Box = { x: MARGIN, y: 0.8, w: SAFE.w - COUNTER_W - 0.2, h: 0.54 }
-export const COUNTER: Box = { x: SLIDE_W - MARGIN - COUNTER_W, y: EDGE_CLEARANCE, w: COUNTER_W, h: 0.28 }
+export const TITLE_TOP = EDGE_CLEARANCE
+export const TITLE_MIN_H = 0.62
+/** Clearance between the bottom of the title block and the top of the body. */
+export const TITLE_BODY_GAP = 0.3
+
+export const TITLE: Box = { x: MARGIN, y: TITLE_TOP, w: SAFE.w - COUNTER_W - 0.2, h: TITLE_MIN_H }
+export const COUNTER: Box = { x: SLIDE_W - MARGIN - COUNTER_W, y: TITLE_TOP + 0.1, w: COUNTER_W, h: 0.3 }
 export const FOOTER: Box = { x: MARGIN, y: SLIDE_H - EDGE_CLEARANCE - 0.28, w: SAFE.w, h: 0.28 }
+
+/**
+ * The body box for a MEASURED title height.
+ *
+ * Returns the region left once the title block and its gap are accounted for,
+ * so no caller can assume a constant header height.
+ */
+export function bodyBelow(titleHeight: number): Box {
+  const top = TITLE_TOP + Math.max(TITLE_MIN_H, titleHeight) + TITLE_BODY_GAP
+  return { x: MARGIN, y: top, w: SAFE.w, h: SLIDE_H - FOOTER_H - top }
+}
 
 /** Single-column body. */
 export const BODY: Box = { ...SAFE }

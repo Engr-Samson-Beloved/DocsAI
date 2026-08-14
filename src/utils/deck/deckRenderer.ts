@@ -28,8 +28,9 @@
  */
 
 import {
-  SLIDE_W, SLIDE_H, LAYOUT_NAME, MARGIN, SAFE, BODY, EYEBROW, TITLE, COUNTER, FOOTER,
-  COLUMN_L, COLUMN_R, HERO, rows, assertOnCanvas, FILL_LIMIT, type Box,
+  SLIDE_W, SLIDE_H, LAYOUT_NAME, MARGIN, SAFE, TITLE, COUNTER, FOOTER,
+  TITLE_TOP, TITLE_MIN_H, HERO, rows, columns, bodyBelow,
+  assertOnCanvas, FILL_LIMIT, type Box,
 } from './layout'
 import type { PresentationSpec } from './presentationSpec'
 import type { PlannedSlide, SlidePlan, SlideLayout } from './slidePlan'
