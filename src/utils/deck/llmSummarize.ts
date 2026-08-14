@@ -81,8 +81,20 @@ Other rules:
   or name to emphasise, and the likely examiner question. Fewer than 40 words is
   a failure; count them.
 - "takeaway" is one sentence, the spoken hook for the slide.
-- Return the SAME number of slides, in the SAME order, with the SAME layouts,
-  titles, eyebrows and sourceRefs as the draft.
+TITLES - rewrite every one:
+- 2 to 6 words. Name the SUBJECT of the slide, in the document's own vocabulary.
+- A title must never name a location in the document. Banned outright:
+  "Chapter One/Two/...", "Front Matter", "Table of Contents", "At a Glance",
+  "Overview", "Introduction" alone, "Summary of Existing Works", "Core
+  Concepts", "Theoretical Background" alone, "General", "Section 3", and any
+  leading section number.
+- No colon splicing two labels. One idea per title.
+- Prefer a title that states the finding: "RFID CUTS HOTEL ENERGY 20-35%" beats
+  "ADVANTAGES"; "WHY ENTERPRISE NETWORKS CONGEST" beats "INTRODUCTION".
+- Every title in the deck must be different from every other.
+
+- Return the SAME number of slides, in the SAME order, with the SAME layouts and
+  sourceRefs as the draft.
 - Return JSON only.`
 
 /**
