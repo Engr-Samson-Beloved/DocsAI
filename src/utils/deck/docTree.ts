@@ -1,4 +1,4 @@
-/**
+﻿/**
  * docTree.ts
  * ------------------------------------------------------------------
  * Builds the document STRUCTURE TREE the slide planner consumes, and parses
@@ -58,13 +58,13 @@ const ENTITIES: Record<string, string> = {
   quot: '"',
   apos: "'",
   nbsp: ' ',
-  ndash: '–',
-  mdash: '—',
-  rsquo: '’',
-  lsquo: '‘',
-  rdquo: '”',
-  ldquo: '“',
-  hellip: '…',
+  ndash: 'â€“',
+  mdash: 'â€”',
+  rsquo: 'â€™',
+  lsquo: 'â€˜',
+  rdquo: 'â€',
+  ldquo: 'â€œ',
+  hellip: 'â€¦',
 }
 
 export function decodeEntities(text: string): string {
@@ -371,7 +371,7 @@ export function buildDocTree(html: string): DocTree {
       const parsedChapter = parseChapterNumber(block.text)
       const clean = cleanHeading(block.text)
 
-      // "Table 2.1: Comparison of …" is a CAPTION, not a section heading, even
+      // "Table 2.1: Comparison of â€¦" is a CAPTION, not a section heading, even
       // when the document styles it as one. Treating it as a heading created a
       // section per caption - each carrying a real table, each numbered from
       // the running chapter counter - so the deck filled with duplicate table
@@ -502,8 +502,8 @@ export function buildDocTree(html: string): DocTree {
     //
     // A PDF reference list uses a hanging indent, so a single citation arrives
     // as several blocks and splitting each block separately cannot put them
-    // back together - it produced "…Computer Communication Review, 44(2), 87-"
-    // and "98. https://doi.org/…" as two separate "references". Rejoining first
+    // back together - it produced "â€¦Computer Communication Review, 44(2), 87-"
+    // and "98. https://doi.org/â€¦" as two separate "references". Rejoining first
     // and splitting once on the author-year boundary is the only way to
     // recover entry boundaries.
     references: splitReferenceEntries(references.join(' ')),
@@ -531,10 +531,10 @@ export function splitReferenceEntries(blob: string): string[] {
   // page range or DOI.
   //
   // The lookbehind is what keeps the split out of the middle of an author list.
-  // Without it, "Al-Shabibi, A., … & Snow, B. (2014)" split at every author and
+  // Without it, "Al-Shabibi, A., â€¦ & Snow, B. (2014)" split at every author and
   // the year filter kept only the tail, so the slide credited "Snow, B." for a
   // seven-author paper.
-  const boundary = /(?<=[.\d)])\s+(?=[A-Z][A-Za-z'’\-]{1,}(?:,\s+[A-Z]\.|\s+et\s+al\.))/g
+  const boundary = /(?<=[.\d)])\s+(?=[A-Z][A-Za-z'â€™\-]{1,}(?:,\s+[A-Z]\.|\s+et\s+al\.))/g
 
   return text
     .split(boundary)
@@ -580,169 +580,12 @@ function inferCoverBlocks(blocks: HtmlBlock[]): HtmlBlock[] {
   return signals >= 3 ? head : []
 }
 
-// --- Cover-page metadata ----------------------------------------------
-
-export interface CoverMetadata {
-  title: string | null
-  studentName: string | null
-  matricNo: string | null
-  department: string | null
-  school: string | null
-  institution: string | null
-  supervisorName: string | null
-  session: string | null
-  date: string | null
-  /** Fields the extractor could not find. The caller must ask, never guess. */
-  missing: string[]
-}
-
-const COVER_BOILERPLATE =
-  /^(a\s+)?(seminar|project|thesis|dissertation)?\s*(report|presentation|work)?\s*(submitted|presented|written)\b|^in partial fulfil?lment|^being a\b|^this (report|seminar)|^by:?$|^supervised by:?$|^submitted to:?$|^presented to:?$/i
-
-/** A label like "MATRIC NO:" possibly followed by its value on the same line. */
-function labelled(lines: string[], pattern: RegExp): string | null {
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    const m = line.match(pattern)
-    if (!m) continue
-
-    // Value on the same line, after the label.
-    const inline = line.slice(m.index! + m[0].length).replace(/^[\s:.\-–—]+/, '').trim()
-    if (inline && inline.length > 1) return inline
-
-    // Otherwise the next non-empty, non-boilerplate line.
-    for (let j = i + 1; j < lines.length; j++) {
-      const next = lines[j].trim()
-      if (!next) continue
-      if (COVER_BOILERPLATE.test(next)) continue
-      return next
-    }
-  }
-  return null
-}
-
-function firstMatch(lines: string[], pattern: RegExp): string | null {
-  for (const line of lines) {
-    const m = line.match(pattern)
-    if (m) return (m[1] ?? m[0]).trim()
-  }
-  return null
-}
-
-/**
- * Reads the identity block off the cover page.
- *
- * Returns null for anything it cannot find and lists it in `missing`. It never
- * falls back to the filename: "PRINCEWILL SEMINAR(SDN)" as a title slide is the
- * defect this replaces, and a wrong-but-plausible value is worse than an
- * explicit prompt to the user.
- */
-export function extractCover(rawLines: string[]): CoverMetadata {
-  const lines = rawLines
-    .flatMap(l => l.split(/\n+/))
-    .map(l => l.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-
-  // Most covers label the matric number; this one does not - it sits bare under
-  // the student's name as "F/HD/24/3410037". Fall back to the ID shape: a
-  // slash-separated alphanumeric token containing digits.
-  const matricNo =
-    labelled(lines, /\bmatric(?:ulation)?\s*(?:no\.?|number)?\b/i) ??
-    firstMatch(lines, /^([A-Z0-9]{1,6}(?:\/[A-Z0-9]{1,10}){2,})[.,]?$/i)
-
-  const supervisorName = labelled(lines, /\bsupervis(?:ed\s+by|or)\b/i)
-  const department = firstMatch(lines, /\bdepartment\s+of\s+(.+?)[.,]?\s*$/i)
-  const school = firstMatch(lines, /\b((?:school|faculty)\s+of\s+.+?)[.,]?\s*$/i)
-  // Trailing punctuation is common ("YABA COLLEGE OF TECHNOLOGY,") and must not
-  // stop the line from matching.
-  const institution = firstMatch(
-    lines,
-    /^([A-Z][A-Za-z'.\- ]*(?:college of technology|polytechnic|university|institute of technology))[.,]?\s*$/i
-  )
-  const session = firstMatch(lines, /\b(20\d{2}\s*\/\s*20\d{2})\b/)
-  const date = firstMatch(lines, /\b((?:january|february|march|april|may|june|july|august|september|october|november|december)[,\s]+20\d{2})\b/i)
-
-  // The student's name follows a "BY" line on every cover in /sample.
-  let studentName = labelled(lines, /^\s*by\s*:?\s*$/i)
-  if (!studentName) studentName = labelled(lines, /\bpresented\s+by\b/i)
-  // A matric number directly beneath the name is the usual layout; if the "BY"
-  // capture grabbed the number instead, step back one line.
-  if (studentName && /\d{2,}/.test(studentName) && matricNo && studentName.includes(matricNo)) {
-    const idx = lines.findIndex(l => l.includes(matricNo))
-    studentName = idx > 0 ? lines[idx - 1] : null
-  }
-
-  const title = extractCoverTitle(lines, { institution, department, studentName, supervisorName })
-
-  const found = { title, studentName, matricNo, department, school, institution, supervisorName, session, date }
-  const missing = Object.entries(found)
-    .filter(([, v]) => !v)
-    .map(([k]) => k)
-
-  return { ...found, missing }
-}
-
-/**
- * The report's real title.
- *
- * Picked as the longest cover line that is not boilerplate, not a labelled
- * field, and not one of the values already identified. On the /sample covers
- * the title is also the longest such line by a wide margin, which makes this
- * stable without needing font sizes.
- */
-function extractCoverTitle(
-  lines: string[],
-  known: { institution: string | null; department: string | null; studentName: string | null; supervisorName: string | null }
-): string | null {
-  const explicit = labelled(lines, /^\s*(?:topic|title)\s*:?\s*/i)
-  if (explicit && explicit.length > 10) return tidyTitle(explicit)
-
-  const knownValues = Object.values(known).filter(Boolean).map(v => (v as string).toLowerCase())
-
-  const isCandidate = (line: string): boolean => {
-    const l = line.toLowerCase()
-    if (line.length < 8 || line.length > 220) return false
-    if (COVER_BOILERPLATE.test(line)) return false
-    if (/\b(matric|supervis|department|faculty|school of|session|higher national diploma|\bhnd\b|\bnd\b|in partial)\b/i.test(line)) return false
-    if (/(college of technology|polytechnic|university|institute of technology)/i.test(line)) return false
-    if (knownValues.some(v => v && (l.includes(v) || v.includes(l)))) return false
-    if (/^\d/.test(line)) return false
-    return true
-  }
-
-  // A cover title is usually set large and wraps over two or three lines. Taking
-  // the single longest line truncates it - the SDN report's title came out as
-  // "SOFTWARE DEFINED NETWORKING (SDN) FOR TRAFFIC", losing "MANAGEMENT IN
-  // ENTERPRISE NETWORKS" from the following line. Consecutive candidate lines
-  // are therefore joined into runs, and the longest RUN wins.
-  const runs: string[][] = []
-  let run: string[] = []
-  for (const line of lines) {
-    if (isCandidate(line)) {
-      run.push(line)
-    } else if (run.length > 0) {
-      runs.push(run)
-      run = []
-    }
-  }
-  if (run.length > 0) runs.push(run)
-
-  if (runs.length === 0) return null
-
-  const best = runs.sort((a, b) => b.join(' ').length - a.join(' ').length)[0]
-  const joined = tidyTitle(best.join(' '))
-  return joined.length >= 12 ? joined : null
-}
+// --- Caption helpers ---------------------------------------------------
 
 /**
  * Removes the page number a "List of Tables" entry drags along:
- * "Classification of RFID Systems by Frequency Range 8" -> "… Frequency Range".
+ * "Classification of RFID Systems by Frequency Range 8" -> "... Frequency Range".
  */
 function stripTrailingPageNumber(text: string): string {
   return text.replace(/\s*\.{2,}\s*\d{1,3}\s*$/, '').replace(/\s+\d{1,3}\s*$/, '').trim()
-}
-
-/** ALL-CAPS cover titles are kept, but stray punctuation and runs are cleaned. */
-function tidyTitle(text: string): string {
-  return text.replace(/\s+/g, ' ').replace(/^[\s"'“”]+|[\s"'“”.]+$/g, '').trim()
 }

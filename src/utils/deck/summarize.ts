@@ -25,7 +25,8 @@
  *   - one `takeaway` per slide, and 40-70 words of speaker notes
  */
 
-import { lintBullet, duplicateKey, wordCount, segmentSentences, hasFiniteVerb } from './textNormalize'
+import { duplicateKey, wordCount, segmentSentences, hasFiniteVerb } from './textNormalize'
+import { rewriteUntilClaim, headSubject } from './claims'
 import type { PresentationSpec } from './presentationSpec'
 
 // --- Phrase-level compression ----------------------------------------
@@ -381,43 +382,36 @@ export function summarizeToBullets(sentences: string[], options: SummarizeOption
 
   const localSeen = new Set<string>(seen ?? [])
 
-  /**
-   * Compress at `wordBudget` and keep only what passes the lint.
-   *
-   * Run twice when necessary: the tight ideal budget forces `reduceToWords` to
-   * shorten, and it refuses to cut mid-thought, so a sentence that yields
-   * nothing at 10 words often yields a clean bullet at the 14-word maximum.
-   * Without the retry, tightening the compressor left slides with one bullet.
-   */
-  const gather = (wordBudget: number) =>
-    scoreSentences(usable)
-      .map(s => ({ ...s, bullet: compressSentence(s.text, wordBudget) }))
-      .filter(s => {
-      if (!s.bullet) return false
-      // The summariser's own output may legitimately be a noun phrase, so the
-      // verb requirement is relaxed here; it still must not be a fragment in
-      // any other respect.
-      const problems = lintBullet(s.bullet, {
-        maxWords: spec.deck.maxWordsPerBullet,
-        requireVerb: false,
-        seen: localSeen,
-      })
-      return problems.length === 0
-    })
+  // Every candidate goes through the rewrite-and-verify loop: compress, check
+  // that the result is a CLAIM, retry at another budget, and drop it if it
+  // never becomes one. Nothing is truncated to fit.
+  const usedSubjects = new Set<string>()
 
-  let candidates = gather(budget)
-  const MIN_BULLETS = 3
-  if (candidates.length < MIN_BULLETS && budget < spec.deck.maxWordsPerBullet) {
-    const relaxed = gather(spec.deck.maxWordsPerBullet)
-    if (relaxed.length > candidates.length) candidates = relaxed
-  }
+  const candidates = scoreSentences(usable)
+    .map(s => ({
+      ...s,
+      bullet: rewriteUntilClaim(wordBudget => compressSentence(s.text, wordBudget), {
+        idealWords: budget,
+        maxWords: spec.deck.maxWordsPerBullet,
+        usedSubjects,
+      }),
+    }))
+    .filter(s => s.bullet.length > 0)
 
   const picked: typeof candidates = []
   for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
     if (picked.length >= count) break
+
     const key = duplicateKey(candidate.bullet)
     if (localSeen.has(key)) continue
+
+    // Re-check against the subjects actually accepted, not merely offered:
+    // two bullets that both open on "SDN controller" say one thing twice.
+    const subject = headSubject(candidate.bullet)
+    if (subject && subject.length > 3 && usedSubjects.has(subject)) continue
+
     localSeen.add(key)
+    if (subject) usedSubjects.add(subject)
     picked.push(candidate)
   }
 

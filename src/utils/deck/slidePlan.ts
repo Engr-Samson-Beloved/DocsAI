@@ -23,11 +23,12 @@ import { lintBullet, duplicateKey, wordCount } from './textNormalize'
 
 export type SlideLayout =
   | 'title'
-  | 'section'
   | 'bullets'
+  | 'cards'
   | 'comparison'
   | 'stat'
   | 'process'
+  | 'diagram'
   | 'table'
   | 'quote'
   | 'references'
@@ -35,19 +36,26 @@ export type SlideLayout =
 
 /** Layouts a content model is allowed to choose. */
 export const CONTENT_LAYOUTS: SlideLayout[] = [
-  'bullets', 'comparison', 'stat', 'process', 'table', 'quote', 'section', 'closing',
+  'bullets', 'cards', 'comparison', 'stat', 'process', 'diagram', 'table', 'quote', 'closing',
 ]
 
 /** Every layout the renderer can draw, including the ones only it creates. */
-export const ALL_LAYOUTS: SlideLayout[] = [
-  'title', 'references', ...CONTENT_LAYOUTS,
-]
+export const ALL_LAYOUTS: SlideLayout[] = ['title', 'references', ...CONTENT_LAYOUTS]
 
 /**
  * Layouts whose content is the deck metadata rather than body copy. They carry
  * no bullets by design, so the "a slide must say something" rule does not apply.
+ *
+ * `section` is deliberately absent: chapter dividers were removed. A divider
+ * whose entire content is "CHAPTER THREE" plus a list of headings tells the
+ * audience where they are in the document, not what is being argued.
  */
-export const STRUCTURAL_LAYOUTS: SlideLayout[] = ['title', 'closing', 'section']
+export const STRUCTURAL_LAYOUTS: SlideLayout[] = ['title', 'closing']
+
+/** Layouts that are not a plain list of bullets, for the variety rule. */
+export const NON_BULLET_CONTENT: SlideLayout[] = [
+  'cards', 'comparison', 'stat', 'process', 'diagram', 'table', 'quote',
+]
 
 /** Layouts that are not a plain title-and-bullets slide, for the variety rule. */
 export const NON_BULLET_LAYOUTS: SlideLayout[] = ['comparison', 'stat', 'process', 'table', 'quote']
@@ -76,8 +84,19 @@ export interface SlideTable {
 export interface PlannedSlide {
   layout: SlideLayout
   title: string
-  /** Source-derived label, e.g. "Chapter Two". Never invented. */
-  eyebrow?: string
+  /**
+   * One line under the deck title, on the title slide only.
+   *
+   * There is no `eyebrow`. It carried "Chapter Two" above every title, which
+   * named the text's location in the document rather than its subject, and cost
+   * the title the vertical space it now uses.
+   */
+  subtitle?: string
+  /**
+   * One sentence stating what the reader should conclude, printed under a table
+   * or diagram. Also what stops a three-row table leaving half the slide empty.
+   */
+  caption?: string
   bullets?: string[]
   /**
    * Shortened citations for the references slide.
@@ -304,17 +323,24 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
         note('bullets', `"${flat.slice(0, 40)}..." exceeded ${spec.deck.maxWordsPerBullet} words; trimmed`, true)
       }
 
-      const problems = lintBullet(candidate, {
+      // The full claim test, not the old surface lint: a bullet must be a
+      // statement someone could agree or disagree with.
+      const problems = isCompleteClaim(candidate, {
         maxWords: spec.deck.maxWordsPerBullet,
-        requireVerb: false,
-        seen,
+        usedSubjects,
       })
       if (problems.length > 0) {
         note('bullets', `dropped "${candidate.slice(0, 40)}..." (${problems.join(', ')})`, true)
         continue
       }
+      if (seen.has(duplicateKey(candidate))) {
+        note('bullets', `dropped a duplicate of an earlier bullet`, true)
+        continue
+      }
 
       seen.add(duplicateKey(candidate))
+      const subject = headSubject(candidate)
+      if (subject) usedSubjects.add(subject)
       cleaned.push(candidate)
     }
 
