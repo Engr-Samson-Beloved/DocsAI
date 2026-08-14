@@ -498,6 +498,7 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
     const slide: PlannedSlide = {
       layout: draft.layout,
       title,
+      role: draft.role,
       bullets: draft.bullets,
       steps: draft.steps,
       columns: draft.columns,
