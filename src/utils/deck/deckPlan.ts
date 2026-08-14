@@ -21,7 +21,7 @@
  * the label cannot drift from the content.
  */
 
-import type { DocSectionNode, DocTree } from './docTree'
+import type { DocSectionNode, DocTable, DocTree } from './docTree'
 import type { PresentationSpec } from './presentationSpec'
 import type { PlannedSlide, SlidePlan, SlideStep, DeckMetadata } from './slidePlan'
 import { summarizeToBullets, deriveTakeaway, buildSpeakerNotes, compressSentence } from './summarize'
