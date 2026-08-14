@@ -119,7 +119,7 @@ export async function exportPresentationPptx(
   // the document it was given, so nothing carries over from a previous run.
   const metadata: DeckMetadata = {
     title: cover.title ?? supplied(meta.title) ?? '',
-    studentName: cover.studentName ?? supplied(meta.studentName) ?? '',
+    studentName: cover.author ?? supplied(meta.studentName) ?? '',
     matricNo: cover.matricNo ?? supplied(meta.matricNo) ?? '',
     department: cover.department ?? supplied(meta.department) ?? '',
     school: cover.school ?? supplied(meta.school) ?? '',

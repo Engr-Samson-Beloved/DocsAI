@@ -104,7 +104,7 @@ if (missing.length > 0) {
 console.log('[3/6] planning the deck')
 const metadata = {
   title: tree.metadata.title ?? '',
-  studentName: tree.metadata.studentName ?? '',
+  studentName: tree.metadata.author ?? '',
   matricNo: tree.metadata.matricNo ?? '',
   department: tree.metadata.department ?? '',
   school: tree.metadata.school ?? '',
@@ -202,8 +202,8 @@ console.log(`non-bullet   ${nonBullet.length}/${content.length} content slides`)
 console.log(`notes        min ${Math.min(...report.slides.map(s => s.notesWordCount))} words`)
 for (const s of report.slides) {
   console.log(
-    `  ${String(s.index).padStart(2)}. [${s.layout.padEnd(10)}] ${s.title.slice(0, 46).padEnd(46)} ` +
-      `${(s.eyebrow || '-').padEnd(14)} ${s.sourceRefs.join(' ')}`
+    `  ${String(s.index).padStart(2)}. [${s.layout.padEnd(10)}] ${s.title.slice(0, 48).padEnd(48)} ` +
+      `${s.sourceRefs.join(' ')}`
   )
 }
 
