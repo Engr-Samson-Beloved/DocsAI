@@ -27,8 +27,16 @@ interface PdfLine {
   y: number
 }
 
-/** Builds a minimal but structurally valid single-page PDF with a real xref table. */
-function buildPdf(lines: PdfLine[]): Uint8Array {
+/**
+ * Builds a minimal but structurally valid single-page PDF with a real xref table.
+ *
+ * The return type is inferred deliberately. Annotating it `Uint8Array` widens to
+ * `Uint8Array<ArrayBufferLike>`, which is not assignable to `BlobPart`, so every
+ * `new File([buildPdf(...)])` below fails to type-check. Inference from
+ * `TextEncoder.encode` gives the narrower `Uint8Array<ArrayBuffer>` that `File`
+ * actually accepts.
+ */
+function buildPdf(lines: PdfLine[]) {
   const content = lines
     .map(l => `BT /F1 12 Tf 72 ${l.y} Td (${l.text.replace(/([()\\])/g, '\\$1')}) Tj ET`)
     .join('\n')

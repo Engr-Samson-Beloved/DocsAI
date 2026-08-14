@@ -27,6 +27,17 @@
  */
 
 import { normalizeExtractedText, segmentSentences } from './textNormalize'
+import { parseCover, type CoverMetadata } from './coverMetadata'
+import {
+  partFromHeading,
+  looksLikeTocBlock,
+  looksLikeTocLine,
+  looksLikeListingLine,
+  stripSectionNumbering,
+  cleanSourceSentence,
+  NON_CONTENT_PARTS,
+  type PartKind,
+} from './documentParts'
 
 // --- Minimal HTML scanning -------------------------------------------
 
@@ -186,6 +197,8 @@ export interface DocSectionNode {
   heading: string
   level: number
   kind: 'front' | 'chapter' | 'back'
+  /** What this section IS. Only 'body' and 'abstract' may reach the planner. */
+  part: PartKind
   paragraphs: string[]
   /** Complete sentences from `paragraphs`, ready for summarisation. */
   sentences: string[]
@@ -201,6 +214,8 @@ export interface DocTree {
   references: string[]
   metadata: CoverMetadata
 }
+
+export { parseCover, CoverConflictError, type CoverMetadata } from './coverMetadata'
 
 const NUM_WORDS = [
   '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
@@ -265,6 +280,7 @@ function newNode(heading: string, level: number, chapter: number | null): DocSec
     : 'chapter'
 
   return {
+    part: partFromHeading(heading) ?? 'body',
     id: sectionId(heading, chapter),
     chapter,
     chapterLabel: chapter !== null && NUM_WORDS[chapter] ? `Chapter ${NUM_WORDS[chapter]}` : null,
@@ -324,6 +340,16 @@ export function buildDocTree(html: string): DocTree {
   let inReferences = false
 
   const push = (node: DocSectionNode) => {
+    // Front matter is dropped here rather than filtered later, so no downstream
+    // stage can be tempted by it. A table of contents that reaches the planner
+    // becomes a slide of numbered headings; the only safe place to lose it is
+    // at the door.
+    if (NON_CONTENT_PARTS.includes(node.part)) return
+
+    // A section whose body is mostly contents lines IS a table of contents,
+    // whatever its heading claims - conversion frequently drops the heading.
+    if (node.paragraphs.length >= 3 && looksLikeTocBlock(node.paragraphs)) return
+
     const hasContent =
       node.paragraphs.length > 0 ||
       node.listItems.length > 0 ||
@@ -448,6 +474,10 @@ export function buildDocTree(html: string): DocTree {
         continue
       }
 
+      // Individual contents/listing lines can survive inside an otherwise
+      // ordinary section when the front matter was never headed.
+      if (looksLikeTocLine(block.text) || looksLikeListingLine(block.text)) continue
+
       current.paragraphs.push(block.text)
       current.wordCount += block.text.split(/\s+/).length
     }
@@ -455,11 +485,15 @@ export function buildDocTree(html: string): DocTree {
 
   if (current) push(current)
 
-  // Segment once, here, so no downstream stage is tempted to split on newlines.
+  // Segment once, here, so no downstream stage is tempted to split on newlines,
+  // and screen every sentence before anything can select it: section numbering
+  // removed, cross-references stripped, scaffolding and stray captions dropped.
   for (const section of sections) {
-    section.sentences = section.paragraphs.flatMap(p =>
-      segmentSentences(normalizeExtractedText(p))
-    )
+    section.heading = stripSectionNumbering(section.heading)
+    section.sentences = section.paragraphs
+      .flatMap(p => segmentSentences(normalizeExtractedText(p)))
+      .map(cleanSourceSentence)
+      .filter(Boolean)
   }
 
   return {
@@ -473,7 +507,7 @@ export function buildDocTree(html: string): DocTree {
     // and splitting once on the author-year boundary is the only way to
     // recover entry boundaries.
     references: splitReferenceEntries(references.join(' ')),
-    metadata: extractCover(coverBlocks.map(b => b.text).filter(Boolean)),
+    metadata: parseCover(coverBlocks.map(b => b.text).filter(Boolean)),
   }
 }
 

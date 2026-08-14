@@ -10,14 +10,14 @@
   // Run: npx tsc -p tsconfig.scripts.json
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    // The whole reason this file exists.
+    // The whole reason this file exists. Everything else is inherited on
+    // purpose: overriding `module`/`moduleResolution` to nodenext makes TS treat
+    // the app's .ts files as CommonJS (the package has no "type": "module"),
+    // which then rejects `import.meta` in code that Next compiles as ESM
+    // perfectly happily. Those would be false positives, and a checker that
+    // cries wolf gets switched off.
     "allowImportingTsExtensions": true,
-    "noEmit": true,
-    // Node tooling, not browser code: no DOM lib, and module resolution that
-    // matches how Node actually loads these files.
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "types": ["node"]
+    "noEmit": true
   },
   "include": ["scripts/**/*.mts", "scripts/**/*.ts", "tests/**/*.mts", "src/**/*.ts"],
   "exclude": ["node_modules", "scratch", ".next"]
