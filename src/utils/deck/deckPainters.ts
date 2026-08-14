@@ -444,7 +444,7 @@ export function paintProcess(
       x: cell.x + pad,
       y: badge.y + badge.h + 0.12,
       w: cell.w - pad * 2,
-      h: hasBodies ? 0.6 : cell.h - (badge.h + pad * 2 + 0.12),
+      h: hasBodies ? titleH : cell.h - (badge.h + pad * 2 + 0.12),
     }
     rec.text(`step-title-${i}`, titleBox, step.title, {
       role: 'body',
