@@ -185,7 +185,7 @@ function toDraftShape(slide: PlannedSlide) {
   return {
     layout: slide.layout,
     title: slide.title,
-    eyebrow: slide.eyebrow,
+    caption: slide.caption,
     bullets: slide.bullets,
     columns: slide.columns,
     stat: slide.stat,
@@ -229,10 +229,19 @@ function mergeWithDraft(draft: SlidePlan, response: unknown): SlidePlan {
         columns: Array.isArray(proposed.columns) && proposed.columns.length > 0 ? proposed.columns : original.columns,
         steps: Array.isArray(proposed.steps) && proposed.steps.length > 0 ? proposed.steps : original.steps,
         stat: proposed.stat?.value ? proposed.stat : original.stat,
+        // The model MAY rewrite the title - naming the subject is exactly the
+        // job it is better at than a rule - but a bad one cannot ship: the gate
+        // rejects banned vocabulary, duplicates and anything over six words.
+        title:
+          typeof proposed.title === 'string' && proposed.title.trim().length >= 3
+            ? proposed.title.trim()
+            : original.title,
+        caption:
+          typeof proposed.caption === 'string' && proposed.caption.trim()
+            ? proposed.caption.trim()
+            : original.caption,
         // Structure the model may NOT change.
         layout: layoutOk && proposed.layout === original.layout ? original.layout : original.layout,
-        title: original.title,
-        eyebrow: original.eyebrow,
         table: original.table,
         citations: original.citations,
         sourceRefs: original.sourceRefs,

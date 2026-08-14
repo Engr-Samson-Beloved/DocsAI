@@ -18,7 +18,7 @@
 import type { RenderReport, RenderedShape } from './deckRenderer'
 import { shapeFillRatio } from './deckRenderer'
 import type { SlidePlan } from './slidePlan'
-import { eyebrowMismatch } from './slidePlan'
+import { NON_BULLET_CONTENT, STRUCTURAL_LAYOUTS } from './slidePlan'
 import type { PresentationSpec } from './presentationSpec'
 import { contrastRatio, DEFAULT_SPEC } from './presentationSpec'
 import { canvasViolation, EDGE_CLEARANCE, SLIDE_W, SLIDE_H, FILL_LIMIT } from './layout'
@@ -258,11 +258,6 @@ export function checkProvenance(report: RenderReport, plan: SlidePlan): QaFindin
     if (slide.sourceRefs.length === 0 || slide.sourceRefs.every(r => !r.trim())) {
       findings.push(err('provenance', `slide "${slide.title}" has no sourceRefs`, slide.index))
     }
-  }
-
-  for (const slide of plan.slides) {
-    const mismatch = eyebrowMismatch(slide)
-    if (mismatch) findings.push(err('provenance', `slide "${slide.title}": ${mismatch}`))
   }
 
   return findings

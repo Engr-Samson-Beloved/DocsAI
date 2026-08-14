@@ -736,7 +736,7 @@ function buildClosingSlide(metadata: DeckMetadata, spec: PresentationSpec): Plan
       `limitation ready, because those attract the first questions. If asked something outside ` +
       `the scope of the seminar, say so plainly and offer what your sources do support.`,
     sourceRefs: ['closing'],
-    takeaway: `${metadata.author} closes and takes questions`,
+    takeaway: `${metadata.studentName} closes and takes questions`,
   }
 }
 
