@@ -216,7 +216,18 @@ export function headingConvention(level: number, rawText: string): HeadingFormat
  * and runs 12.13in wide, and body text sits at 19-20pt.
  */
 export const DECK_STYLE = {
-  slide: { widthIn: 13.333, heightIn: 7.5, layout: 'LAYOUT_16x9' as const },
+  /**
+   * 13.333 x 7.5in - PowerPoint's true widescreen canvas, and the size both
+   * approved decks in /sample use.
+   *
+   * `layout` is the name of a CUSTOM layout the exporter registers, NOT a
+   * pptxgenjs preset. The preset called 'LAYOUT_16x9' is 10 x 5.625in; the deck
+   * shipped with that token while every coordinate below was measured against
+   * 13.333 x 7.5, so roughly 2.7in of every slide (page numbers, footers and the
+   * right quarter of the body column) rendered off-canvas. Keep this name
+   * distinct from any preset so the mix-up cannot recur.
+   */
+  slide: { widthIn: 13.333, heightIn: 7.5, layout: 'WORDPI_WIDE' as const },
 
   /** Full-bleed content column. */
   marginIn: 0.6,
@@ -263,7 +274,46 @@ export const DECK_STYLE = {
   /** Slide count and density. Guideline: 12-15 slides, one main idea per slide. */
   deck: { minSlides: 12, maxSlides: 15, maxBulletsPerSlide: 6 },
 
+  /**
+   * Numbered-step rows (approved deck: objectives laid out as numbered badges
+   * rather than a bullet list). A filled circle carries the number, with the
+   * step text set beside it.
+   */
+  steps: {
+    badgeIn: 0.46,
+    firstYIn: 3.2,
+    strideIn: 0.72,
+    textXIn: 1.25,
+    textWidthIn: 11.4,
+    numberPt: 18,
+    textPt: 18,
+    maxSteps: 5,
+  },
+
+  /**
+   * Two-panel comparison (approved deck: "STATIC, RULE-BASED CONTROL" beside
+   * "LEARNING-BASED CONTROL"), each panel a rounded card with a caption strip.
+   */
+  comparison: {
+    yIn: 1.5,
+    heightIn: 4.5,
+    leftXIn: 0.6,
+    leftWidthIn: 5.6,
+    rightXIn: 7.15,
+    rightWidthIn: 5.55,
+    padIn: 0.35,
+    captionPt: 22,
+    bodyPt: 18,
+  },
+
+  /**
+   * Heading/body type pairing measured from both approved decks: Arial carries
+   * the headings, Calibri the body. The exporter previously set Arial for
+   * everything, which reads flatter than the accredited samples.
+   */
   font: 'Arial',
+  headingFont: 'Arial',
+  bodyFont2: 'Calibri',
 } as const
 
 /**

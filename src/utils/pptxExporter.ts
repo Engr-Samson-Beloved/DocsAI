@@ -89,6 +89,13 @@ const BODY_BOTTOM = BODY_TOP + BODY_H
 // Body 18-22pt, floor 16pt. The approved deck sets slide headers at 36pt - the
 // exporter previously used 24pt, which reads as a subtitle from the back of a hall.
 const FONT = DECK_STYLE.font
+/**
+ * Both approved decks pair a grotesque for headings with a humanist for body
+ * copy (Arial / Calibri). Setting one face everywhere, as this exporter did,
+ * flattens the hierarchy the samples rely on.
+ */
+const HEAD_FONT = DECK_STYLE.headingFont
+const BODY_FACE = DECK_STYLE.bodyFont2
 const TITLE_FONT = DECK_STYLE.titleSlide.title.sizePt
 const HEADER_FONT = DECK_STYLE.header.sizePt
 const SUBHEADER_FONT = 18
@@ -448,9 +455,52 @@ function trimToLength(text: string, maxChars: number): string {
   return text.slice(0, space > floor ? space : maxChars).replace(/[,;\s]+$/, '')
 }
 
-/** Turns a full academic sentence into slide-shaped text. */
+/**
+ * True when a candidate reads as the middle of somebody else's sentence.
+ *
+ * Imported PDFs and DOCX files break paragraphs on layout, not grammar, so the
+ * sentence splitter regularly hands back continuations like "Compete effectively
+ * on the international stage, which in turn limits ...". Rendered as bullets and
+ * force-capitalised, those look like statements the student wrote, and the
+ * accredited decks contain nothing of the kind.
+ */
+function isSentenceFragment(text: string): boolean {
+  const s = text.trim()
+  if (!s) return true
+
+  // Opens with a lowercase word: unambiguously a continuation.
+  if (/^[a-z]/.test(s)) return true
+
+  // Opens with a word that cannot start an independent clause.
+  if (/^(and|but|or|nor|yet|so|which|that|because|although|though|whereas|while|since|as|if|unless|until|whether|thus|hence)\b/i.test(s)) {
+    return true
+  }
+
+  // Opens with a subordinating participle/preposition fragment, e.g.
+  // "Border data-governance regimes ...", "Skills, particularly in ...".
+  if (/^(?:[A-Z][a-z]+),\s/.test(s)) return true
+
+  // Unbalanced brackets mean the clause was cut out of a longer construction.
+  const open = (s.match(/\(/g) || []).length
+  const close = (s.match(/\)/g) || []).length
+  if (open !== close) return true
+
+  return false
+}
+
+/**
+ * Turns a full academic sentence into slide-shaped text.
+ *
+ * Returns '' when the input is a mid-sentence fragment. Callers drop those
+ * rather than presenting them as bullets: a dangling clause with a capital
+ * letter bolted on reads as a broken statement to an examiner.
+ */
 function condense(sentence: string, maxChars: number): string {
   let s = cleanBulletText(sentence)
+
+  // Dot leaders from an imported table of contents:
+  // "Development of the African Tech Ecosystem ..............."
+  s = s.replace(/\s*\.{4,}\s*\d*\s*$/, '')
 
   s = s.replace(HEDGES, '')
   s = s.replace(LEAD_INS, '')
@@ -458,6 +508,10 @@ function condense(sentence: string, maxChars: number): string {
   s = s.replace(/\s*\[\d+(?:\s*[,-]\s*\d+)*\]/g, '') // [12], [3, 4]
   s = s.replace(/\s+([,.;:])/g, '$1')
   s = s.replace(/\s+/g, ' ').trim()
+
+  // Judge the fragment before trimming: stripping a lead-in can leave a clause
+  // that only looked complete because of the connector in front of it.
+  if (isSentenceFragment(s)) return ''
 
   s = trimToLength(s, maxChars)
   s = s.replace(/[.\s]+$/, '') // slide bullets do not take terminal periods
@@ -508,7 +562,14 @@ function summarizeProse(paragraphs: string[], limit: number, maxChars: number): 
     return { text: s.text, index: s.index, score }
   })
 
-  const picked = [...scored]
+  // Condense BEFORE the top-`limit` cut. Fragments are dropped by condense(),
+  // and discarding them afterwards would silently under-fill the slide - the
+  // selection has to choose among sentences that will actually survive.
+  const usable = scored
+    .map(s => ({ ...s, bullet: condense(s.text, maxChars) }))
+    .filter(s => s.bullet.length > 12)
+
+  const picked = [...usable]
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .sort((a, b) => a.index - b.index) // restore document order
@@ -516,11 +577,10 @@ function summarizeProse(paragraphs: string[], limit: number, maxChars: number): 
   const seen = new Set<string>()
   const out: string[] = []
   for (const s of picked) {
-    const bullet = condense(s.text, maxChars)
-    const key = bullet.toLowerCase().slice(0, 60)
-    if (bullet.length > 12 && !seen.has(key)) {
+    const key = s.bullet.toLowerCase().slice(0, 60)
+    if (!seen.has(key)) {
       seen.add(key)
-      out.push(bullet)
+      out.push(s.bullet)
     }
   }
   return out
@@ -540,8 +600,20 @@ interface SlideSpec {
   subHeaderText?: string
   bullets: Bullet[]
   tableRows?: string[][]
-  /** References render as a compact list rather than bullets. */
-  variant?: 'bullets' | 'table' | 'references'
+  /**
+   * How the body is laid out.
+   *  bullets    - single column list (the default)
+   *  table      - a rendered table
+   *  references - compact citation list
+   *  steps      - numbered badge rows, for aims and objectives
+   *  sidebar    - narrative column with concept cards alongside
+   *
+   * `steps` and `sidebar` mirror the approved decks in /sample, which vary the
+   * layout per slide instead of repeating one template for the whole deck.
+   */
+  variant?: 'bullets' | 'table' | 'references' | 'steps' | 'sidebar'
+  /** sidebar variant: card labels taken from the section's sub-headings. */
+  cards?: { label: string; detail: string }[]
 }
 
 /** Presentation importance by section topic - what a seminar audience needs. */
@@ -905,7 +977,9 @@ function bulletsFrom(subsections: Subsection[], slideQuota: number, references: 
   const perSubsection = Math.max(1, Math.round(targetBullets / subsectionCount))
 
   const push = (text: string, kind: BulletKind) => {
-    const clean = cleanBulletText(text)
+    // Headings lifted straight from an imported table of contents drag their dot
+    // leaders and page number along: "Barriers to Global Scaling ....... 14".
+    const clean = cleanBulletText(text).replace(/\s*\.{4,}\s*\d*\s*$/, '').trim()
     if (!clean || clean.length < 4 || isNoiseText(clean)) return
     const key = clean.toLowerCase().slice(0, 60)
     if (seen.has(key)) return
@@ -1042,7 +1116,161 @@ function buildProportionalSpecs(usable: DocSection[], contentBudget: number): Sl
   return specs
 }
 
+// --- Phase 3b: Layout planning -------------------------------------
+
+const OBJECTIVE_HEADER = /\b(aim|objective|goal)s?\b/i
+
+/**
+ * Chooses a body layout per slide.
+ *
+ * Content selection has already happened; this only decides how a slide is
+ * arranged. Both approved decks in /sample use a different arrangement on most
+ * slides (numbered badges for objectives, a narrative column beside concept
+ * cards, panels, tables), where this exporter previously repeated one bullet
+ * template for all 13 content slides.
+ *
+ * Nothing here invents content: `steps` renumbers the bullets it was given, and
+ * `sidebar` promotes sub-headings the document already carries into cards.
+ */
+export function planLayouts(specs: SlideSpec[]): SlideSpec[] {
+  let sinceSidebar = 0
+
+  return specs.map(spec => {
+    // Tables and reference lists already have a dedicated treatment.
+    if (spec.variant === 'table' || spec.variant === 'references') return spec
+
+    const points = spec.bullets.filter(b => b.kind !== 'sub')
+    const subs = spec.bullets.filter(b => b.kind === 'sub')
+
+    // Aims and objectives read as an enumerated list, not prose bullets.
+    if (
+      OBJECTIVE_HEADER.test(spec.headerText) &&
+      points.length >= 3 &&
+      points.length <= DECK_STYLE.steps.maxSteps
+    ) {
+      sinceSidebar++
+      return { ...spec, variant: 'steps' as const, bullets: points }
+    }
+
+    // A section that carries its own sub-headings can show them as cards beside
+    // the narrative. Spaced out so the deck alternates rather than repeats.
+    if (subs.length >= 2 && points.length >= 2 && sinceSidebar >= 2) {
+      sinceSidebar = 0
+      return {
+        ...spec,
+        variant: 'sidebar' as const,
+        bullets: points,
+        cards: subs.slice(0, DECK_STYLE.sidebar.maxCards).map(s => ({
+          label: trimToLength(s.text, 34),
+          detail: '',
+        })),
+      }
+    }
+
+    sinceSidebar++
+    return spec
+  })
+}
+
 // --- Phase 4: Render -----------------------------------------------
+
+/** Numbered badge rows - the approved deck's objectives slide. */
+function renderSteps(slide: any, spec: SlideSpec) {
+  const st = DECK_STYLE.steps
+  const rows = spec.bullets.slice(0, st.maxSteps)
+
+  // Fit the stride to the space actually available so five steps cannot spill
+  // past the footer.
+  const available = SLIDE_H - 0.75 - st.firstYIn
+  const stride = Math.min(st.strideIn, available / Math.max(1, rows.length))
+
+  rows.forEach((b, i) => {
+    const y = st.firstYIn + i * stride
+
+    slide.addShape('ellipse' as any, {
+      x: MARGIN_X,
+      y,
+      w: st.badgeIn,
+      h: st.badgeIn,
+      fill: { color: COLOR.indigo },
+    })
+
+    slide.addText(String(i + 1), {
+      x: MARGIN_X,
+      y,
+      w: st.badgeIn,
+      h: st.badgeIn,
+      fontSize: st.numberPt,
+      bold: true,
+      color: COLOR.white,
+      align: 'center',
+      valign: 'middle',
+      fontFace: HEAD_FONT,
+    })
+
+    slide.addText(b.text, {
+      x: st.textXIn,
+      y: y - 0.05,
+      w: Math.min(st.textWidthIn, SLIDE_W - st.textXIn - MARGIN_X),
+      h: st.badgeIn + 0.1,
+      fontSize: st.textPt,
+      color: COLOR.slate,
+      fontFace: BODY_FACE,
+      valign: 'middle',
+      fit: 'shrink',
+    })
+  })
+}
+
+/** Narrative column with concept cards alongside - the approved deck's slide 2. */
+function renderSidebar(slide: any, spec: SlideSpec, fontSize: number) {
+  const body = DECK_STYLE.bodyWithSidebar
+  const sb = DECK_STYLE.sidebar
+
+  slide.addText(
+    spec.bullets.map((b, i) => ({
+      text: b.text + (i === spec.bullets.length - 1 ? '' : '\n'),
+      options: {
+        bullet: true,
+        fontSize,
+        color: COLOR.slate,
+        fontFace: BODY_FACE,
+        lineSpacing: fontSize * 1.45,
+      },
+    })),
+    { x: body.xIn, y: body.yIn, w: body.widthIn, h: body.heightIn, valign: 'top', fit: 'shrink' }
+  )
+
+  const cards = (spec.cards || []).slice(0, sb.maxCards)
+  cards.forEach((card, i) => {
+    const y = sb.firstYIn + i * sb.strideIn
+    // Alternating fills give the column rhythm, as in the approved deck.
+    const dark = i % 2 === 0
+
+    slide.addShape('roundRect' as any, {
+      x: sb.xIn,
+      y,
+      w: sb.widthIn,
+      h: sb.cardHeightIn,
+      fill: { color: dark ? COLOR.navy : COLOR.paleRow },
+      line: { color: dark ? COLOR.navy : COLOR.border, width: 1 },
+      rectRadius: 0.08,
+    })
+
+    slide.addText(card.label, {
+      x: sb.xIn + 0.25,
+      y,
+      w: sb.widthIn - 0.5,
+      h: sb.cardHeightIn,
+      fontSize: sb.labelPt,
+      bold: true,
+      color: dark ? COLOR.white : COLOR.navy,
+      fontFace: BODY_FACE,
+      valign: 'middle',
+      fit: 'shrink',
+    })
+  })
+}
 
 function paintContentChrome(
   slide: any,
@@ -1117,7 +1345,16 @@ export async function exportPresentationPptx(
   const pptxgen: any = (pptxgenModule as any).default || pptxgenModule
   const pptx = new pptxgen()
 
-  pptx.layout = 'LAYOUT_16x9'
+  // Register the canvas every coordinate in this file was measured against.
+  // pptxgenjs's built-in 'LAYOUT_16x9' is 10 x 5.625in, not 13.333 x 7.5 - the
+  // deck used to ship with that preset, pushing page numbers, footers and the
+  // right quarter of every body column off the slide.
+  pptx.defineLayout({
+    name: DECK_STYLE.slide.layout,
+    width: DECK_STYLE.slide.widthIn,
+    height: DECK_STYLE.slide.heightIn,
+  })
+  pptx.layout = DECK_STYLE.slide.layout
   pptx.title = meta.title || 'Seminar Presentation'
   pptx.author = meta.studentName || 'Student Presenter'
 
@@ -1144,7 +1381,7 @@ export async function exportPresentationPptx(
   const reserved = 2 + (includeAgenda ? 1 : 0)
 
   const contentBudget = Math.max(1, maxSlides - reserved)
-  const specs = buildSlideSpecs(sections, contentBudget).slice(0, contentBudget)
+  const specs = planLayouts(buildSlideSpecs(sections, contentBudget).slice(0, contentBudget))
   const totalSlides = specs.length + reserved
 
   // --- Slide 1: Title ---
@@ -1288,6 +1525,19 @@ export async function exportPresentationPptx(
       continue
     }
 
+    if (spec.variant === 'steps' && spec.bullets.length > 0) {
+      renderSteps(slide, spec)
+      slideNo++
+      continue
+    }
+
+    if (spec.variant === 'sidebar' && spec.bullets.length > 0) {
+      const { fontSize } = packBullets(spec.bullets, 1)
+      renderSidebar(slide, spec, fontSize)
+      slideNo++
+      continue
+    }
+
     if (spec.bullets.length > 0) {
       const { fontSize } = packBullets(spec.bullets, 1)
 
@@ -1300,14 +1550,14 @@ export async function exportPresentationPptx(
                   bold: true,
                   fontSize: fontSize + 1,
                   color: COLOR.slateDark,
-                  fontFace: FONT,
+                  fontFace: HEAD_FONT,
                   lineSpacing: fontSize * 1.6,
                 }
               : {
                   bullet: true,
                   fontSize,
                   color: COLOR.slate,
-                  fontFace: FONT,
+                  fontFace: BODY_FACE,
                   lineSpacing: fontSize * 1.45,
                 },
         })),

@@ -9,6 +9,8 @@
  * package that was actually bundled, so upgrading pdfjs-dist can never desync it again.
  */
 
+import { pageItemsToHtml, type RawTextItem } from './deck/pdfStructure'
+
 type PdfJsApi = any
 
 let apiPromise: Promise<PdfJsApi> | null = null
@@ -153,12 +155,57 @@ export async function loadPdfDocument(file: File | Blob | ArrayBuffer): Promise<
   }
 }
 
+/** Normalises a pdf.js TextItem into the plain shape pdfStructure consumes. */
+function toRawItem(item: any): RawTextItem | null {
+  const str = (item && item.str) || ''
+  if (!str.trim()) return null
+
+  const transform = item.transform || []
+  return {
+    str,
+    x: typeof transform[4] === 'number' ? transform[4] : 0,
+    y: typeof transform[5] === 'number' ? transform[5] : 0,
+    width: typeof item.width === 'number' ? item.width : str.length * 4,
+    // `height` is absent on some producers; the vertical scale in the transform
+    // is the font size in those cases.
+    height:
+      typeof item.height === 'number' && item.height > 0
+        ? item.height
+        : Math.abs(typeof transform[3] === 'number' ? transform[3] : 10),
+    fontName: item.fontName,
+  }
+}
+
 /**
- * Extracts a PDF's text as structured HTML (headings + paragraphs).
+ * A cover page carries the report's identity block and none of its argument.
+ * It is detected by content, not by page index, because some reports open with
+ * a blank or a crest page.
+ */
+function looksLikeCoverPage(text: string): boolean {
+  const t = text.toLowerCase()
+  const signals = [
+    /\bsubmitted (to|in partial)\b/,
+    /\bin partial fulfil?lment\b/,
+    /\bmatric(?:ulation)?\s*(?:no|number)\b/,
+    /\bsupervis(?:or|ed by)\b/,
+    /\bdepartment of\b/,
+    /\bfaculty of\b/,
+    /\bschool of\b/,
+    /\bseminar (report|presentation)\b/,
+  ]
+  return signals.filter(re => re.test(t)).length >= 3
+}
+
+/**
+ * Extracts a PDF's text as structured HTML (headings, paragraphs, lists, tables).
  *
- * Text items are grouped into paragraphs by Y-coordinate gaps, then lines that
- * look like chapter/section headings are promoted to h1/h2/h3 so downstream
- * consumers (the editor, the audit, the PPTX exporter) see real structure.
+ * Structure recovery lives in utils/deck/pdfStructure so it can be unit-tested
+ * without pdf.js. This function is only the pdf.js adapter around it.
+ *
+ * The previous implementation started a new paragraph on any Y move greater
+ * than 5 units. That is a new LINE, not a new paragraph, so every wrapped line
+ * of prose became its own `<p>` and, eventually, its own slide bullet - the
+ * root cause of the mid-sentence bullets in generated decks.
  *
  * Returns '' when the PDF holds no extractable text, which is the signal that it
  * is a scanned image rather than a text PDF.
@@ -181,62 +228,28 @@ export async function extractPdfAsHtml(file: File | Blob): Promise<string> {
 
     if (items.length === 0) continue
 
-    const paragraphs: string[] = []
-    let currentParagraph = ''
-    let lastY: number | null = null
+    const raw = items.map(toRawItem).filter((it): it is RawTextItem => it !== null)
+    if (raw.length === 0) continue
 
-    for (const item of items) {
-      const str = (item && item.str) || ''
-      if (!str.trim()) continue
+    const pageHtml = pageItemsToHtml(raw, i)
+    if (!pageHtml) continue
 
-      const y = item && item.transform ? item.transform[5] : null
+    // Pages are wrapped so the exporter can exclude the cover and contents
+    // pages from the deck's content. Without the wrapper the cover's identity
+    // block was parsed as body prose and could reach a slide.
+    const plain = raw.map(it => it.str).join(' ')
+    const isCover = i <= 2 && looksLikeCoverPage(plain)
+    const isToc = /table\s+of\s+contents/i.test(plain) && /\.{4,}/.test(plain)
 
-      if (lastY !== null && y !== null) {
-        // A Y gap > 5 units typically indicates a new line/paragraph.
-        if (Math.abs(lastY - y) > 5) {
-          if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
-          currentParagraph = str
-        } else {
-          currentParagraph += ' ' + str
-        }
-      } else {
-        currentParagraph += (currentParagraph ? ' ' : '') + str
-      }
-      lastY = y
-    }
+    const attrs =
+      `data-type="page" data-page="${i}"` +
+      (isCover ? ' data-cover="true"' : '') +
+      (isToc ? ' data-toc="true"' : '')
 
-    if (currentParagraph.trim()) paragraphs.push(currentParagraph.trim())
-
-    for (const para of paragraphs) {
-      const isHeading =
-        (para.length < 100 && para === para.toUpperCase() && para.length > 3) ||
-        /^(chapter|abstract|references|bibliography|table of contents)\b/i.test(para)
-
-      // A leading dotted number: "1.0", "1.1", "1.2.3". The trailing dot is
-      // required so a sentence opening with a bare year ("2024 saw ...") is not
-      // mistaken for a heading.
-      const numbering = para.match(/^\d+\.(?:\d+\.?)*(?=\s+\S)/)
-      const isSectionHeading = numbering !== null && para.length < 120
-
-      if (isHeading) {
-        html += `<h1>${escapeHtml(para)}</h1>`
-      } else if (isSectionHeading) {
-        // Depth comes from the numeric prefix alone: 1.2 -> h2, 1.2.3 -> h3.
-        const depth = numbering[0].replace(/\.$/, '').split('.').length
-        const hTag = depth <= 2 ? 'h2' : 'h3'
-        html += `<${hTag}>${escapeHtml(para)}</${hTag}>`
-      } else {
-        html += `<p>${escapeHtml(para)}</p>`
-      }
-    }
+    html += `<div ${attrs}>${pageHtml}</div>`
   }
 
   return html
-}
-
-/** PDF text is untrusted here — "<" in the source must not become markup. */
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 export type DocumentKind = 'pdf' | 'docx' | 'txt' | 'unknown'
