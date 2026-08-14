@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tests for the LLM summarisation layer's failure handling.
  *
  * These are the branches that only execute when a model misbehaves, and a real
@@ -30,11 +30,10 @@ function draftPlan() {
       {
         layout: 'bullets' as const,
         title: 'PROBLEM STATEMENT',
-        eyebrow: 'Chapter One',
         bullets: ['Congestion degrades enterprise application performance'],
         notes: 'word '.repeat(45),
         takeaway: 'Congestion degrades performance',
-        sourceRefs: ['§1.2', 'p. 5'],
+        sourceRefs: ['Â§1.2', 'p. 5'],
       },
     ],
   }
@@ -67,7 +66,7 @@ const goodResponse = JSON.stringify({
       bullets: ['Enterprise congestion degrades application performance measurably'],
       notes: 'spoken '.repeat(45),
       takeaway: 'Congestion has a measurable cost',
-      sourceRefs: ['§1.2', 'p. 5'],
+      sourceRefs: ['Â§1.2', 'p. 5'],
     },
   ],
 })
@@ -109,7 +108,7 @@ describe('refinePlanWithLlm', () => {
           title: 'PROBLEM STATEMENT',
           bullets: ['Something happens here'],
           notes: 'too short',
-          sourceRefs: ['§1.2'],
+          sourceRefs: ['Â§1.2'],
         },
       ],
     })
@@ -138,7 +137,7 @@ describe('refinePlanWithLlm', () => {
           title: 'PROBLEM STATEMENT',
           bullets: ['Something happens here'],
           notes: 'far too short',
-          sourceRefs: ['§1.2'],
+          sourceRefs: ['Â§1.2'],
         },
       ],
     })
@@ -235,9 +234,8 @@ describe('refinePlanWithLlm', () => {
     const { DEFAULT_SPEC } = await spec()
 
     const tampered = JSON.parse(goodResponse)
-    tampered.slides[0].sourceRefs = ['§9.9']
+    tampered.slides[0].sourceRefs = ['Â§9.9']
     tampered.slides[0].title = 'A DIFFERENT TITLE'
-    tampered.slides[0].eyebrow = 'Chapter Nine'
     const { client } = stubClient([JSON.stringify(tampered)])
 
     const result = await refinePlanWithLlm(draftPlan(), {
@@ -245,8 +243,8 @@ describe('refinePlanWithLlm', () => {
     })
 
     const slide = result.plan.slides[0]
-    assert.deepEqual(slide.sourceRefs, ['§1.2', 'p. 5'], 'provenance was overwritten by the model')
+    assert.deepEqual(slide.sourceRefs, ['Â§1.2', 'p. 5'], 'provenance was overwritten by the model')
     assert.equal(slide.title, 'PROBLEM STATEMENT')
-    assert.equal(slide.eyebrow, 'Chapter One')
+    assert.equal(slide.layout, 'bullets')
   })
 })

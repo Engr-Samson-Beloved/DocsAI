@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Deck geometry and rendering regression tests.
  *
  * The bug these exist for: every coordinate in the exporter was measured
@@ -69,7 +69,7 @@ describe('deck geometry fits the canvas', () => {
 
   it('keeps every exported box inside the slide bounds', async () => {
     const mod = await layout()
-    const boxes = ['SAFE', 'BODY', 'EYEBROW', 'TITLE', 'COUNTER', 'FOOTER', 'COLUMN_L', 'COLUMN_R', 'BODY_NARROW', 'SIDEBAR', 'HERO']
+    const boxes = ['SAFE', 'BODY', 'TITLE', 'COUNTER', 'FOOTER', 'COLUMN_L', 'COLUMN_R', 'BODY_NARROW', 'SIDEBAR', 'HERO']
 
     for (const name of boxes) {
       const box = (mod as Record<string, any>)[name]
@@ -83,7 +83,7 @@ describe('deck geometry fits the canvas', () => {
     const { SLIDE_W, SLIDE_H, EDGE_CLEARANCE } = mod
 
     // QA check 1 requires 0.5in of clearance; the chrome is the tightest case.
-    for (const name of ['EYEBROW', 'TITLE', 'COUNTER', 'FOOTER', 'BODY']) {
+    for (const name of ['TITLE', 'COUNTER', 'FOOTER', 'BODY']) {
       const b = (mod as Record<string, any>)[name]
       assert.ok(b.x >= EDGE_CLEARANCE - 1e-9, `${name} is ${b.x}in from the left edge`)
       assert.ok(b.y >= EDGE_CLEARANCE - 1e-9, `${name} is ${b.y}in from the top edge`)
@@ -92,10 +92,18 @@ describe('deck geometry fits the canvas', () => {
     }
   })
 
-  it('does not let the title overlap the body', async () => {
-    const { TITLE, BODY, EYEBROW } = await layout()
-    assert.ok(EYEBROW.y + EYEBROW.h <= TITLE.y, 'the eyebrow overlaps the title')
-    assert.ok(TITLE.y + TITLE.h <= BODY.y, 'the title overlaps the body box')
+  it('derives the body box from the MEASURED title height', async () => {
+    const { TITLE_TOP, TITLE_MIN_H, TITLE_BODY_GAP, bodyBelow } = await layout()
+
+    // A one-line title.
+    const short = bodyBelow(TITLE_MIN_H)
+    assert.ok(short.y >= TITLE_TOP + TITLE_MIN_H + TITLE_BODY_GAP - 1e-9, 'body overlaps a one-line title')
+
+    // A title that wraps to two lines must push the body further down. This is
+    // the regression that put a two-line heading on top of the body.
+    const tall = bodyBelow(TITLE_MIN_H * 2)
+    assert.ok(tall.y > short.y, 'a taller title did not move the body down')
+    assert.ok(tall.h < short.h, 'the body did not shrink to make room')
   })
 
   it('does not let the title collide with the slide counter', async () => {

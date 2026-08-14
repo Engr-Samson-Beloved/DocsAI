@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Unit tests for the pure functions behind the deck generator.
  *
  * Each block names the shipped defect it guards. These are the functions the
@@ -51,7 +51,7 @@ describe('dehyphenate', () => {
 
   it('strips soft hyphens entirely', async () => {
     const { dehyphenate } = await textNormalize()
-    assert.equal(dehyphenate('net­work'), 'network')
+    assert.equal(dehyphenate('netÂ­work'), 'network')
   })
 })
 
@@ -132,7 +132,7 @@ describe('lintBullet', () => {
   it('rejects an embedded newline and a literal bullet glyph', async () => {
     const { lintBullet } = await textNormalize()
     assert.ok(lintBullet('Latency falls sharply\n').includes('contains-newline'))
-    assert.ok(lintBullet('• Latency falls sharply').includes('literal-bullet-glyph'))
+    assert.ok(lintBullet('â€¢ Latency falls sharply').includes('literal-bullet-glyph'))
   })
 
   it('enforces the word cap', async () => {
@@ -528,7 +528,7 @@ describe('validateSlidePlan', () => {
               'A bullet with far too many words in it to be acceptable on any slide anywhere at all',
             ],
             notes: 'w '.repeat(40),
-            sourceRefs: ['§1.2'],
+            sourceRefs: ['Â§1.2'],
           },
         ],
       },
@@ -553,7 +553,7 @@ describe('validateSlidePlan', () => {
             title: 'X',
             bullets: ['Latency falls sharply\n'],
             notes: 'w '.repeat(40),
-            sourceRefs: ['§1.1'],
+            sourceRefs: ['Â§1.1'],
           },
         ],
       },
@@ -578,7 +578,7 @@ describe('validateSlidePlan', () => {
     const { validateSlidePlan } = await slidePlan()
     const { DEFAULT_SPEC } = await spec()
     const result = validateSlidePlan(
-      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Something happens here'], notes: 'too short', sourceRefs: ['§1'] }] },
+      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Something happens here'], notes: 'too short', sourceRefs: ['Â§1'] }] },
       DEFAULT_SPEC
     )
     assert.ok(result.fatal.some(f => f.field === 'notes'))
@@ -601,28 +601,6 @@ describe('validateSlidePlan', () => {
   })
 })
 
-describe('eyebrowMismatch', () => {
-  it('passes when the label agrees with the provenance', async () => {
-    const { eyebrowMismatch } = await slidePlan()
-    assert.equal(
-      eyebrowMismatch({
-        layout: 'bullets', title: 'X', eyebrow: 'Chapter Two',
-        notes: '', sourceRefs: ['§2.3', 'p. 10'],
-      }),
-      null
-    )
-  })
-
-  it('catches the shipped defect: a Chapter Four label on Chapter Two content', async () => {
-    const { eyebrowMismatch } = await slidePlan()
-    const problem = eyebrowMismatch({
-      layout: 'bullets', title: 'SCOPE & SIGNIFICANCE', eyebrow: 'Chapter Four',
-      notes: '', sourceRefs: ['§2.1', 'p. 8'],
-    })
-    assert.ok(problem, 'the mismatch was not detected')
-    assert.match(problem!, /Chapter Four/)
-  })
-})
 
 // --- PDF structure ------------------------------------------------------
 
@@ -686,8 +664,8 @@ describe('extractCover', () => {
   ]
 
   it('recovers the wrapped title in full', async () => {
-    const { extractCover } = await docTree()
-    const meta = extractCover(COVER)
+    const { parseCover } = await docTree()
+    const meta = parseCover(COVER)
     assert.equal(
       meta.title,
       'SOFTWARE DEFINED NETWORKING (SDN) FOR TRAFFIC MANAGEMENT IN CONGESTED ENTERPRISE NETWORKS'
@@ -695,9 +673,9 @@ describe('extractCover', () => {
   })
 
   it('recovers the identity fields', async () => {
-    const { extractCover } = await docTree()
-    const meta = extractCover(COVER)
-    assert.equal(meta.studentName, 'EKPAWHA PRINCEWILL DAVID')
+    const { parseCover } = await docTree()
+    const meta = parseCover(COVER)
+    assert.equal(meta.author, 'EKPAWHA PRINCEWILL DAVID')
     assert.equal(meta.matricNo, 'F/HD/24/3410037')
     assert.equal(meta.department, 'COMPUTER ENGINEERING')
     assert.equal(meta.institution, 'YABA COLLEGE OF TECHNOLOGY')
@@ -705,15 +683,15 @@ describe('extractCover', () => {
   })
 
   it('reports what it could not find instead of inventing it', async () => {
-    const { extractCover } = await docTree()
-    const meta = extractCover(COVER)
+    const { parseCover } = await docTree()
+    const meta = parseCover(COVER)
     assert.ok(meta.missing.includes('session'), 'session is absent and must be reported')
     assert.equal(meta.school, null)
   })
 
   it('returns a null title rather than guessing from nothing', async () => {
-    const { extractCover } = await docTree()
-    const meta = extractCover(['BY:', 'A. STUDENT'])
+    const { parseCover } = await docTree()
+    const meta = parseCover(['BY:', 'A. STUDENT'])
     assert.equal(meta.title, null)
     assert.ok(meta.missing.includes('title'))
   })
