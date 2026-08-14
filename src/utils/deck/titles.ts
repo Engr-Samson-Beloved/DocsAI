@@ -159,23 +159,36 @@ function trimToWords(text: string, max: number): string {
  * weighting every slide in an SDN report is titled "SDN".
  */
 export function dominantSubject(content: string[], deckTermCounts?: Map<string, number>): string {
-  const local = new Map<string, number>()
+  /** How many of the slide's own lines each phrase appears in. */
+  const lineHits = new Map<string, number>()
+  const occurrences = new Map<string, number>()
 
   for (const line of content) {
+    const inThisLine = new Set<string>()
     for (const phrase of candidatePhrases(line)) {
-      const n = phrase.split(' ').length
-      if (n > 4) continue
-      // Multi-word phrases are more informative than single terms.
-      local.set(phrase, (local.get(phrase) ?? 0) + (n > 1 ? 2 : 1))
+      if (phrase.split(' ').length > 4) continue
+      inThisLine.add(phrase)
+      occurrences.set(phrase, (occurrences.get(phrase) ?? 0) + 1)
     }
+    for (const phrase of inThisLine) lineHits.set(phrase, (lineHits.get(phrase) ?? 0) + 1)
   }
 
   let best = ''
   let bestScore = 0
 
-  for (const [phrase, count] of local) {
+  for (const [phrase, hits] of lineHits) {
+    const n = phrase.split(' ').length
     const spread = deckTermCounts?.get(phrase) ?? 1
-    const score = (count * Math.min(phrase.split(' ').length, 3)) / Math.sqrt(spread)
+
+    // Recurrence across the slide's own lines is the strongest signal of what
+    // the slide is ABOUT. Weighting a phrase's colour instead produced titles
+    // like "WHY TWENTY-FIRST CENTURY ENTERPRISE FALLS SHORT" - a vivid phrase
+    // from a single bullet, not the subject of the slide.
+    const recurrence = hits >= 2 ? hits * 3 : 1
+    const length = Math.min(n, 3)
+    const distinctiveness = 1 / Math.sqrt(spread)
+
+    const score = recurrence * length * distinctiveness + (occurrences.get(phrase) ?? 0) * 0.2
     if (score > bestScore) {
       bestScore = score
       best = phrase
@@ -202,15 +215,17 @@ export function titleFromContent(input: TitleInput): string {
 
   const subject = dominantSubject(content, deckTermCounts)
 
-  // 2. A role frame around the slide's own subject.
-  if (subject) {
-    attempts.push(FRAMES[role](trimToWords(subject, 3)))
-    attempts.push(subject)
-  }
+  // 2. The bare subject first. A noun phrase reads as a title on its own
+  //    ("SDN CONTROL PLANE"), and a frame wrapped round a badly-chosen subject
+  //    reads worse than the subject alone, not better.
+  if (subject && subject.split(' ').length >= 2) attempts.push(subject)
 
   // 3. A statement-shaped bullet makes a good title on its own.
   const statement = content.find(c => hasFiniteVerb(c) && c.split(/\s+/).length <= MAX_TITLE_WORDS)
   if (statement) attempts.push(statement)
+
+  // 4. A role frame, when the bare subject is too thin to stand alone.
+  if (subject) attempts.push(FRAMES[role](trimToWords(subject, 3)))
 
   // 4. Last resort: the source heading, but only if it is not structural.
   if (sourceHeading) attempts.push(sourceHeading)

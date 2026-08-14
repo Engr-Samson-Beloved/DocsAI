@@ -113,12 +113,19 @@ export function buildNotesFromSlide(slide: PlannedSlide, spec: PresentationSpec)
   const min = spec.deck.notesMinWords
   const max = spec.deck.notesMaxWords
 
+  // Drawn ONLY from what the slide displays. A table slide has no bullets, so
+  // its points come from its own rows; nothing is pulled from the source
+  // document, which is how "Stress the figure 50ms" reached a slide that had no
+  // such figure on it.
   const points = [
     ...(slide.bullets ?? []),
     ...(slide.steps ?? []).map(s => (s.body ? `${s.title}: ${s.body}` : s.title)),
     ...(slide.columns ?? []).flatMap(c => c.bullets.slice(0, 2)),
     ...(slide.stat ? [`${slide.stat.value} — ${slide.stat.caption}`] : []),
     slide.caption ?? '',
+    slide.table?.caption ?? '',
+    ...(slide.table ? tableTalkingPoints(slide.table) : []),
+    ...(slide.citations ?? []).slice(0, 3),
   ].filter(Boolean)
 
   const parts: string[] = []
@@ -153,12 +160,26 @@ export function buildNotesFromSlide(slide: PlannedSlide, spec: PresentationSpec)
     notes = parts.join(' ')
   }
 
-  if (wordCount(notes) < min && slide.takeaway) {
-    parts.splice(parts.length - 1, 0, `The point to land is that ${lowerFirst(slide.takeaway)}.`)
+  // If still short, pad from the slide's own remaining text - never from the
+  // takeaway, which is derived from the SOURCE and would reintroduce facts the
+  // audience cannot see.
+  if (wordCount(notes) < min) {
+    for (const extra of slideText(slide).slice(1)) {
+      if (wordCount(parts.join(' ')) >= min) break
+      parts.splice(parts.length - 1, 0, `Mention ${lowerFirst(extra)}.`)
+    }
     notes = parts.join(' ')
   }
 
   return notes.replace(/\s+/g, ' ').trim()
+}
+
+/** A table's most quotable rows, phrased as things to say. */
+function tableTalkingPoints(table: NonNullable<PlannedSlide['table']>): string[] {
+  return table.rows.slice(0, 3).map(row => {
+    const [label, ...rest] = row
+    return rest.length > 0 ? `${label}: ${rest.join(' versus ')}` : label
+  })
 }
 
 function lowerFirst(text: string): string {

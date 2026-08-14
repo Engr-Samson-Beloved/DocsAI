@@ -392,11 +392,20 @@ export function checkCollisions(report: RenderReport): QaFinding[] {
  * because it tells the audience where the text came from rather than what it
  * says.
  */
+/**
+ * Chrome, not content.
+ *
+ * The slide counter reads "3 / 14", which the leading-section-number pattern
+ * matches and the audience reads as a page number. Excluding it is not a
+ * loophole - the rule is about what the deck SAYS, and a counter says nothing.
+ */
+const CHROME_SHAPES = new Set(['counter', 'footer'])
+
 export function checkBannedVocabulary(report: RenderReport): QaFinding[] {
   const findings: QaFinding[] = []
 
   for (const shape of report.shapes) {
-    if (!shape.text.trim()) continue
+    if (!shape.text.trim() || CHROME_SHAPES.has(shape.name)) continue
     for (const { pattern, why } of BANNED_TITLE_PATTERNS) {
       if (pattern.test(shape.text)) {
         findings.push(
@@ -424,7 +433,7 @@ export function checkSectionNumbers(report: RenderReport): QaFinding[] {
   const findings: QaFinding[] = []
 
   for (const shape of report.shapes) {
-    if (shape.kind !== 'text') continue
+    if (shape.kind !== 'text' || CHROME_SHAPES.has(shape.name)) continue
     for (const paragraph of shape.paragraphs) {
       if (hasSectionNumber(paragraph)) {
         findings.push(

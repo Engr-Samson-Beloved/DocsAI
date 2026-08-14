@@ -176,7 +176,7 @@ console.log(`      wrote ${pptxPath} (${report.slideCount} slides, ${report.shap
 // --- 6. QA gate ---------------------------------------------------------
 
 console.log('[6/6] qa_deck')
-const findings = qa.runStaticChecks(report, validPlan, DEFAULT_SPEC)
+const findings = qa.runStaticChecks(report, validPlan, DEFAULT_SPEC, diagnostics.rolesPresent)
 findings.push(...(await qa.checkPackage(pptxPath)))
 if (flags.has('--visual')) findings.push(...qa.renderSlideImages(pptxPath, join(outDir, 'slides')))
 

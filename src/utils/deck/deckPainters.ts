@@ -403,14 +403,30 @@ export function paintProcess(
   const gap = 0.42
   const boxes = columns(area, steps.length, gap)
 
-  const cardH = Math.min(area.h, hasBodies ? 2.6 : 1.3)
+  // Card height is MEASURED from the widest wrapped title and body, so a long
+  // step label cannot overflow its box.
+  const pad = 0.22
+  const innerW = boxes[0].w - pad * 2
+  const titlePt = spec.type.body.minPt
+  const bodyPt = spec.type.caption.maxPt
+
+  const titleLines = Math.max(
+    ...steps.map(s => estimateLines(s.title, innerW, titlePt, spec.headingFace))
+  )
+  const bodyLines = hasBodies
+    ? Math.max(...steps.map(s => (s.body.trim() ? estimateLines(s.body, innerW, bodyPt, spec.bodyFace) : 0)))
+    : 0
+
+  const titleH = titleLines * lineIn(titlePt) + 0.08
+  const bodyH = bodyLines > 0 ? bodyLines * lineIn(bodyPt) + 0.08 : 0
+  const needed = pad * 2 + 0.44 + 0.12 + titleH + (bodyH > 0 ? bodyH + 0.06 : 0)
+  const cardH = Math.min(area.h, Math.max(1.1, needed / FILL_LIMIT))
   const top = area.y + Math.max(0, (area.h - cardH) / 2)
 
   steps.forEach((step, i) => {
     const cell: Box = { ...boxes[i], y: top, h: cardH }
     rec.card(`step-card-${i}`, cell, spec.palette.tint)
 
-    const pad = 0.22
     const badge: Box = { x: cell.x + pad, y: cell.y + pad, w: 0.44, h: 0.44 }
     rec.card(`step-badge-${i}`, badge, spec.palette.accent)
     rec.text(`step-number-${i}`, badge, String(i + 1), {
