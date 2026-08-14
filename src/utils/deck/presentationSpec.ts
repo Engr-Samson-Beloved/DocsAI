@@ -92,7 +92,12 @@ export interface PresentationSpec {
     idealWordsPerBullet: number
     notesMinWords: number
     notesMaxWords: number
-    /** Fraction of CONTENT slides that must use a non-bullet layout. */
+    /**
+     * Fraction of CONTENT slides that must use a non-bullet layout.
+     *
+     * The accredited reference deck runs about 85% non-bullet. 40% is the floor
+     * below which a deck reads as one template repeated.
+     */
     minNonBulletRatio: number
     allowAnimations: boolean
   }
@@ -293,7 +298,7 @@ export const HND_SEMINAR_SPEC: PresentationSpec = {
     idealWordsPerBullet: 10,
     notesMinWords: 40,
     notesMaxWords: 70,
-    minNonBulletRatio: 0.3,
+    minNonBulletRatio: 0.4,
     allowAnimations: false,
   },
 

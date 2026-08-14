@@ -132,7 +132,13 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
   let cursor = titleBox.y + titleBox.h + 0.28
 
   if (slide?.subtitle) {
-    const subBox: Box = { x: HERO.x, y: cursor, w: HERO.w, h: 0.5 }
+    const subLines = estimateLines(slide.subtitle, HERO.w, spec.type.body.minPt, spec.bodyFace)
+    const subBox: Box = {
+      x: HERO.x,
+      y: cursor,
+      w: HERO.w,
+      h: Math.max(0.5, subLines * lineIn(spec.type.body.minPt) + 0.1),
+    }
     rec.text('deck-subtitle', subBox, slide.subtitle, {
       role: 'body',
       fontPt: spec.type.body.minPt,
@@ -417,9 +423,14 @@ export function paintProcess(
     ? Math.max(...steps.map(s => (s.body.trim() ? estimateLines(s.body, innerW, bodyPt, spec.bodyFace) : 0)))
     : 0
 
-  const titleH = titleLines * lineIn(titlePt) + 0.08
-  const bodyH = bodyLines > 0 ? bodyLines * lineIn(bodyPt) + 0.08 : 0
-  const needed = pad * 2 + 0.44 + 0.12 + titleH + (bodyH > 0 ? bodyH + 0.06 : 0)
+  // Divided by the fill limit, not padded by a constant: a fixed +0.08 leaves a
+  // three-line label at 92.1% of its box, which is over the limit by a whisker
+  // and fails the overflow check every time.
+  const titleH = (titleLines * lineIn(titlePt)) / FILL_LIMIT + 0.04
+  const bodyH = bodyLines > 0 ? (bodyLines * lineIn(bodyPt)) / FILL_LIMIT + 0.04 : 0
+  // Headroom, so the card is not sized to sit exactly on the 92% limit and
+  // fail it by a rounding difference.
+  const needed = pad * 2 + 0.44 + 0.12 + titleH + (bodyH > 0 ? bodyH + 0.06 : 0) + 0.06
   const cardH = Math.min(area.h, Math.max(1.1, needed / FILL_LIMIT))
   const top = area.y + Math.max(0, (area.h - cardH) / 2)
 
@@ -523,11 +534,16 @@ export function paintDiagram(
 
     const pad = 0.18
     const hasBody = !!node.body.trim()
+    // Measured, not a fraction of the cell: a two-line node label inside a
+    // 38%-of-cell box is exactly the overflow the fixed-header bug produced.
+    const titleLines = estimateLines(node.title, cell.w - pad * 2, spec.type.body.minPt, spec.headingFace)
     const titleBox: Box = {
       x: cell.x + pad,
       y: cell.y + pad,
       w: cell.w - pad * 2,
-      h: hasBody ? Math.min(0.5, cell.h * 0.38) : cell.h - pad * 2,
+      h: hasBody
+        ? Math.min(cell.h - pad * 2 - 0.3, titleLines * lineIn(spec.type.body.minPt) + 0.08)
+        : cell.h - pad * 2,
     }
     rec.text(`node-title-${i}`, titleBox, node.title, {
       role: 'body',

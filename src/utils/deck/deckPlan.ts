@@ -616,9 +616,16 @@ function buildDraft(
   const bullets = summarizeToBullets(sentences, { spec, count: spec.deck.maxBulletsPerSlide, seen })
   if (bullets.length === 0) return null
 
-  if (bullets.length >= 3 && bullets.length <= 6 && bullets.every(b => b.length <= 62)) {
-    return { ...base, layout: 'cards', bullets }
-  }
+  // Parallel items of similar weight sit better as a grid than as a stack: the
+  // reader sees a set rather than a ranking. Long or uneven bullets stay a list,
+  // because a card grid with one overflowing cell looks broken.
+  const even =
+    bullets.length >= 3 &&
+    bullets.length <= 6 &&
+    bullets.every(b => b.length <= 78) &&
+    Math.max(...bullets.map(b => b.length)) - Math.min(...bullets.map(b => b.length)) <= 45
+
+  if (even) return { ...base, layout: 'cards', bullets }
 
   return { ...base, layout: 'bullets', bullets }
 }

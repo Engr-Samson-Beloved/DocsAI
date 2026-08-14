@@ -87,7 +87,16 @@ export function candidatePhrases(text: string, maxWords = 5): string[] {
   }
   if (run.length > 0) out.push(run.join(' '))
 
-  return out.filter(p => p.split(' ').length >= 1)
+  // A phrase that opens or closes on a verb is a fragment of a predicate, not a
+  // subject: "SDN CONTROLLER INITIALISES" and "REQUIRE SDN CONTROLLERS" both
+  // came from accepting these. A title names a thing.
+  return out.filter(p => {
+    const parts = p.split(' ')
+    if (parts.length === 0) return false
+    if (hasFiniteVerb(parts[0])) return false
+    if (parts.length > 1 && hasFiniteVerb(parts[parts.length - 1])) return false
+    return true
+  })
 }
 
 // --- Title generation ---------------------------------------------------
