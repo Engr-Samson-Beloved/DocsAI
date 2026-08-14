@@ -1,0 +1,24 @@
+{
+  // Type-checking for the Node-only tooling: the QA gate, the generation
+  // harness, the .pptx inspector, the fixture builder and the test suite.
+  //
+  // These are excluded from tsconfig.json because they import with explicit
+  // '.ts' specifiers - Node's type-stripping resolver requires the extension,
+  // while the Next build forbids it. Excluding them from the app build without
+  // this file would mean they were never type-checked at all.
+  //
+  // Run: npx tsc -p tsconfig.scripts.json
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The whole reason this file exists.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // Node tooling, not browser code: no DOM lib, and module resolution that
+    // matches how Node actually loads these files.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.mts", "scripts/**/*.ts", "tests/**/*.mts", "src/**/*.ts"],
+  "exclude": ["node_modules", "scratch", ".next"]
+}

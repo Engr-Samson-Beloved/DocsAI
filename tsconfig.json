@@ -30,5 +30,12 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "scratch", "tests"]
+  "//exclude": [
+    "scripts, tests and scratch are Node-only tooling, not part of the Next app.",
+    "They import with explicit '.ts' specifiers because Node's type-stripping",
+    "resolver requires them, which this config forbids (allowImportingTsExtensions).",
+    "They are still type-checked, deliberately, via tsconfig.scripts.json:",
+    "  npx tsc -p tsconfig.scripts.json"
+  ],
+  "exclude": ["node_modules", "scratch", "tests", "scripts"]
 }
