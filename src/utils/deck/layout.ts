@@ -76,10 +76,15 @@ export const FILL_LIMIT = 0.92
  */
 export const COUNTER_W = 1.4
 
-export const EYEBROW: Box = { x: MARGIN, y: 0.34, w: SAFE.w - COUNTER_W - 0.2, h: 0.3 }
-export const TITLE: Box = { x: MARGIN, y: 0.66, w: SAFE.w - COUNTER_W - 0.2, h: 0.62 }
-export const COUNTER: Box = { x: SLIDE_W - MARGIN - COUNTER_W, y: 0.34, w: COUNTER_W, h: 0.3 }
-export const FOOTER: Box = { x: MARGIN, y: SLIDE_H - FOOTER_H + 0.18, w: SAFE.w, h: 0.3 }
+/**
+ * Chrome sits inside EDGE_CLEARANCE on every side. QA check 1 requires each
+ * text box to keep 0.5in from the slide edge, so the eyebrow and counter start
+ * at y = 0.5 and the footer ends at y = 7.0 rather than hugging the trim.
+ */
+export const EYEBROW: Box = { x: MARGIN, y: EDGE_CLEARANCE, w: SAFE.w - COUNTER_W - 0.2, h: 0.28 }
+export const TITLE: Box = { x: MARGIN, y: 0.8, w: SAFE.w - COUNTER_W - 0.2, h: 0.54 }
+export const COUNTER: Box = { x: SLIDE_W - MARGIN - COUNTER_W, y: EDGE_CLEARANCE, w: COUNTER_W, h: 0.28 }
+export const FOOTER: Box = { x: MARGIN, y: SLIDE_H - EDGE_CLEARANCE - 0.28, w: SAFE.w, h: 0.28 }
 
 /** Single-column body. */
 export const BODY: Box = { ...SAFE }

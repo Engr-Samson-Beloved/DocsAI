@@ -59,14 +59,46 @@ const PHRASE_COMPRESSIONS: [RegExp, string][] = [
 
 /** Openers that carry no information once the sentence stands alone on a slide. */
 const LEAD_INS =
-  /^(however|therefore|moreover|furthermore|in addition|additionally|consequently|subsequently|thus|hence|indeed|also|nevertheless|nonetheless|as a result|for instance|for example|in fact|in general|in particular|overall|finally|first(?:ly)?|second(?:ly)?|third(?:ly)?|lastly|on the other hand|that is|in other words|notably|importantly|crucially|significantly)\b[\s,:-]*/i
+  /^(however|therefore|moreover|furthermore|in addition|additionally|consequently|subsequently|thus|hence|indeed|also|nevertheless|nonetheless|as a result|for instance|for example|in fact|in general|in particular|overall|finally|first(?:ly)?|second(?:ly)?|third(?:ly)?|fourth(?:ly)?|fifth(?:ly)?|lastly|on the other hand|that is|in other words|notably|importantly|crucially|significantly)\b[\s,:-]*/i
+
+/**
+ * Words that open a subordinate or adverbial clause.
+ *
+ * `dropLeadingAdverbial` already removes such an opener when a main clause
+ * follows it. So a bullet that STILL begins with one of these has no main
+ * clause at all - it is a dependent fragment like "By separating the control
+ * plane" or "As the number of flows and network devices grows", both of which
+ * the previous pass happily printed as statements.
+ */
+const SUBORDINATE_OPENER =
+  /^(as|by|in|on|at|for|with|within|without|from|to|into|through|throughout|during|across|among|amongst|between|before|after|since|until|unless|if|when|whenever|while|whilst|where|wherever|despite|given|following|according|regarding|concerning|upon|under|over|beyond|besides|toward|towards)\b/i
 
 const HEDGES =
   /^(it is (?:important|crucial|worth|necessary|essential) to (?:note|remember|mention|state|emphasi[sz]e) that|it should be noted that|this (?:chapter|section|study|paper|work|project|seminar) (?:presents|discusses|describes|examines|explores|covers|outlines|introduces)|the (?:aim|purpose|objective) of this (?:chapter|section|study) is to)\b[\s:,-]*/i
 
-/** Determiners and empty subjects that waste the first two words of a bullet. */
-const WEAK_OPENERS = /^(the|this|that|these|those|such|its|their)\s+/i
-const EMPTY_SUBJECT = /^(it|there)\s+(is|are|was|were|has|have|can|will)\s+/i
+/** Determiners that waste the first word of a bullet without carrying meaning. */
+const WEAK_OPENERS = /^(the|such|its|their)\s+/i
+
+/**
+ * A pronoun subject followed directly by a copula: "This is not merely a
+ * theoretical improvement". Isolated on a slide these say nothing, because the
+ * subject lives in the previous sentence. Rejected outright.
+ *
+ * The shipped deck's "Is not merely a theoretical improvement" came from
+ * stripping the determiner off exactly this shape and capitalising what was
+ * left.
+ */
+const PRONOUN_COPULA = /^(it|this|that|these|those|there)\s+(is|are|was|were)\b/i
+
+/** A pronoun subject before a real verb or noun: strip it, keep the predicate. */
+const PRONOUN_SUBJECT = /^(it|this|these|those)\s+(?=[a-z])/i
+
+/**
+ * Function words a complete statement cannot end on. A bullet ending "of",
+ * "the" or "when" was cut mid-thought, whatever its word count says.
+ */
+const TRAILING_FUNCTION_WORD =
+  /\b(a|an|the|of|to|in|for|on|with|by|as|at|from|into|onto|upon|and|or|but|nor|that|which|who|when|where|while|because|although|though|since|if|whether|than|then|its|their|his|her|this|these|those|such|between|among|through|during|within|without|across|over|under|about|via|per)$/i
 
 /** True when a fragment holds a specific worth protecting from the trimmer. */
 function hasSpecific(text: string): boolean {
@@ -107,22 +139,46 @@ function dropEmptyParentheticals(text: string): string {
 }
 
 /**
- * Trims to a word budget at a clause boundary, never mid-thought, and never
- * leaving dangling punctuation.
+ * Reduces a sentence to at most `maxWords` WITHOUT cutting mid-thought.
+ *
+ * Returns '' when that is impossible. This is the important change: the old
+ * behaviour was to hard-cut at the word budget, which is what produced bullets
+ * like "Network congestion in enterprise environments occurs when the volume
+ * of" - inside the word limit, and still visibly half a sentence.
+ *
+ * Only a real clause boundary (colon, semicolon, or a comma with enough before
+ * it) may end a shortened bullet.
  */
-function trimToWords(text: string, maxWords: number): string {
-  const words = text.trim().split(/\s+/)
-  if (words.length <= maxWords) return text.trim()
+function reduceToWords(text: string, maxWords: number): string {
+  const clean = text.trim()
+  if (countWords(clean) <= maxWords) return clean
 
-  const head = words.slice(0, maxWords).join(' ')
-
-  // Prefer to end at a clause boundary inside the budget.
-  const boundary = Math.max(head.lastIndexOf(';'), head.lastIndexOf(','))
-  if (boundary > head.length * 0.55) {
-    return head.slice(0, boundary).replace(/[\s,;:\-–—]+$/, '')
+  // Take the leading independent clause if there is one.
+  for (const separator of [': ', '; ', ' - ', ' — ']) {
+    const at = clean.indexOf(separator)
+    if (at > 0) {
+      const head = clean.slice(0, at).trim()
+      if (countWords(head) >= 4 && countWords(head) <= maxWords) return head
+    }
   }
 
-  return head.replace(/[\s,;:\-–—]+$/, '')
+  // Otherwise cut at the last comma that leaves a substantial clause.
+  const words = clean.split(/\s+/)
+  const head = words.slice(0, maxWords).join(' ')
+  const comma = head.lastIndexOf(',')
+  if (comma > 0) {
+    const candidate = head.slice(0, comma).trim()
+    if (countWords(candidate) >= 5) return candidate
+  }
+
+  // No honest way to shorten it.
+  return ''
+}
+
+/** True when the text stops on a word that cannot end a statement. */
+function endsMidThought(text: string): boolean {
+  const stripped = text.trim().replace(/[.,;:!?]+$/, '')
+  return TRAILING_FUNCTION_WORD.test(stripped)
 }
 
 /**
@@ -142,13 +198,17 @@ export function compressSentence(sentence: string, maxWords = 14): string {
   s = s.replace(HEDGES, '')
   s = s.replace(LEAD_INS, '')
 
+  // A bare pronoun subject with a copula means nothing once the slide isolates
+  // it from the sentence before.
+  if (PRONOUN_COPULA.test(s)) return ''
+
   for (const [pattern, replacement] of PHRASE_COMPRESSIONS) s = s.replace(pattern, replacement)
 
   s = dropEmptyParentheticals(s)
   s = dropLeadingAdverbial(s)
   s = dropRelativeClause(s)
 
-  s = s.replace(EMPTY_SUBJECT, '')
+  s = s.replace(PRONOUN_SUBJECT, '')
   s = s.replace(WEAK_OPENERS, '')
 
   s = s.replace(/\s+([,.;:])/g, '$1').replace(/\s+/g, ' ').trim()
@@ -156,15 +216,24 @@ export function compressSentence(sentence: string, maxWords = 14): string {
 
   if (!s) return ''
 
-  s = trimToWords(s, maxWords)
+  s = reduceToWords(s, maxWords)
+  if (!s) return ''
+
   s = s.replace(/[.\s,;:\-–—]+$/, '')
 
-  // An unclosed bracket means the trimmer cut through a construction.
+  // An unbalanced bracket means a construction was cut through.
   const open = (s.match(/\(/g) || []).length
   const close = (s.match(/\)/g) || []).length
-  if (open > close) s = s.replace(/\s*\([^)]*$/, '')
+  if (open > close) s = s.replace(/\s*\([^)]*$/, '').trim()
 
-  if (!s) return ''
+  if (!s || countWords(s) < 4) return ''
+
+  // Final integrity gate: a bullet must not stop on a function word, and must
+  // not open on a conjunction or a subordinator that leaves it dangling.
+  if (endsMidThought(s)) return ''
+  if (/^(and|but|or|nor|yet|so|which|that|because|although|though|whereas)\b/i.test(s)) return ''
+  if (SUBORDINATE_OPENER.test(s)) return ''
+
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
@@ -255,9 +324,18 @@ export function summarizeToBullets(sentences: string[], options: SummarizeOption
 
   const localSeen = new Set<string>(seen ?? [])
 
-  const candidates = scoreSentences(usable)
-    .map(s => ({ ...s, bullet: compressSentence(s.text, budget) }))
-    .filter(s => {
+  /**
+   * Compress at `wordBudget` and keep only what passes the lint.
+   *
+   * Run twice when necessary: the tight ideal budget forces `reduceToWords` to
+   * shorten, and it refuses to cut mid-thought, so a sentence that yields
+   * nothing at 10 words often yields a clean bullet at the 14-word maximum.
+   * Without the retry, tightening the compressor left slides with one bullet.
+   */
+  const gather = (wordBudget: number) =>
+    scoreSentences(usable)
+      .map(s => ({ ...s, bullet: compressSentence(s.text, wordBudget) }))
+      .filter(s => {
       if (!s.bullet) return false
       // The summariser's own output may legitimately be a noun phrase, so the
       // verb requirement is relaxed here; it still must not be a fragment in
@@ -269,6 +347,13 @@ export function summarizeToBullets(sentences: string[], options: SummarizeOption
       })
       return problems.length === 0
     })
+
+  let candidates = gather(budget)
+  const MIN_BULLETS = 3
+  if (candidates.length < MIN_BULLETS && budget < spec.deck.maxWordsPerBullet) {
+    const relaxed = gather(spec.deck.maxWordsPerBullet)
+    if (relaxed.length > candidates.length) candidates = relaxed
+  }
 
   const picked: typeof candidates = []
   for (const candidate of [...candidates].sort((a, b) => b.score - a.score)) {
@@ -292,9 +377,24 @@ export function deriveTakeaway(sentences: string[], heading: string): string {
   const usable = sentences.filter(s => s.trim().length >= 25)
   if (usable.length === 0) return `${heading} is covered on this slide`
 
-  const best = scoreSentences(usable).sort((a, b) => b.score - a.score)[0]
-  const compressed = compressSentence(best.text, 20)
-  return compressed || `${heading} is covered on this slide`
+  const ranked = scoreSentences(usable).sort((a, b) => b.score - a.score)
+
+  // Try each candidate, not just the highest-scoring one: the compressor
+  // legitimately rejects sentences that cannot be shortened honestly, and
+  // giving up after the first produced notes that opened "make the point that
+  // Introduction is covered on this slide".
+  for (const candidate of ranked.slice(0, 5)) {
+    const compressed = compressSentence(candidate.text, 20)
+    if (compressed) return compressed
+  }
+
+  // Last resort: the strongest sentence, lightly shortened at a clause
+  // boundary. Still the document's own words, never a template.
+  const fallback = ranked[0].text.replace(/\s+/g, ' ').trim()
+  const cut = fallback.slice(0, 150)
+  const boundary = Math.max(cut.lastIndexOf(', '), cut.lastIndexOf('; '))
+  const trimmed = (boundary > 60 ? cut.slice(0, boundary) : cut).replace(/[.,;:\s]+$/, '')
+  return trimmed || `${heading} is covered on this slide`
 }
 
 // --- Speaker notes -----------------------------------------------------
@@ -326,15 +426,23 @@ function likelyQuestion(heading: string): string {
   return 'Expect a question on how this connects to your overall argument.'
 }
 
-/** The one figure or named standard worth stressing aloud. */
+/**
+ * The one figure or named standard worth stressing aloud, with wording that
+ * suits what it actually is - calling a protocol name "the number the panel
+ * will remember" reads as a template that was never checked.
+ */
 function emphasisFrom(sentences: string[]): string | null {
   for (const s of sentences) {
     const figure = s.match(/\b\d+(?:[.,]\d+)?\s*(?:%|percent|ms|Gbps|Mbps|seconds?|years?)\b/i)
-    if (figure) return figure[0]
+    if (figure) return `Stress the figure ${figure[0]} - it is the number the panel will remember`
   }
   for (const s of sentences) {
     const standard = s.match(/\b(?:OpenFlow|IEEE\s?\d[\w.]*|RFC\s?\d+|ONOS|OpenDaylight|Mininet|NETCONF|P4)\b/)
-    if (standard) return standard[0]
+    if (standard) return `Name ${standard[0]} explicitly - the panel will expect the specific standard`
+  }
+  for (const s of sentences) {
+    const year = s.match(/\b(?:19|20)\d{2}\b/)
+    if (year) return `Anchor the timeline on ${year[0]} so the chronology is clear`
   }
   return null
 }
@@ -359,15 +467,30 @@ export function buildSpeakerNotes(options: NotesOptions): string {
   const max = spec.deck.notesMaxWords
 
   const parts: string[] = []
-  const push = (text: string) => {
+  /** Normalised openings already used, so no sentence is said twice. */
+  const said = new Set<string>()
+
+  const fingerprint = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).slice(0, 8).join(' ')
+
+  const push = (text: string): boolean => {
     const clean = text.replace(/\s+/g, ' ').trim()
-    if (clean) parts.push(clean.replace(/[.\s]*$/, '.'))
+    if (!clean) return false
+    const key = fingerprint(clean)
+    if (said.has(key)) return false
+    said.add(key)
+    parts.push(clean.replace(/[.\s]*$/, '.'))
+    return true
   }
 
   push(`Open by making the point that ${lowerFirst(takeaway)}`)
+  // The takeaway itself is now spoken; record its own fingerprint too, so the
+  // supporting pass cannot re-add the same sentence in a slightly different
+  // compression.
+  said.add(fingerprint(takeaway))
 
   const emphasis = emphasisFrom(sentences)
-  if (emphasis) push(`Stress the figure ${emphasis} - it is the number the panel will remember`)
+  if (emphasis) push(emphasis)
 
   // Add supporting detail until the word count is comfortably in range.
   const supporting = scoreSentences(sentences.filter(s => s.length >= 30))
@@ -376,8 +499,8 @@ export function buildSpeakerNotes(options: NotesOptions): string {
 
   for (const sentence of supporting) {
     if (countWords(parts.join(' ')) >= min) break
-    const trimmed = compressSentence(sentence, 22)
-    if (trimmed && !parts.some(p => p.includes(trimmed.slice(0, 30)))) push(trimmed)
+    const trimmed = compressSentence(sentence, 22) || sentence.slice(0, 140).trim()
+    push(trimmed)
   }
 
   push(likelyQuestion(heading))

@@ -38,6 +38,17 @@ export const CONTENT_LAYOUTS: SlideLayout[] = [
   'bullets', 'comparison', 'stat', 'process', 'table', 'quote', 'section', 'closing',
 ]
 
+/** Every layout the renderer can draw, including the ones only it creates. */
+export const ALL_LAYOUTS: SlideLayout[] = [
+  'title', 'references', ...CONTENT_LAYOUTS,
+]
+
+/**
+ * Layouts whose content is the deck metadata rather than body copy. They carry
+ * no bullets by design, so the "a slide must say something" rule does not apply.
+ */
+export const STRUCTURAL_LAYOUTS: SlideLayout[] = ['title', 'closing', 'section']
+
 /** Layouts that are not a plain title-and-bullets slide, for the variety rule. */
 export const NON_BULLET_LAYOUTS: SlideLayout[] = ['comparison', 'stat', 'process', 'table', 'quote']
 
@@ -243,7 +254,7 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
       return
     }
 
-    const layout: SlideLayout = (CONTENT_LAYOUTS as string[]).includes(s.layout as string)
+    const layout: SlideLayout = (ALL_LAYOUTS as string[]).includes(s.layout as string)
       ? (s.layout as SlideLayout)
       : 'bullets'
     if (s.layout && layout !== s.layout) {
@@ -339,7 +350,7 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
       (table?.rows.length ?? 0) > 0 ||
       !!stat ||
       isStr(s.quote)
-    if (!hasContent) {
+    if (!hasContent && !STRUCTURAL_LAYOUTS.includes(layout)) {
       note('content', 'nothing left to render after validation', false)
       return
     }

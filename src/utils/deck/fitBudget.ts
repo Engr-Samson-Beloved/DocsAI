@@ -82,12 +82,19 @@ export interface MeasuredItem {
   spaceAfterIn?: number
 }
 
-/** Total estimated height of a stack of text runs, in inches. */
+/**
+ * Total estimated height of a stack of text runs, in inches.
+ *
+ * Paragraph spacing is counted BETWEEN items only. Charging it after the last
+ * paragraph as well overstates every box by one gap, which for single-line
+ * chrome (a 12pt eyebrow in a 0.28in box) is enough to report 103% fill on text
+ * that plainly fits.
+ */
 export function estimateHeightIn(items: MeasuredItem[], boxWidthIn: number): number {
-  return items.reduce((total, item) => {
+  return items.reduce((total, item, i) => {
     const lines = estimateLines(item.text, boxWidthIn, item.fontPt, item.fontFace)
     const lineHeightIn = (item.fontPt * LINE_HEIGHT_RATIO) / PT_PER_IN
-    const spaceAfter = item.spaceAfterIn ?? PARA_SPACE_AFTER_IN
+    const spaceAfter = i < items.length - 1 ? item.spaceAfterIn ?? PARA_SPACE_AFTER_IN : 0
     return total + lines * lineHeightIn + spaceAfter
   }, 0)
 }

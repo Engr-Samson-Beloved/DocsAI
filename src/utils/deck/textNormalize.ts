@@ -37,14 +37,26 @@
  * ("state-\nof-the-art") rejoins to "state-of-the-art" because the following
  * segment starts a new hyphenated part.
  */
+/**
+ * Second halves of compounds that are genuinely hyphenated in English. When a
+ * line break falls inside one of these, the hyphen belongs to the word and must
+ * survive - otherwise "bandwidth-\nintensive" rejoins as "bandwidthintensive".
+ */
+const COMPOUND_TAILS =
+  /^(intensive|based|driven|aware|specific|oriented|related|defined|level|side|wide|scale|time|critical|effective|efficient|friendly|free|only|like|type|style|grained|hop|end|to|and|or|of|in|on|by)\b/i
+
 export function dehyphenate(text: string): string {
   // Soft hyphen: an explicit "break here" character that must never survive.
   let out = text.replace(/­/g, '')
 
-  // word- \n word  ->  wordword   (the typesetting case)
-  // Guarded so that a following capital, which usually signals a real compound
-  // like "Software-\nDefined", keeps its hyphen.
-  out = out.replace(/([a-z])-[ \t]*\r?\n[ \t]*([a-z])/g, '$1$2')
+  // word- \n word  ->  wordword   (the typesetting case), unless the tail is a
+  // recognised compound suffix, in which case the hyphen is real.
+  out = out.replace(/([a-z])-[ \t]*\r?\n[ \t]*([a-z]\w*)/g, (match, head: string, tail: string) =>
+    COMPOUND_TAILS.test(tail) ? `${head}-${tail}` : `${head}${tail}`
+  )
+
+  // A following capital almost always signals a real compound
+  // ("Software-\nDefined"), so that hyphen is kept.
   out = out.replace(/([A-Za-z])-[ \t]*\r?\n[ \t]*([A-Z])/g, '$1-$2')
 
   return out

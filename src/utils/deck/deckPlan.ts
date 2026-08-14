@@ -94,6 +94,35 @@ export function extractSteps(sentences: string[]): SlideStep[] {
   return steps.length >= 3 ? steps : []
 }
 
+/**
+ * True when an extracted table is coherent enough to render.
+ *
+ * PDF tables whose header cells wrap onto a second line come out of extraction
+ * as ragged rows - the SDN report's controller comparison produced a header of
+ * "SDN | Language Southbound | Key Strength | Enterprise" followed by a row of
+ * "Controller | Protocol | Suitability". Rendering that is worse than not
+ * rendering it: the slide looks authoritative and says nothing. A ragged table
+ * is dropped and the section falls back to bullets.
+ */
+export function normalizeTable(table: DocTable): DocTable | null {
+  const width = table.headers.length
+  if (width < 2 || width > 5) return null
+
+  // Header cells must be short labels, not sentence fragments. A header that
+  // reads as prose means the column detection split the wrong gaps.
+  if (table.headers.some(h => !h.trim() || h.split(/\s+/).length > 5)) return null
+
+  // Keep only rows that match the header width. A single ragged row - usually a
+  // cell that wrapped onto a second line - should not discard an otherwise
+  // sound table, but a table that is mostly ragged was mis-parsed and is worse
+  // than useless on a slide: it looks authoritative and says nothing.
+  const clean = table.rows.filter(r => r.length === width && r.some(c => c.trim()))
+  if (clean.length < 2) return null
+  if (clean.length / table.rows.length < 0.6) return null
+
+  return { caption: table.caption, headers: table.headers, rows: clean.slice(0, 6) }
+}
+
 /** Splits a section into two contrasting columns when its content is a comparison. */
 function extractColumns(
   sections: DocSectionNode[],
@@ -294,9 +323,11 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
     }
   }
 
-  // Reserve: title, closing, and a references slide when there are references.
+  // Reserve: title, closing, a references slide, and a slot for each source
+  // table that a comparison slide will not itself display.
   const hasReferences = tree.references.length > 0
-  const reserved = 2 + (hasReferences ? 1 : 0)
+  const harvestable = countHarvestableTables(groups)
+  const reserved = 2 + (hasReferences ? 1 : 0) + harvestable
   const contentBudget = Math.max(1, maxTotal - reserved)
 
   // Every chapter keeps at least its strongest section, then the budget goes to
@@ -312,6 +343,7 @@ export function planDeck(tree: DocTree, options: PlanOptions): DeckPlanResult {
     if (slide) contentSlides.push(slide)
   }
 
+  harvestTables(contentSlides, selected, spec, decisions)
   ensureLayoutVariety(contentSlides, spec, decisions)
 
   const slides: PlannedSlide[] = [
@@ -403,30 +435,21 @@ function buildSlide(
   const takeaway = deriveTakeaway(sentences, primary.heading)
   const notes = buildSpeakerNotes({ spec, heading: primary.heading, takeaway, sentences })
 
-  // 1. A real table in the source always beats prose about it.
-  const table = sections.flatMap(s => s.tables).find(t => t.headers.length >= 2 && t.rows.length >= 1)
-  if (table) {
-    decisions.push(`${base.title}: table layout (source table with ${table.rows.length} rows)`)
-    return {
-      ...base,
-      layout: 'table',
-      table: {
-        headers: table.headers.slice(0, 5),
-        rows: table.rows.slice(0, 6).map(r => r.slice(0, 5)),
-        caption: table.caption || undefined,
-      },
-      notes,
-      takeaway,
-    }
-  }
-
-  // 2. A contrast pair the document itself drew.
+  // 1. A contrast the document itself drew beats anything inferred. Its tables
+  //    are not lost: they are harvested onto their own slides afterwards.
   if (group.comparison) {
     const columns = extractColumns(sections, spec)
     if (columns) {
       decisions.push(`${base.title}: comparison layout`)
       return { ...base, layout: 'comparison', columns, notes, takeaway }
     }
+  }
+
+  // 2. A real table in the source beats prose about it.
+  const table = sections.map(s => s.tables).flat().map(normalizeTable).find(Boolean)
+  if (table) {
+    decisions.push(`${base.title}: table layout (source table with ${table.rows.length} rows)`)
+    return { ...base, layout: 'table', table, notes, takeaway }
   }
 
   // 3. An explicit sequence of stages.
@@ -457,6 +480,71 @@ function buildSlide(
   if (bullets.length === 0) return null
 
   return { ...base, layout: 'bullets', bullets, notes, takeaway }
+}
+
+/** Tables that a comparison slide will not itself display, capped at two. */
+const MAX_HARVESTED_TABLES = 2
+
+function countHarvestableTables(groups: SlideGroup[]): number {
+  let n = 0
+  for (const group of groups) {
+    if (!group.comparison) continue
+    n += group.sections.flatMap(s => s.tables).map(normalizeTable).filter(Boolean).length
+  }
+  return Math.min(n, MAX_HARVESTED_TABLES)
+}
+
+/**
+ * Gives a source table its own slide when the slide built from its section
+ * used a different layout.
+ *
+ * Without this, merging "Advantages" and "Limitations" into one comparison
+ * slide silently discarded the "Traditional vs SDN" table those sections
+ * carried - and that table is the single most presentable artifact in the
+ * document. The table slide is inserted directly after its source slide so the
+ * argument still reads in order.
+ */
+function harvestTables(
+  slides: PlannedSlide[],
+  groups: SlideGroup[],
+  spec: PresentationSpec,
+  decisions: string[]
+): void {
+  let added = 0
+
+  for (const group of groups) {
+    if (added >= MAX_HARVESTED_TABLES) break
+
+    const sourceIndex = slides.findIndex(s => sameRefs(s.sourceRefs, sourceRefsFor(group.sections)))
+    if (sourceIndex === -1) continue
+    if (slides[sourceIndex].layout === 'table') continue
+
+    for (const raw of group.sections.flatMap(s => s.tables)) {
+      if (added >= MAX_HARVESTED_TABLES) break
+      const table = normalizeTable(raw)
+      if (!table) continue
+
+      const heading = table.caption || `${group.sections[0].heading} at a glance`
+      const sentences = group.sections.flatMap(s => s.sentences)
+      const takeaway = deriveTakeaway(sentences, heading)
+
+      slides.splice(sourceIndex + 1 + added, 0, {
+        layout: 'table',
+        title: heading.toUpperCase().slice(0, 58),
+        eyebrow: eyebrowFor(group.sections),
+        table,
+        notes: buildSpeakerNotes({ spec, heading, takeaway, sentences }),
+        takeaway,
+        sourceRefs: sourceRefsFor(group.sections),
+      })
+      added++
+      decisions.push(`harvested a ${table.rows.length}-row table from §${group.sections[0].id} onto its own slide`)
+    }
+  }
+}
+
+function sameRefs(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
 /**
