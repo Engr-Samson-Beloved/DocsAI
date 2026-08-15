@@ -430,7 +430,7 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
 
     slides.push({
       layout,
-      title,
+      title: cleanTitle,
       role: isStr(s.role) ? s.role : undefined,
       subtitle: isStr(s.subtitle) ? s.subtitle.trim() : undefined,
       caption: isStr(s.caption) ? s.caption.trim() : undefined,
