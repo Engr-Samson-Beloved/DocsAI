@@ -329,7 +329,7 @@ export function paintCards(
     const textBox: Box = {
       x: cell.x + pad,
       y: labelBox.y + labelBox.h + 0.06,
-      w: innerW,
+      w,
       h: cell.h - (labelBox.y - cell.y) - labelBox.h - pad - 0.06,
     }
     rec.text(`card-text-${i}`, textBox, item, {
