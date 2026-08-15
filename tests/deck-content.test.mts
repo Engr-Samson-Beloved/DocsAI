@@ -51,7 +51,7 @@ describe('dehyphenate', () => {
 
   it('strips soft hyphens entirely', async () => {
     const { dehyphenate } = await textNormalize()
-    assert.equal(dehyphenate('netÂ­work'), 'network')
+    assert.equal(dehyphenate('net\u00ADwork'), 'network')
   })
 })
 
@@ -132,7 +132,7 @@ describe('lintBullet', () => {
   it('rejects an embedded newline and a literal bullet glyph', async () => {
     const { lintBullet } = await textNormalize()
     assert.ok(lintBullet('Latency falls sharply\n').includes('contains-newline'))
-    assert.ok(lintBullet('â€¢ Latency falls sharply').includes('literal-bullet-glyph'))
+    assert.ok(lintBullet('\u2022 Latency falls sharply').includes('literal-bullet-glyph'))
   })
 
   it('enforces the word cap', async () => {

@@ -128,9 +128,9 @@ describe('deck geometry fits the canvas', () => {
 
 describe('the renderer holds no literal geometry', () => {
   it('imports its geometry from layout.ts', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
-    assert.match(src, /from '\.\/layout'/, 'the renderer does not import the layout module')
-    assert.match(src, /assertOnCanvas/, 'the renderer does not assert shapes are on canvas')
+    const src = read('src/utils/deck/slideRecorder.ts')
+    assert.match(src, /from '\.\/layout'/, 'the recorder does not import the layout module')
+    assert.match(src, /assertOnCanvas/, 'the recorder does not assert shapes are on canvas')
   })
 
   it('routes every shape through the recorder, which asserts on canvas', () => {
