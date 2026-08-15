@@ -47,7 +47,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const { extractPdfAsHtml } = await import('../src/utils/pdfLoader.ts')
 const { buildDocTree } = await import('../src/utils/deck/docTree.ts')
-const { planDeck } = await import('../src/utils/deck/deckPlan.ts')
+const { planDeck, foldUnderfilledSlides } = await import('../src/utils/deck/deckPlan.ts')
+const { groundNotes } = await import('../src/utils/deck/speakerNotes.ts')
 const { validateSlidePlan } = await import('../src/utils/deck/slidePlan.ts')
 const { renderDeck } = await import('../src/utils/deck/deckRenderer.ts')
 const { refinePlanWithLlm } = await import('../src/utils/deck/llmSummarize.ts')
@@ -155,7 +156,13 @@ if (validation.fatal.length > 0) {
 }
 
 // Metadata is not part of what the validator rebuilds, so re-attach it.
-const validPlan = { metadata, slides: validation.plan.slides }
+// The underfill fold runs again here: validation can drop a bullet the model
+// wrote, leaving a slide with one.
+const grounded = groundNotes(validation.plan.slides, DEFAULT_SPEC)
+for (const note of grounded.replaced) console.log(`      regenerated notes - ${note}`)
+const folded = foldUnderfilledSlides(grounded.slides, DEFAULT_SPEC)
+for (const note of folded.notes) console.log(`      ${note}`)
+const validPlan = { metadata, slides: folded.slides }
 
 // --- 5. Render ----------------------------------------------------------
 

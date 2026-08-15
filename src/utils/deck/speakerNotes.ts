@@ -174,6 +174,39 @@ export function buildNotesFromSlide(slide: PlannedSlide, spec: PresentationSpec)
   return notes.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * Replaces any notes that reference something absent from their slide.
+ *
+ * A model writes fluent notes and will happily mention a term from the source
+ * that never made it onto the slide - "QoS", "ECMP" - leaving the presenter
+ * pointing at nothing. Rather than argue with it, the offending notes are
+ * regenerated from the slide's own text, which cannot be ungrounded by
+ * construction.
+ */
+export function groundNotes(
+  slides: PlannedSlide[],
+  spec: PresentationSpec
+): { slides: PlannedSlide[]; replaced: string[] } {
+  const replaced: string[] = []
+
+  const grounded = slides.map(slide => {
+    const onSlide = slideText(slide).join(' ').toLowerCase()
+    const offending = salientTokens(slide.notes).filter(token => {
+      const needle = token.toLowerCase().trim()
+      if (needle.length < 3) return false
+      if (/^(the|and|but|be|ready|then|lead|stress|expect|open|mention)$/i.test(needle)) return false
+      return !onSlide.includes(needle)
+    })
+
+    if (offending.length === 0) return slide
+
+    replaced.push(`${slide.title}: notes mentioned ${offending.slice(0, 3).join(', ')}`)
+    return { ...slide, notes: buildNotesFromSlide(slide, spec) }
+  })
+
+  return { slides: grounded, replaced }
+}
+
 /** A table's most quotable rows, phrased as things to say. */
 function tableTalkingPoints(table: NonNullable<PlannedSlide['table']>): string[] {
   return table.rows.slice(0, 3).map(row => {

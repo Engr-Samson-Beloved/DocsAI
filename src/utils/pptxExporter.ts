@@ -23,7 +23,8 @@
  */
 
 import { buildDocTree } from './deck/docTree'
-import { planDeck } from './deck/deckPlan'
+import { planDeck, foldUnderfilledSlides } from './deck/deckPlan'
+import { groundNotes } from './deck/speakerNotes'
 import { validateSlidePlan } from './deck/slidePlan'
 import { renderDeck } from './deck/deckRenderer'
 import { DEFAULT_SPEC, type PresentationSpec } from './deck/presentationSpec'
@@ -150,7 +151,12 @@ export async function exportPresentationPptx(
     )
   }
 
-  const validPlan = { metadata, slides: validation.plan.slides }
+  // Validation can drop a bullet, leaving a slide with one; fold those away
+  // before rendering rather than shipping a near-empty slide.
+  const validPlan = {
+    metadata,
+    slides: foldUnderfilledSlides(groundNotes(validation.plan.slides, spec).slides, spec).slides,
+  }
   const { pptx, report } = await renderDeck(validPlan, spec)
 
   // The gate runs on every generation, not just in CI. An error here means a

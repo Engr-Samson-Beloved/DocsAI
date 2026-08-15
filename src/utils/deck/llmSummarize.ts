@@ -81,6 +81,9 @@ Other rules:
   or name to emphasise, and the likely examiner question. Fewer than 40 words is
   a failure; count them.
 - "takeaway" is one sentence, the spoken hook for the slide.
+- Notes may mention ONLY things that appear in that slide's own text. Naming a
+  term, number or product that is not on the slide tells the presenter to point
+  at something the audience cannot see.
 TITLES - rewrite every one:
 - 2 to 6 words. Name the SUBJECT of the slide, in the document's own vocabulary.
 - A title must never name a location in the document. Banned outright:
@@ -88,7 +91,7 @@ TITLES - rewrite every one:
   "Overview", "Introduction" alone, "Summary of Existing Works", "Core
   Concepts", "Theoretical Background" alone, "General", "Section 3", and any
   leading section number.
-- No colon splicing two labels. One idea per title.
+- No colon anywhere in a title. One idea per title.
 - Prefer a title that states the finding: "RFID CUTS HOTEL ENERGY 20-35%" beats
   "ADVANTAGES"; "WHY ENTERPRISE NETWORKS CONGEST" beats "INTRODUCTION".
 - Every title in the deck must be different from every other.
@@ -244,8 +247,14 @@ function mergeWithDraft(draft: SlidePlan, response: unknown): SlidePlan {
         // The model MAY rewrite the title - naming the subject is exactly the
         // job it is better at than a rule - but a bad one cannot ship: the gate
         // rejects banned vocabulary, duplicates and anything over six words.
+        // ...except on the title slide, whose title is the REPORT's title as
+        // parsed from the cover page. That is a fact about the document, not a
+        // heading to be improved, and a model that "improves" it puts a
+        // different title on the student's seminar than the one they submitted.
         title:
-          typeof proposed.title === 'string' && proposed.title.trim().length >= 3
+          original.layout === 'title' || original.layout === 'closing'
+            ? original.title
+            : typeof proposed.title === 'string' && proposed.title.trim().length >= 3
             ? proposed.title.trim()
             : original.title,
         caption:

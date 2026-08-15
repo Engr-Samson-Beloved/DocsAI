@@ -474,6 +474,14 @@ export function checkTitleLength(report: RenderReport): QaFinding[] {
 
   for (const slide of report.slides) {
     if (slide.layout === 'title' || slide.layout === 'closing') continue
+
+    // One idea per title. None of the reference deck's titles carries a colon.
+    if (slide.title.includes(':')) {
+      findings.push(
+        err('title-colon', `"${slide.title}" splices two labels with a colon`, slide.index)
+      )
+    }
+
     const n = wordCount(slide.title)
     if (n < 2 || n > 6) {
       findings.push(err('title-length', `"${slide.title}" is ${n} words; titles are 2-6`, slide.index))

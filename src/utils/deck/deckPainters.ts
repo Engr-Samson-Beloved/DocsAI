@@ -43,10 +43,13 @@ export function titleBlock(
   footer: string
 ): Box {
   const pt = spec.type.sectionHeading.maxPt
-  const lines = estimateLines(slide.title, TITLE.w, pt, spec.headingFace)
-  const height = Math.max(TITLE_MIN_H, lines * lineIn(pt) + 0.12)
+  // Upper case, as in the accredited reference deck. Applied at render so the
+  // planner and the model can work in ordinary prose.
+  const text = slide.title.toUpperCase()
+  const lines = estimateLines(text, TITLE.w, pt, spec.headingFace)
+  const height = Math.max(TITLE_MIN_H, (lines * lineIn(pt)) / FILL_LIMIT + 0.06)
 
-  rec.text('title', { ...TITLE, h: height }, slide.title, {
+  rec.text('title', { ...TITLE, h: height }, text, {
     role: 'heading',
     fontPt: pt,
     fontFace: spec.headingFace,

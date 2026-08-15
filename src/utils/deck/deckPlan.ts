@@ -770,4 +770,44 @@ function buildReferencesSlide(references: string[], spec: PresentationSpec): Pla
   }
 }
 
+/**
+ * Folds or drops under-filled slides in a VALIDATED plan.
+ *
+ * The planner already does this on its own drafts, but validation runs after
+ * the model rewrites the deck and can drop a bullet that no longer passes the
+ * claim test - so a slide that left the planner with four bullets can reach the
+ * renderer with one. This is the same rule applied at the last possible moment.
+ */
+export function foldUnderfilledSlides(
+  slides: PlannedSlide[],
+  spec: PresentationSpec
+): { slides: PlannedSlide[]; notes: string[] } {
+  const out = [...slides]
+  const notes: string[] = []
+
+  for (let i = out.length - 1; i >= 0; i--) {
+    const slide = out[i]
+    if (slide.layout !== 'bullets' && slide.layout !== 'cards') continue
+    if ((slide.bullets?.length ?? 0) >= 2) continue
+
+    const host = [out[i - 1], out[i + 1]].find(
+      candidate =>
+        candidate &&
+        (candidate.layout === 'bullets' || candidate.layout === 'cards') &&
+        (candidate.bullets?.length ?? 0) + (slide.bullets?.length ?? 0) <= spec.deck.maxBulletsPerSlide
+    )
+
+    if (host) {
+      host.bullets = [...(host.bullets ?? []), ...(slide.bullets ?? [])]
+      host.sourceRefs = [...new Set([...host.sourceRefs, ...slide.sourceRefs])]
+      notes.push(`folded under-filled "${slide.title}" into "${host.title}"`)
+    } else {
+      notes.push(`dropped under-filled "${slide.title}"`)
+    }
+    out.splice(i, 1)
+  }
+
+  return { slides: out, notes }
+}
+
 export { isClaim }

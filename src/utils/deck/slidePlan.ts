@@ -297,6 +297,13 @@ export function validateSlidePlan(raw: unknown, spec: PresentationSpec): Validat
       return
     }
 
+    // One idea per title. A colon splices two labels together
+    // ("Core Concepts: Theoretical Background") and neither half names a
+    // subject on its own.
+    const spliced = title.includes(':')
+    const cleanTitle = spliced ? title.split(':').pop()!.trim() || title.replace(/:/g, ' ').trim() : title
+    if (spliced) note('title', `"${title}" splices two labels with a colon; kept the specific half`, true)
+
     const layout: SlideLayout = (ALL_LAYOUTS as string[]).includes(s.layout as string)
       ? (s.layout as SlideLayout)
       : 'bullets'
