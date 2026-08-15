@@ -23,6 +23,7 @@ import {
 import type { PresentationSpec } from './presentationSpec'
 import type { PlannedSlide, SlidePlan } from './slidePlan'
 import { estimateLines } from './fitBudget'
+import { hasFiniteVerb } from './textNormalize'
 import type { SlideRecorder } from './slideRecorder'
 
 /** Points-to-inches for a single line at a given size. */
