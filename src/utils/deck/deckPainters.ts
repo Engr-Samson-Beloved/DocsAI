@@ -22,7 +22,7 @@ import {
 } from './layout'
 import type { PresentationSpec } from './presentationSpec'
 import type { PlannedSlide, SlidePlan } from './slidePlan'
-import { estimateLines } from './fitBudget'
+import { estimateLines, estimateHeightIn } from './fitBudget'
 import { hasFiniteVerb } from './textNormalize'
 import type { SlideRecorder } from './slideRecorder'
 
@@ -112,6 +112,29 @@ function captionBand(
 
 // --- Title and closing ---------------------------------------------------
 
+/**
+ * The identity block, in the order the accredited cover pages use.
+ * Short trailing fields are merged when vertical space runs out.
+ */
+function identityLines(m: SlidePlan['metadata'], merge: number): string[] {
+  const lines = [
+    m.studentName,
+    m.matricNo ? `Matric No: ${m.matricNo}` : '',
+    [m.department && `Department of ${titleCase(m.department)}`, m.school].filter(Boolean).join(', '),
+    m.institution ? titleCase(m.institution) : '',
+    m.supervisorName ? `Supervisor: ${m.supervisorName}` : '',
+    m.session ? `Session ${m.session}` : '',
+  ].filter(s => s && s.trim())
+
+  // Fold the last lines together rather than let them overflow: two short
+  // fields on one line read fine, a clipped block does not.
+  for (let i = 0; i < merge && lines.length > 3; i++) {
+    const last = lines.pop()!
+    lines[lines.length - 1] = `${lines[lines.length - 1]}  |  ${last}`
+  }
+  return lines
+}
+
 export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: PresentationSpec) {
   const m = plan.metadata
   rec.setBackground(spec.palette.inverse)
@@ -119,7 +142,55 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
   const slide = plan.slides[0]
   const titlePt = spec.type.title.minPt
   const titleLines = estimateLines(m.title, HERO.w, titlePt, spec.headingFace, true)
-  const titleH = Math.max(1.2, titleLines * lineIn(titlePt) + 0.2)
+  const titleH = Math.max(1.2, (titleLines * lineIn(titlePt)) / FILL_LIMIT + 0.1)
+
+  // Everything between the hero's top and the bottom margin has to hold the
+  // title, an optional subtitle and the identity block.
+  const available = SLIDE_H - MARGIN - HERO.y
+
+  const measureIdentity = (lines: string[], pt: number) =>
+    estimateHeightIn(lines.map(text => ({ text, fontPt: pt, fontFace: spec.bodyFace })), HERO.w) /
+    FILL_LIMIT
+
+  const measureSubtitle = (text: string) =>
+    Math.max(0.5, (estimateLines(text, HERO.w, spec.type.body.minPt, spec.bodyFace) * lineIn(spec.type.body.minPt)) / FILL_LIMIT + 0.06)
+
+  /**
+   * The fit ladder. Preferences in order: keep the subtitle, keep the body
+   * size, keep generous gaps, keep every identity field on its own line.
+   *
+   * Sizing the identity block from what the title happened to leave over is the
+   * production defect this replaces: a cover that supplies school AND session
+   * gives six lines where the SDN sample gives four, and six did not fit.
+   */
+  type Fit = { gapA: number; gapB: number; pt: number; subtitle: boolean; merge: number }
+  const ladder: Fit[] = []
+  for (const merge of [0, 1, 2]) {
+    for (const subtitle of [true, false]) {
+      for (const pt of [spec.type.body.minPt, spec.type.bodyAbsoluteMinPt]) {
+        for (const [gapA, gapB] of [[0.28, 0.35], [0.2, 0.24], [0.14, 0.16]]) {
+          ladder.push({ gapA, gapB, pt, subtitle, merge })
+        }
+      }
+    }
+  }
+
+  const wanted = slide?.subtitle?.trim()
+  let chosen = ladder[ladder.length - 1]
+  let identity = identityLines(m, chosen.merge)
+  let identityH = measureIdentity(identity, chosen.pt)
+
+  for (const fit of ladder) {
+    const lines = identityLines(m, fit.merge)
+    const idH = measureIdentity(lines, fit.pt)
+    const subH = wanted && fit.subtitle ? measureSubtitle(wanted) + fit.gapB : 0
+    if (titleH + fit.gapA + subH + idH <= available) {
+      chosen = fit
+      identity = lines
+      identityH = idH
+      break
+    }
+  }
 
   const titleBox: Box = { x: HERO.x, y: HERO.y, w: HERO.w, h: titleH }
   rec.text('deck-title', titleBox, m.title, {
@@ -133,17 +204,11 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
     lineSpacingMultiple: 1.15,
   })
 
-  let cursor = titleBox.y + titleBox.h + 0.28
+  let cursor = titleBox.y + titleBox.h + chosen.gapA
 
-  if (slide?.subtitle) {
-    const subLines = estimateLines(slide.subtitle, HERO.w, spec.type.body.minPt, spec.bodyFace)
-    const subBox: Box = {
-      x: HERO.x,
-      y: cursor,
-      w: HERO.w,
-      h: Math.max(0.5, subLines * lineIn(spec.type.body.minPt) + 0.1),
-    }
-    rec.text('deck-subtitle', subBox, slide.subtitle, {
+  if (wanted && chosen.subtitle) {
+    const subBox: Box = { x: HERO.x, y: cursor, w: HERO.w, h: measureSubtitle(wanted) }
+    rec.text('deck-subtitle', subBox, wanted, {
       role: 'body',
       fontPt: spec.type.body.minPt,
       fontFace: spec.bodyFace,
@@ -151,27 +216,19 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
       align: 'center',
       valign: 'middle',
     })
-    cursor += subBox.h + 0.35
+    cursor += subBox.h + chosen.gapB
   }
 
-  const identity = [
-    m.studentName,
-    m.matricNo ? `Matric No: ${m.matricNo}` : '',
-    [m.department && `Department of ${titleCase(m.department)}`, m.school].filter(Boolean).join(', '),
-    m.institution ? titleCase(m.institution) : '',
-    m.supervisorName ? `Supervisor: ${m.supervisorName}` : '',
-    m.session ? `Session ${m.session}` : '',
-  ].filter(s => s && s.trim())
-
+  // The block gets the height its own text needs, capped by what is left.
   const identityBox: Box = {
     x: HERO.x,
     y: cursor,
     w: HERO.w,
-    h: Math.max(1.2, SLIDE_H - cursor - MARGIN),
+    h: Math.min(Math.max(identityH, 0.5), SLIDE_H - MARGIN - cursor),
   }
   rec.bullets('deck-identity', identityBox, identity, {
     role: 'body',
-    fontPt: spec.type.body.minPt,
+    fontPt: chosen.pt,
     fontFace: spec.bodyFace,
     color: spec.palette.inverseMuted,
     bullet: false,
@@ -183,7 +240,23 @@ export function paintClosingSlide(rec: SlideRecorder, plan: SlidePlan, spec: Pre
   const m = plan.metadata
   rec.setBackground(spec.palette.inverse)
 
-  const [top, bottom] = rows({ x: HERO.x, y: HERO.y + 0.6, w: HERO.w, h: HERO.h - 1.2 }, 2, 0.4)
+  const detail = [
+    'Questions and Comments',
+    [m.studentName, m.matricNo, m.institution && titleCase(m.institution)]
+      .filter(Boolean)
+      .join('  |  '),
+  ].filter(Boolean)
+
+  // Measured, not halved: the detail line carries three fields and can wrap.
+  const detailH =
+    estimateHeightIn(
+      detail.map(text => ({ text, fontPt: spec.type.body.minPt, fontFace: spec.bodyFace })),
+      HERO.w
+    ) / FILL_LIMIT
+
+  const area = { x: HERO.x, y: HERO.y + 0.6, w: HERO.w, h: HERO.h - 1.2 }
+  const top: Box = { ...area, h: Math.max(0.8, area.h - detailH - 0.4) }
+  const bottom: Box = { x: area.x, y: top.y + top.h + 0.4, w: area.w, h: detailH }
 
   rec.text('closing-title', top, 'THANK YOU', {
     role: 'title',
@@ -195,24 +268,14 @@ export function paintClosingSlide(rec: SlideRecorder, plan: SlidePlan, spec: Pre
     valign: 'bottom',
   })
 
-  rec.bullets(
-    'closing-detail',
-    bottom,
-    [
-      'Questions and Comments',
-      [m.studentName, m.matricNo, m.institution && titleCase(m.institution)]
-        .filter(Boolean)
-        .join('  |  '),
-    ].filter(Boolean),
-    {
-      role: 'body',
-      fontPt: spec.type.body.minPt,
-      fontFace: spec.bodyFace,
-      color: spec.palette.inverseMuted,
-      bullet: false,
-      align: 'center',
-    }
-  )
+  rec.bullets('closing-detail', bottom, detail, {
+    role: 'body',
+    fontPt: spec.type.body.minPt,
+    fontFace: spec.bodyFace,
+    color: spec.palette.inverseMuted,
+    bullet: false,
+    align: 'center',
+  })
 }
 
 // --- Content layouts -----------------------------------------------------
