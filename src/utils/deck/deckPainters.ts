@@ -254,7 +254,7 @@ export function paintCards(
   // font down until the grid fits. Laying out first and hoping the text fits is
   // what put a 296%-full card on the slide.
   const labelPt = spec.type.body.minPt
-  let bodyPt = spec.type.caption.maxPt
+  let bodyPt = 0
   let cellH = 0
 
   for (let pt = spec.type.caption.maxPt; pt >= spec.type.caption.minPt; pt--) {
@@ -263,7 +263,7 @@ export function paintCards(
         const labelH =
           (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT
         const textH = (estimateLines(item, innerW, pt, spec.bodyFace) * lineIn(pt)) / FILL_LIMIT
-        return pad * 2 + 0.42 + 0.12 + labelH + 0.06 + textH + 0.08
+        return pad * 2 + 0.42 + 0.12 + labelH + 0.06 + textH + 0.1
       })
     )
     if (tallest * rowCount + rowGap * (rowCount - 1) <= body.h) {
@@ -271,11 +271,14 @@ export function paintCards(
       cellH = tallest
       break
     }
-    bodyPt = pt
-    cellH = tallest
   }
 
-  cellH = Math.min(cellH, (body.h - rowGap * (rowCount - 1)) / rowCount)
+  // Cards only when they genuinely fit. Clamping the cell height instead just
+  // moves the overflow inside the card, where it is harder to see.
+  if (bodyPt === 0) {
+    paintBullets(rec, slide, spec, body, spec.type.body.minPt)
+    return
+  }
   const stackH = cellH * rowCount + rowGap * (rowCount - 1)
   const top = body.y + Math.max(0, (body.h - stackH) / 2)
 
