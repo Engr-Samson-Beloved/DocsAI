@@ -557,11 +557,13 @@ export function paintProcess(
     })
 
     if (hasBodies && step.body.trim()) {
+      // Height taken from the measurement the card was sized with, not from
+      // whatever space happens to be left: leftovers drift as the title grows.
       const bodyBox: Box = {
         x: cell.x + pad,
         y: titleBox.y + titleBox.h + 0.06,
         w: cell.w - pad * 2,
-        h: cell.h - (titleBox.y - cell.y) - titleBox.h - pad - 0.06,
+        h: Math.min(bodyH, cell.h - (titleBox.y - cell.y) - titleBox.h - pad - 0.06),
       }
       rec.text(`step-body-${i}`, bodyBox, step.body, {
         role: 'caption',
