@@ -652,7 +652,16 @@ function tableCaption(table: DocTable, sentences: string[]): string | undefined 
     return headers.filter(h => h && lower.includes(h.split(/\s+/)[0])).length >= 2
   })
 
-  return best ? shortenPredicate(best, 26) : undefined
+  if (best) return shortenPredicate(best, 26)
+
+  // Nothing in the prose states the outcome, so describe what the table sets
+  // out. Derived entirely from the headers, so it cannot assert anything the
+  // table does not show.
+  const [first, ...entities] = table.headers
+  if (entities.length >= 2) {
+    return `${entities.join(' and ')} compared across ${table.rows.length} ${first.toLowerCase()} rows`
+  }
+  return undefined
 }
 
 function selectGroups(groups: SlideGroup[], budget: number, decisions: string[]): SlideGroup[] {

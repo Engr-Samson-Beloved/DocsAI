@@ -723,7 +723,7 @@ export function paintTable(
   // Rows are sized to fill the area rather than sitting in its top third,
   // which is what left the bottom half of a table slide empty.
   const rowCount = table.rows.length + 1
-  const h = Math.min(area.h, rowCount * 0.62)
+  const h = Math.min(area.h, Math.max(rowCount * 0.62, area.h * 0.9))
 
   rec.table('body-table', { ...area, h }, table.headers, table.rows, spec)
 }

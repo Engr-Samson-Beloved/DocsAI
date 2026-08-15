@@ -236,7 +236,12 @@ function mergeWithDraft(draft: SlidePlan, response: unknown): SlidePlan {
         bullets: Array.isArray(proposed.bullets) && proposed.bullets.length > 0
           ? proposed.bullets
           : original.bullets,
-        notes: typeof proposed.notes === 'string' && proposed.notes.trim() ? proposed.notes : original.notes,
+        notes:
+          original.layout === 'title' || original.layout === 'closing'
+            ? original.notes
+            : typeof proposed.notes === 'string' && proposed.notes.trim()
+            ? proposed.notes
+            : original.notes,
         takeaway:
           typeof proposed.takeaway === 'string' && proposed.takeaway.trim()
             ? proposed.takeaway
