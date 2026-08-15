@@ -368,11 +368,26 @@ function cardBody(claim: string, label: string): string {
  */
 function cardLabel(claim: string): string {
   const words = claim.split(/\s+/).filter(Boolean)
-  const stop = words.findIndex(w =>
-    /^(is|are|was|were|has|have|enables?|allows?|provides?|requires?|reduces?|increases?|improves?|offers?|supports?|delivers?|creates?|causes?|makes?|shows?|remains?|becomes?|can|may|must|will|should)$/i.test(w)
-  )
-  const take = stop > 1 ? stop : Math.min(4, words.length)
-  return words.slice(0, take).join(' ').replace(/[,;:.]$/, '')
+
+  // The subject is everything before the first finite verb. Using the shared
+  // detector rather than a hand-written verb list is what stops labels like
+  // "Conventional networks use a" - "use" was simply missing from the list.
+  const stop = words.findIndex(w => hasFiniteVerb(w))
+  let take = stop > 1 ? stop : Math.min(3, words.length)
+
+  // Never end a label on a function word: "SDN enables administrators to".
+  while (
+    take > 1 &&
+    /^(a|an|the|of|to|in|for|on|with|by|as|at|from|and|or|that|which|its|their|this|these)$/i.test(
+      words[take - 1]
+    )
+  ) {
+    take--
+  }
+
+  const label = words.slice(0, take).join(' ').replace(/[,;:.]$/, '')
+  // A bare demonstrative names nothing.
+  return /^(this|that|these|those|it)$/i.test(label) ? words.slice(0, Math.min(3, words.length)).join(' ') : label
 }
 
 export function paintComparison(
