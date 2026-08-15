@@ -213,6 +213,49 @@ the recorded shapes.
 
 ---
 
+## 10a. Defects found in production, after the above
+
+Three, all on paths my fixtures did not exercise.
+
+**`deck-identity` at 105% of its box.** The title slide sized the identity block
+from the space the title happened to leave over
+(`h: Math.max(1.2, SLIDE_H - cursor - MARGIN)`) and never measured it against its
+own content. Every other painter measures; this was the one place the old
+pattern survived. It escaped because the SDN cover supplies neither `school` nor
+`session`, giving four identity lines — a fuller cover gives six, and six did
+not fit under a three-line title plus a subtitle. Replaced with a measured fit
+ladder.
+
+**`deck-identity` at 16pt, rejected by the gate.** Two faults meeting. The fit
+ladder's loop nesting reached the 16pt floor while it still had a free
+line-merge and the subtitle in hand — shrinking type is the most damaging
+concession available and it was being tried third. Re-ordered by what each
+concession costs the reader: tighten gaps → merge trailing identity fields →
+drop the subtitle → 16pt floor.
+
+Underneath it, the gate rejected 16pt outright: `rangeFor` returned
+`spec.type.body` (18–22) for body text, so the standard's documented "16pt
+absolute minimum" was unreachable and the floor check beneath it was dead code.
+The body range now runs from `bodyAbsoluteMinPt`, with a **warning** when a shape
+sits on the floor rather than in the preferred range. A floor that cannot be
+stood on is not a floor.
+
+**`step-body-*` at 96% and 108% on slide 9.** `paintProcess` stepped the body
+size down until the cards fitted, stored it in `bodyPt`, and then drew the text
+at `spec.type.caption.maxPt` — the box was sized at one size and filled at
+another. Only the deterministic path hit it, because its bullets are longer than
+the LLM path's, and my zero-error SDN run had been the `--llm` one. Beneath that,
+the never-fits branch clamped the card height to the available area, moving the
+overflow inside the card as text on text — the exact failure the comment above
+the loop warns against. It now falls back to a bullet list built from the steps,
+which loses the sequence but no words.
+
+The shared shape of all three: **a box sized from leftover space, or filled at a
+size it was not measured at.** That is the first thing to suspect in any future
+overflow report.
+
+---
+
 ## 11. Where this still falls short
 
 Honestly, and in order:
