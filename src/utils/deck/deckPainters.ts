@@ -46,7 +46,7 @@ export function titleBlock(
   // Upper case, as in the accredited reference deck. Applied at render so the
   // planner and the model can work in ordinary prose.
   const text = slide.title.toUpperCase()
-  const lines = estimateLines(text, TITLE.w, pt, spec.headingFace)
+  const lines = estimateLines(text, TITLE.w, pt, spec.headingFace, true)
   const height = Math.max(TITLE_MIN_H, (lines * lineIn(pt)) / FILL_LIMIT + 0.06)
 
   rec.text('title', { ...TITLE, h: height }, text, {
@@ -117,7 +117,7 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
 
   const slide = plan.slides[0]
   const titlePt = spec.type.title.minPt
-  const titleLines = estimateLines(m.title, HERO.w, titlePt, spec.headingFace)
+  const titleLines = estimateLines(m.title, HERO.w, titlePt, spec.headingFace, true)
   const titleH = Math.max(1.2, titleLines * lineIn(titlePt) + 0.2)
 
   const titleBox: Box = { x: HERO.x, y: HERO.y, w: HERO.w, h: titleH }
@@ -264,7 +264,7 @@ export function paintCards(
     const tallest = Math.max(
       ...items.map(item => {
         const labelH =
-          (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT
+          (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace, true) * lineIn(labelPt)) / FILL_LIMIT
         const textH = (estimateLines(item, innerW, pt, spec.bodyFace) * lineIn(pt)) / FILL_LIMIT
         return pad * 2 + 0.42 + 0.12 + labelH + 0.06 + textH + 0.1
       })
@@ -319,7 +319,7 @@ export function paintCards(
     const label = cardLabel(item)
     const w = cell.w - pad * 2
     const labelH =
-      (estimateLines(label, w, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT + 0.04
+      (estimateLines(label, w, labelPt, spec.headingFace, true) * lineIn(labelPt)) / FILL_LIMIT + 0.04
 
     const labelBox: Box = { x: cell.x + pad, y: badge.y + badge.h + 0.12, w, h: labelH }
     rec.text(`card-label-${i}`, labelBox, label, {
@@ -338,7 +338,7 @@ export function paintCards(
       w,
       h: cell.h - (labelBox.y - cell.y) - labelBox.h - pad - 0.06,
     }
-    rec.text(`card-text-${i}`, textBox, item, {
+    rec.text(`card-text-${i}`, textBox, cardBody(item, label), {
       role: 'caption',
       fontPt: bodyPt,
       fontFace: spec.bodyFace,
@@ -347,6 +347,19 @@ export function paintCards(
       valign: 'top',
     })
   })
+}
+
+/**
+ * The rest of the claim, once its label has been lifted out.
+ *
+ * Without this the card printed "Twenty-first century enterprises depend" as a
+ * heading and "Twenty-first century enterprises depend on network
+ * infrastructure" underneath it - the same words twice.
+ */
+function cardBody(claim: string, label: string): string {
+  const rest = claim.slice(label.length).replace(/^[\s,;:-]+/, '').trim()
+  if (rest.split(/\s+/).filter(Boolean).length < 3) return claim
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
 }
 
 /**
@@ -493,7 +506,7 @@ export function paintProcess(
   const bodyPt = spec.type.caption.maxPt
 
   const titleLines = Math.max(
-    ...steps.map(s => estimateLines(s.title, innerW, titlePt, spec.headingFace))
+    ...steps.map(s => estimateLines(s.title, innerW, titlePt, spec.headingFace, true))
   )
   const bodyLines = hasBodies
     ? Math.max(...steps.map(s => (s.body.trim() ? estimateLines(s.body, innerW, bodyPt, spec.bodyFace) : 0)))
@@ -593,7 +606,33 @@ export function paintDiagram(
   const perRow = nodes.length <= 4 ? nodes.length : Math.ceil(nodes.length / 2)
   const rowCount = Math.ceil(nodes.length / perRow)
   const gap = 0.4
-  const rowBoxes = rows(area, rowCount, 0.55)
+  const rowGap = 0.55
+
+  // Height from the tallest node's own text. Filling the row instead left a
+  // three-box diagram as three near-empty columns.
+  const pad = 0.18
+  const nodeW = (area.w - gap * (perRow - 1)) / perRow - pad * 2
+  const titleIn = (spec.type.body.minPt * 1.25) / 72
+  const bodyIn = (spec.type.caption.maxPt * 1.25) / 72
+  const nodeH = Math.min(
+    (area.h - rowGap * (rowCount - 1)) / rowCount,
+    Math.max(
+      ...nodes.map(n => {
+        const tl = estimateLines(n.title, nodeW, spec.type.body.minPt, spec.headingFace, true)
+        const bl = n.body.trim() ? estimateLines(n.body, nodeW, spec.type.caption.maxPt, spec.bodyFace) : 0
+        return pad * 2 + (tl * titleIn) / FILL_LIMIT + (bl > 0 ? 0.04 + (bl * bodyIn) / FILL_LIMIT : 0) + 0.08
+      })
+    )
+  )
+
+  const stackH = nodeH * rowCount + rowGap * (rowCount - 1)
+  const top = area.y + Math.max(0, (area.h - stackH) / 2)
+  const rowBoxes = Array.from({ length: rowCount }, (_, r) => ({
+    x: area.x,
+    y: top + r * (nodeH + rowGap),
+    w: area.w,
+    h: nodeH,
+  }))
 
   nodes.forEach((node, i) => {
     const r = Math.floor(i / perRow)
@@ -608,11 +647,10 @@ export function paintDiagram(
 
     rec.card(`node-${i}`, cell, fill)
 
-    const pad = 0.18
     const hasBody = !!node.body.trim()
     // Measured, not a fraction of the cell: a two-line node label inside a
     // 38%-of-cell box is exactly the overflow the fixed-header bug produced.
-    const titleLines = estimateLines(node.title, cell.w - pad * 2, spec.type.body.minPt, spec.headingFace)
+    const titleLines = estimateLines(node.title, cell.w - pad * 2, spec.type.body.minPt, spec.headingFace, true)
     const titleBox: Box = {
       x: cell.x + pad,
       y: cell.y + pad,
@@ -685,8 +723,7 @@ export function paintTable(
   // Rows are sized to fill the area rather than sitting in its top third,
   // which is what left the bottom half of a table slide empty.
   const rowCount = table.rows.length + 1
-  const naturalH = rowCount * 0.62
-  const h = Math.min(area.h, Math.max(naturalH, area.h * 0.75))
+  const h = Math.min(area.h, rowCount * 0.62)
 
   rec.table('body-table', { ...area, h }, table.headers, table.rows, spec)
 }

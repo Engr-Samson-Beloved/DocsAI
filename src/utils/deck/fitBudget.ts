@@ -57,21 +57,38 @@ export const PARA_SPACE_AFTER_IN = 0.08
  * /72), which is the same formula with consistent units, and the planner and
  * the QA gate both call THIS function so they can never disagree.
  */
+/**
+ * Bold glyphs are wider than regular ones at the same size.
+ *
+ * Ignoring this under-counted a bold card title by a line: the box was sized
+ * for three wrapped lines, LibreOffice laid out four, and the fourth rendered
+ * on top of the body text beneath it. A word-wrap estimate that is optimistic
+ * about width causes overlap, not just tight spacing.
+ */
+const BOLD_WIDTH_FACTOR = 1.09
+
 export function estimateLines(
   text: string,
   boxWidthIn: number,
   fontPt: number,
-  fontFace = 'Calibri'
+  fontFace = 'Calibri',
+  bold = false
 ): number {
   const trimmed = (text ?? '').trim()
   if (!trimmed) return 0
   if (boxWidthIn <= 0 || fontPt <= 0) return 1
 
-  const ratio = CHAR_WIDTH_RATIO[fontFace] ?? DEFAULT_CHAR_WIDTH_RATIO
+  const ratio = (CHAR_WIDTH_RATIO[fontFace] ?? DEFAULT_CHAR_WIDTH_RATIO) * (bold ? BOLD_WIDTH_FACTOR : 1)
   const charWidthIn = (fontPt * ratio) / PT_PER_IN
   const charsPerLine = Math.max(1, Math.floor(boxWidthIn / charWidthIn))
 
-  return Math.max(1, Math.ceil(trimmed.length / charsPerLine))
+  // Wrapping breaks at spaces, so a line rarely fills to the last character.
+  // Counting characters alone under-counts lines for text with long words in a
+  // narrow column - exactly the case that overlapped.
+  const longestWord = Math.max(...trimmed.split(/\s+/).map(w => w.length))
+  const effective = Math.max(1, charsPerLine - Math.min(4, Math.floor(longestWord / 3)))
+
+  return Math.max(1, Math.ceil(trimmed.length / effective))
 }
 
 export interface MeasuredItem {
