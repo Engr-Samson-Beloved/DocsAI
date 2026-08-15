@@ -294,7 +294,6 @@ export function paintCards(
 
     rec.card(`card-${i}`, cell, spec.palette.tint)
 
-    const pad = 0.26
     const badge: Box = { x: cell.x + pad, y: cell.y + pad, w: 0.42, h: 0.42 }
     rec.card(`card-badge-${i}`, badge, spec.palette.accent)
     rec.text(`card-number-${i}`, badge, String(i + 1), {
