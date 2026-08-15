@@ -18,6 +18,43 @@ import { extractPdfAsHtml, detectDocumentKind, DOCUMENT_ACCEPT } from './pdfLoad
 
 export type IngestKind = 'pdf' | 'docx' | 'txt'
 
+/**
+ * Maps Word style names onto HTML so structure comes from `styles.xml` rather
+ * than being guessed from text patterns further down the pipeline.
+ *
+ * mammoth's default map already covers Heading 1-6, Title and Quote. The
+ * additions here are the ones that were costing us fidelity:
+ *
+ *  - `toc N` entries are tagged so the importer can DROP them. They are Word's
+ *    cached TOC field text: leader dots and stale page numbers baked into
+ *    paragraphs. Re-flowing them produced the mangled
+ *    "1.1Background of the Study.........41.2Problem Definition" output. The
+ *    editor regenerates a real TOC from headings instead.
+ *  - `Caption` is tagged so a figure/table caption can be kept on the same page
+ *    as the thing it captions.
+ *  - `List Paragraph` is tagged because Word uses it both for real numbered
+ *    lists and for indented body text; the importer decides which.
+ */
+const DOCX_STYLE_MAP = [
+  "p[style-name='Title'] => h1.doc-title:fresh",
+  "p[style-name='Subtitle'] => p.doc-subtitle:fresh",
+  "p[style-name='Heading 1'] => h1:fresh",
+  "p[style-name='Heading 2'] => h2:fresh",
+  "p[style-name='Heading 3'] => h3:fresh",
+  "p[style-name='Heading 4'] => h4:fresh",
+  "p[style-name='Heading 5'] => h5:fresh",
+  "p[style-name='Heading 6'] => h6:fresh",
+  "p[style-name='TOC Heading'] => h1:fresh",
+  // Word emits `toc 1`..`toc 9` for cached TOC field entries.
+  ...Array.from({ length: 9 }, (_, i) => `p[style-name='toc ${i + 1}'] => p.docx-toc-entry:fresh`),
+  "p[style-name='Caption'] => p.docx-caption:fresh",
+  "p[style-name='Body Text'] => p:fresh",
+  "p[style-name='List Paragraph'] => p.docx-list-paragraph:fresh",
+  "p[style-name='Quote'] => blockquote:fresh",
+  "p[style-name='Intense Quote'] => blockquote:fresh",
+  "r[style-name='Hyperlink'] => a",
+]
+
 export interface IngestedDocument {
   /** The file as handed over by the picker */
   file: File
@@ -126,7 +163,21 @@ export async function ingestDocumentFile(file: File): Promise<IngestedDocument> 
     try {
       const mammoth = await import('mammoth')
       const arrayBuffer = await file.arrayBuffer()
-      const result = await mammoth.convertToHtml({ arrayBuffer })
+      const result = await mammoth.convertToHtml(
+        { arrayBuffer },
+        {
+          styleMap: DOCX_STYLE_MAP,
+          includeDefaultStyleMap: true,
+          // Inline every embedded figure as a data: URI and carry the alt text
+          // across. The editor schema now has an Image node to receive these.
+          convertImage: mammoth.images.imgElement(async image => {
+            const base64 = await image.read('base64')
+            // `altText` is present at runtime but missing from mammoth's types.
+            const alt = (image as { altText?: string }).altText || ''
+            return { src: `data:${image.contentType};base64,${base64}`, alt }
+          }),
+        }
+      )
       return { ...base, kind: 'docx', html: result.value }
     } catch (err) {
       throw new DocumentIngestError(

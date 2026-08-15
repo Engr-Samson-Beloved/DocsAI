@@ -25,10 +25,30 @@ export interface IngestedSource {
   addedAt: number
 }
 
+/**
+ * The bytes of the file the user uploaded, kept so an untouched document can be
+ * converted by LibreOffice instead of re-rendered from our editor model.
+ *
+ * `contentHash` is a hash of the HTML we produced at import. If the editor's
+ * current HTML still hashes to this value the user has not changed anything, so
+ * converting the original is strictly more faithful than re-rendering it — it
+ * keeps the page geometry, tables, figures, numbering and hyperlinks that the
+ * import pipeline necessarily discarded.
+ */
+export interface OriginalUpload {
+  projectId: string
+  name: string
+  mime: string
+  blob: Blob
+  contentHash: string
+  savedAt: number
+}
+
 const DB_NAME = 'wordpi-db'
-const DB_VERSION = 2
+const DB_VERSION = 3
 const STORE_SOURCES = 'project-sources'
 const STORE_PROJECTS = 'projects'
+const STORE_ORIGINALS = 'project-originals'
 
 export function initDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -63,6 +83,13 @@ export function initDB(): Promise<IDBDatabase> {
       if (oldVersion < 2) {
         if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
           db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' })
+        }
+      }
+
+      // Version 3 setup (original uploaded files, for true-fidelity conversion)
+      if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains(STORE_ORIGINALS)) {
+          db.createObjectStore(STORE_ORIGINALS, { keyPath: 'projectId' })
         }
       }
     }
@@ -250,6 +277,9 @@ export async function deleteProject(projectId: string): Promise<void> {
         headers: getRequestHeaders()
       }).catch(e => console.warn('Background project delete sync failed:', e))
 
+      // The stored original upload is only meaningful alongside its project.
+      deleteOriginalUpload(projectId).catch(() => {})
+
       resolve()
     }
 
@@ -427,16 +457,71 @@ export async function deleteSourcesForProject(projectId: string): Promise<void> 
   }
 }
 
+/* --- Original Upload Store Helpers --- */
+
+/** Cheap, stable content hash (djb2) used to detect whether a document was edited. */
+export function hashContent(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  }
+  return (h >>> 0).toString(36) + ':' + text.length.toString(36)
+}
+
+export async function saveOriginalUpload(record: OriginalUpload): Promise<void> {
+  try {
+    const db = await initDB()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ORIGINALS, 'readwrite')
+      const req = tx.objectStore(STORE_ORIGINALS).put(record)
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(new Error('Failed to store the original upload'))
+    })
+  } catch (e) {
+    // Non-fatal: without the original we simply fall back to rendering the
+    // editor model, which is what the app did before this existed.
+    console.warn('Could not persist original upload:', e)
+  }
+}
+
+export async function getOriginalUpload(projectId: string): Promise<OriginalUpload | null> {
+  try {
+    const db = await initDB()
+    return await new Promise<OriginalUpload | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_ORIGINALS, 'readonly')
+      const req = tx.objectStore(STORE_ORIGINALS).get(projectId)
+      req.onsuccess = () => resolve((req.result as OriginalUpload) || null)
+      req.onerror = () => reject(new Error('Failed to read the original upload'))
+    })
+  } catch (e) {
+    console.warn('Could not read original upload:', e)
+    return null
+  }
+}
+
+export async function deleteOriginalUpload(projectId: string): Promise<void> {
+  try {
+    const db = await initDB()
+    await new Promise<void>(resolve => {
+      const tx = db.transaction(STORE_ORIGINALS, 'readwrite')
+      const req = tx.objectStore(STORE_ORIGINALS).delete(projectId)
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve()
+    })
+  } catch {
+    /* nothing to clean up */
+  }
+}
+
 export async function clearAllLocalData(): Promise<void> {
   const db = await initDB()
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_PROJECTS, STORE_SOURCES], 'readwrite')
-    const projectsStore = transaction.objectStore(STORE_PROJECTS)
-    const sourcesStore = transaction.objectStore(STORE_SOURCES)
-    
-    projectsStore.clear()
-    sourcesStore.clear()
-    
+    const stores = [STORE_PROJECTS, STORE_SOURCES]
+    if (db.objectStoreNames.contains(STORE_ORIGINALS)) stores.push(STORE_ORIGINALS)
+    const transaction = db.transaction(stores, 'readwrite')
+
+    stores.forEach(name => transaction.objectStore(name).clear())
+
     transaction.oncomplete = () => {
       resolve()
     }

@@ -7,6 +7,12 @@ import StarterKit from '@tiptap/starter-kit'
 import TextAlign from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
+// Tables and images are NOT in StarterKit. Without these nodes in the schema
+// ProseMirror silently drops them on setContent — a <table> collapses into a
+// run of loose text and an <img> disappears entirely — so every figure and
+// table in an imported .docx was lost before any exporter ran.
+import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
+import Image from '@tiptap/extension-image'
 import { LineHeight } from './LineHeightExtension'
 import { Underline } from './UnderlineExtension'
 import Dashboard, { Project } from '../Dashboard/Dashboard'
@@ -25,8 +31,11 @@ import {
   syncProjects,
   deleteProject as dbDeleteProject,
   saveProjectsBatch,
-  clearAllLocalData
+  clearAllLocalData,
+  saveOriginalUpload,
+  hashContent
 } from '../../utils/db'
+import { decideExportPath, convertToPdf } from '../../utils/docxConvert'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription, verifyPaymentCallback, checkAiQuota, incrementDailyUsage } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
@@ -39,7 +48,8 @@ import {
   pickDocumentFile,
   ingestDocumentFile,
   DocumentIngestError,
-  type IngestedDocument
+  type IngestedDocument,
+  type IngestKind
 } from '../../utils/documentIngest'
 import { REPORT_DOCX, REPORT_STYLE, headingConvention } from '../../utils/houseStyle'
 import {
@@ -790,16 +800,44 @@ const normalizeAcademicHtml = (html: string): string => {
   }
 }
 
+/** MIME type Word uses for .docx, for uploads that arrive without one. */
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+/** Hands a generated blob to the browser as a download. */
+const downloadBlob = (blob: Blob, filename: string): void => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename.replace(/[\r\n"]/g, '')
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+
 /**
  * Deterministic pre-processing pass for imported document HTML.
  * Runs AFTER parser (mammoth/pdfjs) but BEFORE ensurePaginatedHtml.
- * Cleans noise and promotes implicit headings:
- *  C1: Promote bold paragraphs matching chapter/section patterns → h1/h2/h3
- *  C2: Promote ALL-CAPS short paragraphs → h1 headings
- *  C3: Remove "Page X of Y" noise paragraphs
+ *
+ * The guiding rule after the export audit: NEVER re-derive structure the parser
+ * already gave us. A .docx carries its outline in styles.xml, and mammoth's
+ * style map turns that into real h1/h2/h3 elements. Guessing headings from text
+ * patterns on top of that was actively destructive — it promoted every ALL-CAPS
+ * line under 100 characters (including ordinary emphasised sentences) to h1, and
+ * rebuilt each promoted element with `textContent`, discarding the inline bold,
+ * italic and hyperlink markup inside it.
+ *
+ * So the heuristics now run ONLY over paragraphs the parser left unstructured,
+ * and only when the document arrived with no headings at all — which in practice
+ * means plain-text and PDF-extracted imports, never a styled .docx.
+ *
+ *  C0: Drop Word's cached TOC field text (regenerated later from real headings)
+ *  C1: Promote chapter/section-numbered paragraphs → h1/h2/h3 (unstyled only)
+ *  C2: Promote ALL-CAPS short paragraphs → h1 (unstyled only)
+ *  C3: Remove "Page X of Y" noise (PDF extraction only)
  *  C4: Collapse excessive consecutive blank paragraphs
  */
-const cleanImportedHtml = (html: string): string => {
+const cleanImportedHtml = (html: string, kind: IngestKind = 'docx'): string => {
   if (typeof window === 'undefined' || !html.trim()) return html
 
   try {
@@ -807,22 +845,77 @@ const cleanImportedHtml = (html: string): string => {
     const doc = parser.parseFromString(html, 'text/html')
     const body = doc.body
 
-    // C3: Remove "Page X of Y" noise paragraphs and standalone page numbers
-    body.querySelectorAll('p').forEach(p => {
-      const text = p.textContent?.trim() || ''
-      if (/^page\s+\d+\s*(of\s+\d+)?\.?$/i.test(text)) {
-        p.remove()
-        return
-      }
-      // Remove standalone numbers that are likely page numbers (1-3 digits, nothing else)
-      if (/^\d{1,3}$/.test(text) && !p.previousElementSibling?.matches('ol, ul')) {
-        p.remove()
-        return
+    // C0: Word's TOC field caches its rendered text — leader dots and page
+    // numbers baked into paragraphs. Those page numbers refer to Word's
+    // pagination, not ours, so carrying them over guarantees wrong references.
+    // Drop them; generateTableOfContents() rebuilds a real TOC from headings.
+    body.querySelectorAll('p.docx-toc-entry').forEach(p => p.remove())
+
+    // C0b: Word's "List Paragraph" style is used both for real numbered lists
+    // and for indented body text. When the numbering came from a literal glyph
+    // typed into the run (or from a Symbol-font bullet mammoth passed through as
+    // text), the export showed "·The system shall accept..." — a middot
+    // character with no list formatting and no hanging indent. Rebuild those as
+    // real <ul><li> so the renderer can give them a proper hanging indent.
+    const BULLET_GLYPH = /^\s*[·•‣▪●⁃-]\s+/
+    const listRuns: HTMLElement[][] = []
+    let run: HTMLElement[] = []
+    Array.from(body.children).forEach(child => {
+      const el = child as HTMLElement
+      const isBulletPara =
+        el.tagName === 'P' && BULLET_GLYPH.test(el.textContent || '')
+      if (isBulletPara) {
+        run.push(el)
+      } else {
+        if (run.length) listRuns.push(run)
+        run = []
       }
     })
+    if (run.length) listRuns.push(run)
+
+    for (const group of listRuns) {
+      const ul = doc.createElement('ul')
+      for (const p of group) {
+        const li = doc.createElement('li')
+        while (p.firstChild) li.appendChild(p.firstChild)
+        // Remove only the leading glyph, preserving the inline markup after it.
+        const first = li.firstChild
+        // 3 === Node.TEXT_NODE; the DOM `Node` global is shadowed in this module
+        // by the tiptap `Node` import.
+        if (first && first.nodeType === 3) {
+          first.textContent = (first.textContent || '').replace(BULLET_GLYPH, '')
+        }
+        ul.appendChild(li)
+      }
+      group[0].replaceWith(ul)
+      group.slice(1).forEach(p => p.remove())
+    }
+
+    // If the parser produced real headings, its outline is authoritative and the
+    // pattern-matching below must not second-guess it.
+    const hasParsedOutline = body.querySelector('h1, h2, h3, h4, h5, h6') !== null
+
+    // C3: Remove "Page X of Y" noise paragraphs and standalone page numbers.
+    // Only meaningful for PDF text extraction, where running headers and footers
+    // land in the text stream as ordinary lines. A .docx keeps them in headerN.xml
+    // and never in the body, so applying this to Word imports only ever deleted
+    // real content — a lone "2024" or a numbered list marker.
+    if (kind === 'pdf') {
+      body.querySelectorAll('p').forEach(p => {
+        const text = p.textContent?.trim() || ''
+        if (/^page\s+\d+\s*(of\s+\d+)?\.?$/i.test(text)) {
+          p.remove()
+          return
+        }
+        if (/^\d{1,3}$/.test(text) && !p.previousElementSibling?.matches('ol, ul')) {
+          p.remove()
+          return
+        }
+      })
+    }
 
     // C1: Promote bold paragraphs matching chapter/section patterns to headings
-    body.querySelectorAll('p').forEach(p => {
+    if (!hasParsedOutline) body.querySelectorAll('p').forEach(p => {
       const text = p.textContent?.trim() || ''
       if (!text || text.length > 150) return // Skip long paragraphs
 
@@ -862,7 +955,11 @@ const cleanImportedHtml = (html: string): string => {
 
       if (newTag) {
         const heading = doc.createElement(newTag)
-        heading.textContent = text
+        // Move the paragraph's children across rather than flattening to text:
+        // assigning textContent discarded every <strong>, <em> and <a href>
+        // inside a promoted heading, which is how reference links in headings
+        // became dead text before they ever reached the exporter.
+        while (p.firstChild) heading.appendChild(p.firstChild)
         p.replaceWith(heading)
       }
     })
@@ -1605,6 +1702,9 @@ export default function Editor() {
     name: string
     htmlContent: string
     extension: string
+    /** The original bytes, kept so an unmodified import can be converted rather
+     *  than re-rendered. Only present for formats worth converting. */
+    file?: File
   } | null>(null)
   const [importOption, setImportOption] = useState<'maintain' | 'seminar' | 'apa' | 'ieee' | 'text_only'>('maintain')
 
@@ -2697,6 +2797,12 @@ export default function Editor() {
     activeProjectIdRef.current = activeProjectId
   }, [activeProjectId])
 
+  // Holds the project id of an imported document that has not been edited yet.
+  // While set, PDF export converts the ORIGINAL .docx with LibreOffice instead
+  // of re-rendering our HTML view of it — the only way tables, figures, page
+  // geometry and hyperlinks come out exactly as the user formatted them.
+  const pristineImportRef = useRef<string | null>(null)
+
   // Tiptap Editor configuration
   const editor = useEditor({
     immediatelyRender: false,
@@ -2716,6 +2822,15 @@ export default function Editor() {
       TextAlign.configure({
         types: ['heading', 'paragraph'],
       }),
+      // `resizable` keeps the colgroup/col widths that mammoth emits from the
+      // DOCX grid, so column proportions survive the round trip to export.
+      Table.configure({ resizable: true, allowTableNodeSelection: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      // `allowBase64` is required: mammoth inlines DOCX media as data: URIs,
+      // and without it every imported figure is stripped by the schema.
+      Image.configure({ allowBase64: true, inline: false }),
       Underline,
       LineHeight.configure({
         types: ['paragraph', 'heading'],
@@ -2733,6 +2848,10 @@ export default function Editor() {
       if (transaction && transaction.getMeta('paginating')) {
         return
       }
+
+      // Any real edit means the stored original no longer describes what the
+      // user is looking at, so the faithful-conversion path must stand down.
+      pristineImportRef.current = null
 
       setIsSaved(false)
       
@@ -3242,11 +3361,40 @@ export default function Editor() {
     setLoadingMessage('Generating your PDF…')
     setIsExporting(true)
     try {
+      // Track A — convert the original. Only for a whole, unedited .docx
+      // import: a partial scope (cover/toc only) is by definition something we
+      // composed, not something the upload contained.
+      if (scope === 'full') {
+        const decision = await decideExportPath(
+          activeProjectId,
+          pristineImportRef.current !== null && pristineImportRef.current === activeProjectId
+        )
+
+        if (decision.useOriginal && decision.original) {
+          setLoadingMessage('Converting your original document…')
+          try {
+            const blob = await convertToPdf(decision.original.blob, decision.original.name)
+            downloadBlob(blob, `${safeName}.pdf`)
+            return
+          } catch (convertErr) {
+            // A converter failure must not lose the user their export — fall
+            // through to the in-browser renderer and say what changed.
+            console.warn('Faithful conversion failed, falling back to render:', convertErr)
+            setHintNotice({
+              tone: 'info',
+              message:
+                'Exact conversion was unavailable, so the PDF was rendered from the editor instead. Tables, figures and page layout may differ from the original Word file.'
+            })
+          }
+        }
+      }
+
+      setLoadingMessage('Generating your PDF…')
       await exportPdfReact(editor.getHTML(), {
         filename: `${safeName}.pdf`,
         docHeader,
         docFooter,
-        lineHeight: wizardLineSpacing || '2',
+        lineHeight: wizardLineSpacing || String(REPORT_STYLE.font.lineSpacing),
         scope,
       })
     } catch (err) {
@@ -4105,6 +4253,26 @@ export default function Editor() {
       pendingImportFileRef.current = doc.file
     }
 
+    // Keep the bytes the user handed us. While the document stays untouched,
+    // exporting it means converting THIS file with LibreOffice rather than
+    // re-rendering our lossy HTML view of it.
+    if (doc.kind === 'docx') {
+      saveOriginalUpload({
+        projectId: newProjId,
+        name: doc.name,
+        mime: doc.file.type || DOCX_MIME,
+        blob: doc.file,
+        contentHash: hashContent(cleanedHtml),
+        savedAt: Date.now()
+      }).catch(e => console.warn('Could not retain the original upload', e))
+
+      // Mark the import pristine AFTER the content and pagination have settled,
+      // so the setContent/pagination churn is not mistaken for a user edit.
+      setTimeout(() => { pristineImportRef.current = newProjId }, 300)
+    } else {
+      pristineImportRef.current = null
+    }
+
     const importedText = editor ? editor.getText() : ''
     const newProj: Project = {
       id: newProjId,
@@ -4144,8 +4312,9 @@ export default function Editor() {
       const doc = await ingestDocumentFile(file)
       setImportFileData({
         name: doc.name,
-        htmlContent: cleanImportedHtml(doc.html),
-        extension: doc.kind
+        htmlContent: cleanImportedHtml(doc.html, doc.kind),
+        extension: doc.kind,
+        file: doc.file
       })
       setImportOption('maintain')
       setShowImportModal(true)
@@ -4171,7 +4340,7 @@ export default function Editor() {
     setIsExporting(true)
     try {
       const doc = await ingestDocumentFile(file)
-      const cleanedHtml = cleanImportedHtml(doc.html)
+      const cleanedHtml = cleanImportedHtml(doc.html, doc.kind)
 
       createProjectFromIngested(doc, cleanedHtml)
 
@@ -4201,7 +4370,7 @@ export default function Editor() {
     setIsExporting(true)
     try {
       const doc = await ingestDocumentFile(file)
-      const cleanedHtml = cleanImportedHtml(doc.html)
+      const cleanedHtml = cleanImportedHtml(doc.html, doc.kind)
 
       createProjectFromIngested(doc, cleanedHtml)
 
@@ -4275,6 +4444,29 @@ export default function Editor() {
       setTimeout(() => {
         runPagination(editor)
       }, 100)
+    }
+
+    // "Maintain" on a .docx is the one import option that leaves the document
+    // as the user formatted it, so the original bytes are still an accurate
+    // description of it and exporting can convert them instead of re-rendering.
+    // Every other option restyles the content, which makes the original stale.
+    if (importOption === 'maintain' && importFileData.extension === 'docx' && importFileData.file) {
+      const projectId = activeProjectId
+      const file = importFileData.file
+      if (projectId) {
+        saveOriginalUpload({
+          projectId,
+          name: importFileData.name,
+          mime: file.type || DOCX_MIME,
+          blob: file,
+          contentHash: hashContent(cleanedContent),
+          savedAt: Date.now()
+        }).catch(e => console.warn('Could not retain the original upload', e))
+        // After pagination has settled, so its transactions are not read as edits.
+        setTimeout(() => { pristineImportRef.current = projectId }, 300)
+      }
+    } else {
+      pristineImportRef.current = null
     }
 
     // Set Document Title
