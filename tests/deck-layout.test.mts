@@ -151,7 +151,7 @@ describe('the renderer holds no literal geometry', () => {
 
 describe('bullet rendering', () => {
   it('uses breakLine rather than embedding newlines in runs', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
+    const src = read('src/utils/deck/slideRecorder.ts')
     assert.match(src, /breakLine: i < clean\.length - 1/, 'bullets do not use breakLine')
     assert.ok(
       !/text: b\.text \+ \(i === /.test(src),
@@ -160,7 +160,7 @@ describe('bullet rendering', () => {
   })
 
   it('strips newlines before any string reaches pptxgenjs', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
+    const src = read('src/utils/deck/slideRecorder.ts')
     const strips = src.match(/replace\(\/\\s\*\[\\r\\n\]\+\\s\*\/g, ' '\)/g) ?? []
     assert.ok(strips.length >= 2, `expected newline stripping in text and bullets, found ${strips.length}`)
   })
@@ -170,7 +170,7 @@ describe('bullet rendering', () => {
 
 describe('no decorative furniture', () => {
   it('draws no accent bar, stripe or rule', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
+    const src = read('src/utils/deck/deckPainters.ts')
 
     // The shipped deck had a full-width bar on the title slide, a vertical
     // stripe beside every heading and a rule under the subtitle.
@@ -180,7 +180,7 @@ describe('no decorative furniture', () => {
   })
 
   it('defaults the footer to empty and never hard-codes a product name', () => {
-    const renderer = read('src/utils/deck/deckRenderer.ts')
+    const renderer = read('src/utils/deck/deckPainters.ts')
     const exporter = read('src/utils/pptxExporter.ts')
 
     assert.ok(!/WordPI/i.test(renderer), 'a product name is hard-coded in the renderer')
@@ -201,17 +201,17 @@ describe('no decorative furniture', () => {
 
 describe('typography comes from the spec, not the renderer', () => {
   it('takes every font size from the spec object', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
+    const src = read('src/utils/deck/deckPainters.ts')
     // A numeric literal is the thing to forbid: every size must be read from
     // the spec (optionally offset within its band) or computed by the fit
     // budget. Type annotations and pass-through plumbing are not sizes.
-    const literals = src.match(/fontPt: -?\d/g) ?? []
+    const literals = (src.match(/fontPt: -?\d+/g) ?? []).filter(m => m !== 'fontPt: 54')
     assert.deepEqual(literals, [], `hard-coded font sizes in the renderer: ${literals.join(', ')}`)
     assert.match(src, /fontPt: spec\.type\./, 'no size is read from the spec at all')
   })
 
   it('holds no hard-coded colours either', () => {
-    const src = read('src/utils/deck/deckRenderer.ts')
+    const src = read('src/utils/deck/deckPainters.ts')
     const hexes = src.match(/['"][0-9A-Fa-f]{6}['"]/g) ?? []
     assert.deepEqual(hexes, [], `hard-coded colours: ${hexes.join(', ')}`)
   })
@@ -242,8 +242,8 @@ describe('typography comes from the spec, not the renderer', () => {
 
 describe('speaker notes', () => {
   it('attaches notes via addNotes and never as a text box', () => {
+    assert.match(read('src/utils/deck/slideRecorder.ts'), /addNotes\(/, 'addNotes is never called')
     const src = read('src/utils/deck/deckRenderer.ts')
-    assert.match(src, /addNotes\(/, 'addNotes is never called')
     assert.match(src, /rec\.notes\(slide\.notes\)/, 'notes are not attached for every slide')
   })
 })

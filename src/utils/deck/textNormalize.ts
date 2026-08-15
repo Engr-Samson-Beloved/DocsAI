@@ -233,12 +233,34 @@ const OPENING_CONJUNCTIONS =
  * were sliced out of the middle of a sentence, which almost always lose their
  * verb along with their subject.
  */
+/**
+ * Auxiliaries and common finite verbs.
+ *
+ * English third-person singular ends in "-s", which is also the plural noun
+ * ending, so an "-s" suffix rule cannot distinguish "controllers" from
+ * "controls". The list is therefore explicit. It is the weakest part of the
+ * claim test - an unlisted verb makes a good bullet look verbless - so it errs
+ * wide, and "falls", "degrades" and their like are in it because their absence
+ * silently dropped correct claims.
+ */
 const AUXILIARIES = new Set(
   ('is are was were be been being am has have had do does did can could may might must shall should ' +
     'will would enables enable allows allow provides provide requires require uses use offers offer ' +
     'supports support reduces reduce increases increase improves improve creates create causes cause ' +
     'shows show demonstrates demonstrate achieves achieve remains remain becomes become includes include ' +
-    'consists comprises delivers deliver eliminates eliminate introduces introduce')
+    'consists comprises delivers deliver eliminates eliminate introduces introduce ' +
+    // Regular third-person forms that a suffix rule cannot safely infer.
+    'falls fall rises rise grows grow drops drop cuts cut shifts shift moves move runs run ' +
+    'works work helps help leads lead means mean needs need takes take gives give holds hold ' +
+    'keeps keep sends send adds add costs cost saves save scales scale fails fail learns learn ' +
+    'detects detect prevents prevent ensures ensure avoids avoid applies apply relies rely ' +
+    'varies vary differs differ exceeds exceed meets meet spans span ranges range depends depend ' +
+    'affects affect handles handle carries carry treats treat splits split routes route ' +
+    'separates separate replaces replace extends extend limits limit lowers lower raises raise ' +
+    'shortens shorten lengthens lengthen simplifies simplify complicates complicate ' +
+    'centralises centralise centralizes centralize decouples decouple ' +
+    'monitors monitor manages manage controls control operates operate performs perform ' +
+    'accounts account emerges emerge persists persist stems stem arises arise')
     .split(/\s+/)
 )
 
