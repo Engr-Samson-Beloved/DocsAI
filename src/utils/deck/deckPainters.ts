@@ -156,18 +156,28 @@ export function paintTitleSlide(rec: SlideRecorder, plan: SlidePlan, spec: Prese
     Math.max(0.5, (estimateLines(text, HERO.w, spec.type.body.minPt, spec.bodyFace) * lineIn(spec.type.body.minPt)) / FILL_LIMIT + 0.06)
 
   /**
-   * The fit ladder. Preferences in order: keep the subtitle, keep the body
-   * size, keep generous gaps, keep every identity field on its own line.
+   * The fit ladder, ordered by what each concession COSTS the reader. The
+   * outermost loop is the last resort, the innermost is tried first:
    *
-   * Sizing the identity block from what the title happened to leave over is the
-   * production defect this replaces: a cover that supplies school AND session
-   * gives six lines where the SDN sample gives four, and six did not fit.
+   *   1. tighten the gaps          - nobody notices
+   *   2. merge trailing identity   - "Supervisor: X  |  Session Y" reads fine
+   *   3. drop the subtitle         - loses a line of framing
+   *   4. drop to the 16pt floor    - leaves the standard's body range
+   *
+   * Getting this order wrong is the second production defect on this slide:
+   * the previous nesting reached 16pt while it still had a free line-merge and
+   * the subtitle in hand, and the gate then rejected the deck for a type-scale
+   * violation it never needed to commit.
+   *
+   * Sizing the identity block from whatever the title left over was the first.
+   * A cover supplying school AND session gives six lines where the SDN sample
+   * gives four, and six did not fit.
    */
   type Fit = { gapA: number; gapB: number; pt: number; subtitle: boolean; merge: number }
   const ladder: Fit[] = []
-  for (const merge of [0, 1, 2]) {
+  for (const pt of [spec.type.body.minPt, spec.type.bodyAbsoluteMinPt]) {
     for (const subtitle of [true, false]) {
-      for (const pt of [spec.type.body.minPt, spec.type.bodyAbsoluteMinPt]) {
+      for (const merge of [0, 1, 2]) {
         for (const [gapA, gapB] of [[0.28, 0.35], [0.2, 0.24], [0.14, 0.16]]) {
           ladder.push({ gapA, gapB, pt, subtitle, merge })
         }

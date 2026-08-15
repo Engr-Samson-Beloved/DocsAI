@@ -191,7 +191,15 @@ function rangeFor(shape: RenderedShape, spec: PresentationSpec) {
     case 'heading': return { name: 'section heading', range: spec.type.sectionHeading }
     case 'caption': return { name: 'caption', range: spec.type.caption }
     case 'display': return { name: 'display', range: { minPt: spec.type.title.minPt, maxPt: 96 } }
-    default: return { name: 'body', range: spec.type.body }
+    // The standard reads "body 18-22pt with a 16pt floor". Enforcing 18 as a
+    // hard minimum made the floor unreachable and the floor check below it dead
+    // code, so a dense cover page had no legal way to fit. The floor is the
+    // hard limit; sitting on it is a warning, because it should be rare.
+    default:
+      return {
+        name: 'body',
+        range: { minPt: spec.type.bodyAbsoluteMinPt, maxPt: spec.type.body.maxPt },
+      }
   }
 }
 
@@ -215,9 +223,20 @@ export function checkSpecCompliance(report: RenderReport, spec: PresentationSpec
       )
     }
 
-    if (shape.fontPt > 0 && shape.role === 'body' && shape.fontPt < spec.type.bodyAbsoluteMinPt) {
+    // Below the standard's preferred range but above the floor: legal, and
+    // worth surfacing so a deck that has quietly shrunk everywhere is visible.
+    if (
+      shape.fontPt > 0 &&
+      shape.role === 'body' &&
+      shape.fontPt >= spec.type.bodyAbsoluteMinPt &&
+      shape.fontPt < spec.type.body.minPt
+    ) {
       findings.push(
-        err('type-scale', `"${shape.name}" is ${shape.fontPt}pt, below the ${spec.type.bodyAbsoluteMinPt}pt absolute floor`, shape.slide)
+        warn(
+          'type-scale',
+          `"${shape.name}" is ${shape.fontPt}pt, on the ${spec.type.bodyAbsoluteMinPt}pt floor rather than the ${spec.type.body.minPt}-${spec.type.body.maxPt}pt body range`,
+          shape.slide
+        )
       )
     }
 

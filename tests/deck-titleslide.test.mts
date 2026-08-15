@@ -125,6 +125,70 @@ describe('title slide fits its own content', () => {
     assert.equal(occurrences, 1, `matric number appears ${occurrences} times`)
   })
 
+  /**
+   * Second production defect on the same slide. The fit ladder dropped the
+   * identity block to the 16pt floor while it still had a free line-merge and
+   * the subtitle in hand, and the gate then rejected the deck for a type-scale
+   * violation it never needed to commit.
+   */
+  it('keeps the identity block in the body range rather than reaching for the floor', async () => {
+    const { renderDeck } = await renderer()
+    const { DEFAULT_SPEC } = await spec()
+
+    const { report } = await renderDeck(planFor(LONG_TITLE, LONG_SUBTITLE), DEFAULT_SPEC)
+    const identity = report.shapes.find(s => s.name === 'deck-identity')
+
+    assert.ok(identity, 'the identity block was not rendered')
+    assert.equal(
+      identity.fontPt,
+      DEFAULT_SPEC.type.body.minPt,
+      `identity is ${identity.fontPt}pt; cheaper concessions were still available`
+    )
+  })
+
+  it('raises no type-scale error on a full cover page', async () => {
+    const { renderDeck } = await renderer()
+    const { runStaticChecks } = await qa()
+    const { DEFAULT_SPEC } = await spec()
+
+    const plan = planFor(LONG_TITLE, LONG_SUBTITLE)
+    const { report } = await renderDeck(plan, DEFAULT_SPEC)
+
+    const scale = runStaticChecks(report, plan, DEFAULT_SPEC).filter(
+      f => f.check === 'type-scale' && f.severity === 'error'
+    )
+    assert.deepEqual(scale, [], scale.map(f => f.message).join('\n'))
+  })
+
+  /**
+   * The standard reads "body 18-22pt with a 16pt floor". The floor has to be
+   * usable, or the ladder's last rung fails the build instead of saving it.
+   */
+  it('treats the 16pt floor as legal and 15pt as an error', async () => {
+    const { runStaticChecks } = await qa()
+    const { DEFAULT_SPEC } = await spec()
+
+    const { renderDeck } = await renderer()
+    const plan = planFor(LONG_TITLE)
+    const { report } = await renderDeck(plan, DEFAULT_SPEC)
+
+    const probe = report.shapes.find(s => s.name === 'deck-identity')!
+    const at = (pt: number) => {
+      const forged = { ...report, shapes: [{ ...probe, fontPt: pt }] }
+      return runStaticChecks(forged, plan, DEFAULT_SPEC).filter(f => f.check === 'type-scale')
+    }
+
+    const floor = at(DEFAULT_SPEC.type.bodyAbsoluteMinPt)
+    assert.deepEqual(floor.filter(f => f.severity === 'error'), [], '16pt should be legal')
+    assert.equal(floor.filter(f => f.severity === 'warning').length, 1, '16pt should warn')
+
+    assert.equal(
+      at(DEFAULT_SPEC.type.bodyAbsoluteMinPt - 1).filter(f => f.severity === 'error').length,
+      1,
+      '15pt is below the floor and must be an error'
+    )
+  })
+
   it('does not overflow the closing slide when the detail line is long', async () => {
     const { renderDeck } = await renderer()
     const { runStaticChecks } = await qa()
