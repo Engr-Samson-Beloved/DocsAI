@@ -568,7 +568,7 @@ describe('validateSlidePlan', () => {
     const { validateSlidePlan } = await slidePlan()
     const { DEFAULT_SPEC } = await spec()
     const result = validateSlidePlan(
-      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Something happens here'], notes: 'w '.repeat(40), sourceRefs: [] }] },
+      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Centralised control reduces deployment time'], notes: 'w '.repeat(40), sourceRefs: [] }] },
       DEFAULT_SPEC
     )
     assert.ok(result.fatal.some(f => f.field === 'sourceRefs'))
@@ -578,7 +578,7 @@ describe('validateSlidePlan', () => {
     const { validateSlidePlan } = await slidePlan()
     const { DEFAULT_SPEC } = await spec()
     const result = validateSlidePlan(
-      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Something happens here'], notes: 'too short', sourceRefs: ['Â§1'] }] },
+      { slides: [{ layout: 'bullets', title: 'X', bullets: ['Centralised control reduces deployment time'], notes: 'too short', sourceRefs: ['Â§1'] }] },
       DEFAULT_SPEC
     )
     assert.ok(result.fatal.some(f => f.field === 'notes'))

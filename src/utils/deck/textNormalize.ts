@@ -273,13 +273,33 @@ const AUXILIARIES = new Set(
  * underlying philosophy" as a verb, so "Flexibility means that the same
  * underlying philosophy" read as complete when it plainly is not.
  */
+/**
+ * Third-person singular endings that a plural noun rarely takes.
+ *
+ * A bare "-s" rule cannot work: it is both the verb inflection and the plural.
+ * These longer endings are overwhelmingly verbal ("degrades", "provides",
+ * "manages", "eliminates"), which rescues correct claims that no word list will
+ * ever fully cover.
+ *
+ * It is deliberately a little permissive - "rates" and "states" are plural
+ * nouns that match. That trade is right for this check: its job is to catch
+ * bare noun lists like "Firewalls, load balancers, intrusion detection
+ * systems", and none of those match. A wrongly-permitted bullet is visible on
+ * the slide; a wrongly-dropped one disappears silently.
+ */
+const THIRD_PERSON_ENDING =
+  /(?:ates|ises|izes|ifies|ides|udes|uces|ects|ends|ents|orts|ages|ances|olves|erves|ives|ades|ines|ures|eeds|oses|ests|acts|orms|akes|omes|eres|ires|ores|ields)$/
+
 export function hasFiniteVerb(text: string): boolean {
   const words = text.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter(Boolean)
 
   for (const w of words) {
     if (AUXILIARIES.has(w)) return true
-    // Past tense / third person singular. -ing is deliberately excluded.
-    if (w.length > 4 && /(?:ed|ises|izes|ates|ifies)$/.test(w)) return true
+    // Past tense. -ing is deliberately excluded: a bare participle is not a
+    // predicate, which is what "Flexibility means that the same underlying
+    // philosophy" turned on.
+    if (w.length > 4 && /ed$/.test(w)) return true
+    if (w.length > 5 && THIRD_PERSON_ENDING.test(w)) return true
   }
   return false
 }

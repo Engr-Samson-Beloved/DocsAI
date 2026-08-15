@@ -229,7 +229,7 @@ describe('refinePlanWithLlm', () => {
     assert.ok(!result.plan.slides.some(s => s.title === 'INVENTED SLIDE'))
   })
 
-  it('never lets the model rewrite provenance or the slide title', async () => {
+  it('never lets the model rewrite provenance, but may rewrite the title', async () => {
     const { refinePlanWithLlm } = await llm()
     const { DEFAULT_SPEC } = await spec()
 
@@ -244,7 +244,7 @@ describe('refinePlanWithLlm', () => {
 
     const slide = result.plan.slides[0]
     assert.deepEqual(slide.sourceRefs, ['Â§1.2', 'p. 5'], 'provenance was overwritten by the model')
-    assert.equal(slide.title, 'PROBLEM STATEMENT')
+    assert.equal(slide.title, 'A DIFFERENT TITLE', 'the model may rename a slide; the gate polices the result')
     assert.equal(slide.layout, 'bullets')
   })
 })
