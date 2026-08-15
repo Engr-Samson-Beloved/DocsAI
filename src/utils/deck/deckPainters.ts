@@ -269,21 +269,55 @@ export function paintCards(
       background: spec.palette.accent,
     })
 
+    // A label above the claim, as the reference deck does: the reader scans the
+    // labels, then reads the one they want. The label is the claim's own
+    // opening phrase, not new text.
+    const label = cardLabel(item)
+    const labelPt = spec.type.body.minPt
+    const bodyPt = spec.type.caption.maxPt
+    const innerW = cell.w - pad * 2
+
+    const labelH = (estimateLines(label, innerW, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT + 0.04
+
+    const labelBox: Box = { x: cell.x + pad, y: badge.y + badge.h + 0.12, w: innerW, h: labelH }
+    rec.text(`card-label-${i}`, labelBox, label, {
+      role: 'body',
+      fontPt: labelPt,
+      fontFace: spec.headingFace,
+      color: spec.palette.ink,
+      bold: true,
+      background: spec.palette.tint,
+      valign: 'top',
+    })
+
     const textBox: Box = {
       x: cell.x + pad,
-      y: badge.y + badge.h + 0.14,
-      w: cell.w - pad * 2,
-      h: cell.h - (badge.h + pad * 2 + 0.14),
+      y: labelBox.y + labelBox.h + 0.06,
+      w: innerW,
+      h: cell.h - (labelBox.y - cell.y) - labelBox.h - pad - 0.06,
     }
     rec.text(`card-text-${i}`, textBox, item, {
-      role: 'body',
-      fontPt: spec.type.body.minPt,
+      role: 'caption',
+      fontPt: bodyPt,
       fontFace: spec.bodyFace,
-      color: spec.palette.ink,
+      color: spec.palette.muted,
       background: spec.palette.tint,
       valign: 'top',
     })
   })
+}
+
+/**
+ * A card's label: the claim's opening noun phrase, up to four words.
+ * Derived from the claim itself, so it adds no new assertion.
+ */
+function cardLabel(claim: string): string {
+  const words = claim.split(/\s+/).filter(Boolean)
+  const stop = words.findIndex(w =>
+    /^(is|are|was|were|has|have|enables?|allows?|provides?|requires?|reduces?|increases?|improves?|offers?|supports?|delivers?|creates?|causes?|makes?|shows?|remains?|becomes?|can|may|must|will|should)$/i.test(w)
+  )
+  const take = stop > 1 ? stop : Math.min(4, words.length)
+  return words.slice(0, take).join(' ').replace(/[,;:.]$/, '')
 }
 
 export function paintComparison(

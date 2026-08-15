@@ -619,13 +619,17 @@ function buildDraft(
   // Parallel items of similar weight sit better as a grid than as a stack: the
   // reader sees a set rather than a ranking. Long or uneven bullets stay a list,
   // because a card grid with one overflowing cell looks broken.
-  const even =
-    bullets.length >= 3 &&
-    bullets.length <= 6 &&
-    bullets.every(b => b.length <= 78) &&
-    Math.max(...bullets.map(b => b.length)) - Math.min(...bullets.map(b => b.length)) <= 45
+  // The card painter derives a short label from each claim's own opening
+  // phrase, so long claims are no obstacle; what matters is that there are
+  // enough of them to form a set, and that they are of comparable weight.
+  const spread =
+    bullets.length > 0
+      ? Math.max(...bullets.map(b => b.length)) - Math.min(...bullets.map(b => b.length))
+      : 0
 
-  if (even) return { ...base, layout: 'cards', bullets }
+  if (bullets.length >= 4 && bullets.length <= 6 && spread <= 70) {
+    return { ...base, layout: 'cards', bullets }
+  }
 
   return { ...base, layout: 'bullets', bullets }
 }

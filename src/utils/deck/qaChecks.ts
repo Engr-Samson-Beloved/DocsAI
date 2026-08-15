@@ -672,7 +672,12 @@ export function checkRoleCoverage(rolesPresent: string[], plan: SlidePlan): QaFi
  * before layouts were chosen by content shape.
  */
 export function checkVariety(report: RenderReport, spec: PresentationSpec): QaFinding[] {
-  const content = report.slides.filter(s => s.layout !== 'title' && s.layout !== 'closing')
+  // Title, closing and references are fixed structural slides, not places where
+  // a layout choice was available. Counting references in the denominator
+  // penalises the deck for having a bibliography.
+  const content = report.slides.filter(
+    s => s.layout !== 'title' && s.layout !== 'closing' && s.layout !== 'references'
+  )
   if (content.length === 0) return []
 
   const nonBullet = content.filter(s => NON_BULLET_CONTENT.includes(s.layout))
