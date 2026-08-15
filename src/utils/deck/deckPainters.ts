@@ -311,13 +311,11 @@ export function paintCards(
     // labels, then reads the one they want. The label is the claim's own
     // opening phrase, not new text.
     const label = cardLabel(item)
-    const labelPt = spec.type.body.minPt
-    const bodyPt = spec.type.caption.maxPt
-    const innerW = cell.w - pad * 2
+    const w = cell.w - pad * 2
+    const labelH =
+      (estimateLines(label, w, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT + 0.04
 
-    const labelH = (estimateLines(label, innerW, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT + 0.04
-
-    const labelBox: Box = { x: cell.x + pad, y: badge.y + badge.h + 0.12, w: innerW, h: labelH }
+    const labelBox: Box = { x: cell.x + pad, y: badge.y + badge.h + 0.12, w, h: labelH }
     rec.text(`card-label-${i}`, labelBox, label, {
       role: 'body',
       fontPt: labelPt,
