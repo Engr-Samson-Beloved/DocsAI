@@ -245,13 +245,52 @@ export function paintCards(
 
   const perRow = items.length <= 4 ? 2 : 3
   const rowCount = Math.ceil(items.length / perRow)
-  const rowBoxes = rows(body, rowCount, 0.22)
+  const rowGap = 0.22
+  const colGap = 0.28
+  const pad = 0.26
+  const innerW = (body.w - colGap * (perRow - 1)) / perRow - pad * 2
+
+  // Size the cells from the TALLEST card's measured content, stepping the body
+  // font down until the grid fits. Laying out first and hoping the text fits is
+  // what put a 296%-full card on the slide.
+  const labelPt = spec.type.body.minPt
+  let bodyPt = spec.type.caption.maxPt
+  let cellH = 0
+
+  for (let pt = spec.type.caption.maxPt; pt >= spec.type.caption.minPt; pt--) {
+    const tallest = Math.max(
+      ...items.map(item => {
+        const labelH =
+          (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace) * lineIn(labelPt)) / FILL_LIMIT
+        const textH = (estimateLines(item, innerW, pt, spec.bodyFace) * lineIn(pt)) / FILL_LIMIT
+        return pad * 2 + 0.42 + 0.12 + labelH + 0.06 + textH + 0.08
+      })
+    )
+    if (tallest * rowCount + rowGap * (rowCount - 1) <= body.h) {
+      bodyPt = pt
+      cellH = tallest
+      break
+    }
+    bodyPt = pt
+    cellH = tallest
+  }
+
+  cellH = Math.min(cellH, (body.h - rowGap * (rowCount - 1)) / rowCount)
+  const stackH = cellH * rowCount + rowGap * (rowCount - 1)
+  const top = body.y + Math.max(0, (body.h - stackH) / 2)
+
+  const rowBoxes = Array.from({ length: rowCount }, (_, r) => ({
+    x: body.x,
+    y: top + r * (cellH + rowGap),
+    w: body.w,
+    h: cellH,
+  }))
 
   items.forEach((item, i) => {
     const r = Math.floor(i / perRow)
     const c = i % perRow
     const inRow = Math.min(perRow, items.length - r * perRow)
-    const cell = columns(rowBoxes[r], inRow, 0.28)[c]
+    const cell = columns(rowBoxes[r], inRow, colGap)[c]
 
     rec.card(`card-${i}`, cell, spec.palette.tint)
 
