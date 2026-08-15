@@ -258,14 +258,23 @@ export function paintCards(
   // font down until the grid fits. Laying out first and hoping the text fits is
   // what put a 296%-full card on the slide.
   const labelPt = spec.type.body.minPt
+
+  // Either every card carries a label or none does. A label needs at least two
+  // words to be a heading rather than a severed subject, so if any card cannot
+  // produce one, the whole grid shows plain claims.
+  const useLabel = items.every(
+    item => cardLabel(item).split(/\s+/).filter(Boolean).length >= 2
+  )
   let bodyPt = 0
   let cellH = 0
 
   for (let pt = spec.type.caption.maxPt; pt >= spec.type.caption.minPt; pt--) {
     const tallest = Math.max(
       ...items.map(item => {
-        const labelH =
-          (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace, true) * lineIn(labelPt)) / FILL_LIMIT
+        const labelH = useLabel
+          ? (estimateLines(cardLabel(item), innerW, labelPt, spec.headingFace, true) * lineIn(labelPt)) /
+            FILL_LIMIT
+          : 0
         const textH = (estimateLines(item, innerW, pt, spec.bodyFace) * lineIn(pt)) / FILL_LIMIT
         return pad * 2 + 0.42 + 0.12 + labelH + 0.06 + textH + 0.1
       })
@@ -296,8 +305,9 @@ export function paintCards(
   items.forEach((item, i) => {
     const r = Math.floor(i / perRow)
     const c = i % perRow
-    const inRow = Math.min(perRow, items.length - r * perRow)
-    const cell = columns(rowBoxes[r], inRow, colGap)[c]
+    // Always divide by perRow, so a part-filled final row keeps the grid's
+    // column width instead of one card spanning the slide.
+    const cell = columns(rowBoxes[r], perRow, colGap)[c]
 
     rec.card(`card-${i}`, cell, spec.palette.tint)
 
@@ -319,27 +329,31 @@ export function paintCards(
     // opening phrase, not new text.
     const label = cardLabel(item)
     const w = cell.w - pad * 2
-    const labelH =
-      (estimateLines(label, w, labelPt, spec.headingFace, true) * lineIn(labelPt)) / FILL_LIMIT + 0.04
+
+    const labelH = useLabel
+      ? (estimateLines(label, w, labelPt, spec.headingFace, true) * lineIn(labelPt)) / FILL_LIMIT + 0.04
+      : 0
 
     const labelBox: Box = { x: cell.x + pad, y: badge.y + badge.h + 0.12, w, h: labelH }
-    rec.text(`card-label-${i}`, labelBox, label, {
-      role: 'body',
-      fontPt: labelPt,
-      fontFace: spec.headingFace,
-      color: spec.palette.ink,
-      bold: true,
-      background: spec.palette.tint,
-      valign: 'top',
-    })
+    if (useLabel) {
+      rec.text(`card-label-${i}`, labelBox, label, {
+        role: 'body',
+        fontPt: labelPt,
+        fontFace: spec.headingFace,
+        color: spec.palette.ink,
+        bold: true,
+        background: spec.palette.tint,
+        valign: 'top',
+      })
+    }
 
     const textBox: Box = {
       x: cell.x + pad,
-      y: labelBox.y + labelBox.h + 0.06,
+      y: labelBox.y + labelBox.h + (useLabel ? 0.06 : 0),
       w,
-      h: cell.h - (labelBox.y - cell.y) - labelBox.h - pad - 0.06,
+      h: cell.h - (labelBox.y - cell.y) - labelBox.h - pad - (useLabel ? 0.06 : 0),
     }
-    rec.text(`card-text-${i}`, textBox, cardBody(item, label), {
+    rec.text(`card-text-${i}`, textBox, useLabel ? cardBody(item, label) : item, {
       role: 'caption',
       fontPt: bodyPt,
       fontFace: spec.bodyFace,
@@ -374,7 +388,10 @@ function cardLabel(claim: string): string {
   // detector rather than a hand-written verb list is what stops labels like
   // "Conventional networks use a" - "use" was simply missing from the list.
   const stop = words.findIndex(w => hasFiniteVerb(w))
-  let take = stop > 1 ? stop : Math.min(3, words.length)
+  // Cut AT the verb wherever it is. Falling through to "first three words" when
+  // the subject was a single word produced labels like "SDN is" and "Security
+  // must be" - a head with its predicate amputated.
+  let take = stop >= 1 ? stop : Math.min(3, words.length)
 
   // Never end a label on a function word: "SDN enables administrators to".
   while (
