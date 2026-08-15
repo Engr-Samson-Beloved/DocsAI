@@ -620,7 +620,10 @@ export function paintProcess(
   // Step the body size down until the cards fit the area they have. Clamping
   // the height instead pushes the overflow INSIDE the card, where it renders as
   // text on top of text - which is what a five-step flow did.
-  let bodyPt = spec.type.caption.maxPt
+  // 0 means "no size fits". The loop must not leave a size behind that was
+  // only the last one TRIED, because the renderer below draws at whatever it
+  // finds here and would fill a short box with tall text.
+  let bodyPt = 0
   let bodyH = 0
   let cardH = 0
 
@@ -631,13 +634,24 @@ export function paintProcess(
     const h = lines > 0 ? (lines * lineIn(pt)) / FILL_LIMIT + 0.04 : 0
     const needed = pad * 2 + 0.44 + 0.12 + titleH + (h > 0 ? h + 0.06 : 0) + 0.08
 
-    bodyPt = pt
-    bodyH = h
-    cardH = needed
-    if (needed <= area.h) break
+    if (needed <= area.h) {
+      bodyPt = pt
+      bodyH = h
+      cardH = needed
+      break
+    }
   }
 
-  cardH = Math.min(area.h, Math.max(1.1, cardH))
+  // Nothing fits, even at the smallest caption size. Clamping the card to the
+  // area is what the comment above forbids, so the steps become a list: the
+  // sequence reads more weakly, but no word is lost and nothing overlaps.
+  if (bodyPt === 0) {
+    const merged = steps.map(s => (s.body.trim() ? `${s.title} - ${s.body}` : s.title))
+    paintBullets(rec, { ...slide, bullets: merged }, spec, area, spec.type.body.minPt)
+    return
+  }
+
+  cardH = Math.max(1.1, cardH)
   const top = area.y + Math.max(0, (area.h - cardH) / 2)
 
   steps.forEach((step, i) => {
@@ -684,7 +698,9 @@ export function paintProcess(
       }
       rec.text(`step-body-${i}`, bodyBox, step.body, {
         role: 'caption',
-        fontPt: spec.type.caption.maxPt,
+        // bodyPt, not caption.maxPt: the loop above chose this size so the text
+        // would fit, and drawing at a different one discards that work.
+        fontPt: bodyPt,
         fontFace: spec.bodyFace,
         color: spec.palette.muted,
         background: spec.palette.tint,
