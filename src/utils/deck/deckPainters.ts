@@ -503,24 +503,35 @@ export function paintProcess(
   const pad = 0.22
   const innerW = boxes[0].w - pad * 2
   const titlePt = spec.type.body.minPt
-  const bodyPt = spec.type.caption.maxPt
-
   const titleLines = Math.max(
     ...steps.map(s => estimateLines(s.title, innerW, titlePt, spec.headingFace, true))
   )
-  const bodyLines = hasBodies
-    ? Math.max(...steps.map(s => (s.body.trim() ? estimateLines(s.body, innerW, bodyPt, spec.bodyFace) : 0)))
-    : 0
 
   // Divided by the fill limit, not padded by a constant: a fixed +0.08 leaves a
-  // three-line label at 92.1% of its box, which is over the limit by a whisker
-  // and fails the overflow check every time.
+  // three-line label at 92.1% of its box, over the limit by a whisker.
   const titleH = (titleLines * lineIn(titlePt)) / FILL_LIMIT + 0.04
-  const bodyH = bodyLines > 0 ? (bodyLines * lineIn(bodyPt)) / FILL_LIMIT + 0.04 : 0
-  // Headroom, so the card is not sized to sit exactly on the 92% limit and
-  // fail it by a rounding difference.
-  const needed = pad * 2 + 0.44 + 0.12 + titleH + (bodyH > 0 ? bodyH + 0.06 : 0) + 0.06
-  const cardH = Math.min(area.h, Math.max(1.1, needed / FILL_LIMIT))
+
+  // Step the body size down until the cards fit the area they have. Clamping
+  // the height instead pushes the overflow INSIDE the card, where it renders as
+  // text on top of text - which is what a five-step flow did.
+  let bodyPt = spec.type.caption.maxPt
+  let bodyH = 0
+  let cardH = 0
+
+  for (let pt = spec.type.caption.maxPt; pt >= spec.type.caption.minPt; pt--) {
+    const lines = hasBodies
+      ? Math.max(...steps.map(s => (s.body.trim() ? estimateLines(s.body, innerW, pt, spec.bodyFace) : 0)))
+      : 0
+    const h = lines > 0 ? (lines * lineIn(pt)) / FILL_LIMIT + 0.04 : 0
+    const needed = pad * 2 + 0.44 + 0.12 + titleH + (h > 0 ? h + 0.06 : 0) + 0.08
+
+    bodyPt = pt
+    bodyH = h
+    cardH = needed
+    if (needed <= area.h) break
+  }
+
+  cardH = Math.min(area.h, Math.max(1.1, cardH))
   const top = area.y + Math.max(0, (area.h - cardH) / 2)
 
   steps.forEach((step, i) => {
