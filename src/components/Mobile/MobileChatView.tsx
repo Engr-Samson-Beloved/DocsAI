@@ -1360,7 +1360,7 @@ Output the complete restructured document as clean HTML with proper heading hier
       } else if (hasCover && !hasContent) {
         suggestions = `\n\nYour cover page is set! Here's what's next:\n- 🔍 **Search journals** for references\n- ✨ **Generate full document** with all chapters\n- 📝 **Write a specific section** — just tell me which one`
       } else {
-        suggestions = `\n\nYour document has ${wordCount} words across ${totalPages} page(s). I can:\n- 🧠 **Humanize** any section to bypass AI detection\n- ✏️ **Edit or improve** specific chapters\n- 📚 **Add references** from online journals\n- 📄 **Export** to Word, PDF, or PowerPoint`
+        suggestions = `\n\nYour document has ${wordCount} words across ${totalPages} page(s). I can:\n- 🧠 **Improve originality** of any section\n- ✏️ **Edit or improve** specific chapters\n- 📚 **Add references** from online journals\n- 📄 **Export** to Word, PDF, or PowerPoint`
       }
       
       addBotMessage(`👋 Hey there! I'm **WordPI**, your intelligent academic writing assistant.${suggestions}`)

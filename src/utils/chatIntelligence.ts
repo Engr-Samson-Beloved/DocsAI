@@ -467,14 +467,14 @@ export function classifyIntent(
 
       if (sectionCtx) {
         enrichedPrompt =
-          `You are a professional academic copyeditor specializing in bypassing AI detection. ` +
-          `The user wants to humanize the following section from their document.\n\n` +
+          `You are a professional academic copyeditor. ` +
+          `The user wants to improve the originality and natural academic expression of the following section from their document.\n\n` +
           `${docMeta}\n\n` +
           `${conversationCtx}` +
           `User request: "${trimmed}"\n\n` +
           `Section content to humanize:\n"""\n${sectionCtx.slice(0, 3000)}\n"""\n\n` +
-          `Rewrite it to look 100% human-written. Follow strict anti-AI-detection rules: ` +
-          `vary sentence lengths aggressively, eliminate robotic transitions, use natural academic vocabulary. ` +
+          `Rewrite it in a natural academic voice: ` +
+          `vary sentence lengths, eliminate formulaic transitions, use precise academic vocabulary. ` +
           `Return the rewritten content in clean HTML (<p>, <h2>, <h3> tags).`
       } else {
         enrichedPrompt =

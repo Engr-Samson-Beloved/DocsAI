@@ -43,6 +43,7 @@ import {
   HumanizerUnavailableError,
   HumanizeJobError
 } from '../../utils/humanize'
+import IntegrityPanel from '../Integrity/IntegrityPanel'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription, verifyPaymentCallback, checkAiQuota, incrementDailyUsage } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
@@ -103,6 +104,7 @@ import {
   ChevronDown,
   Menu,
   Sparkles,
+  ShieldCheck,
   X
 } from 'lucide-react'
 
@@ -1723,6 +1725,16 @@ export default function Editor() {
     /** What the user uploaded, so the modal can name it back to them. */
     sourceName: string
   } | null>(null)
+
+  /**
+   * Whether the Integrity Check dialog is open.
+   *
+   * Only a flag lives here: the dialog owns its own submit/poll/result state
+   * (see components/Integrity/IntegrityPanel.tsx). Running that state machine
+   * from this component would add a fourth long-lived async workflow to a file
+   * that already has three.
+   */
+  const [showIntegrityPanel, setShowIntegrityPanel] = useState(false)
 
   // Document Outline Left Sidebar States
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
@@ -4781,12 +4793,17 @@ export default function Editor() {
         setIsSimulatingAI(false)
         return
       }
+      // Framed as an editing brief rather than an evasion brief. The mechanical
+      // instructions below are unchanged — varied sentence length and plainer
+      // vocabulary are what good academic copyediting asks for anyway — but the
+      // model is no longer told its goal is to defeat a detector, and neither
+      // is the user (§13).
       promptText =
-        `You are a professional academic copyeditor specializing in bypassing AI detection. ` +
-        `Rewrite the highlighted text below to look 100% human-written, ensuring it easily passes Turnitin AI, GPTZero, and other AI detectors.\n\n` +
+        `You are a professional academic copyeditor. ` +
+        `Rewrite the highlighted text below so it reads in a natural academic voice, with the clarity and rhythm of careful human writing.\n\n` +
         `Follow these strict rules:\n` +
-        `- BURSTINESS: Aggressively mix short, punchy sentences (5-10 words) with long, complex analytical clauses (30-40 words).\n` +
-        `- PERPLEXITY: Use varied, natural academic vocabulary. Eliminate all typical AI clichés and robotic transitions like 'furthermore', 'moreover', 'consequently', 'subsequently', 'in addition', 'delve', 'tapestry', 'testament to', 'beacon of'.\n` +
+        `- SENTENCE VARIETY: Mix short, direct sentences (5-10 words) with longer analytical clauses (30-40 words).\n` +
+        `- VOCABULARY: Use varied, natural academic vocabulary. Eliminate all typical AI clichés and robotic transitions like 'furthermore', 'moreover', 'consequently', 'subsequently', 'in addition', 'delve', 'tapestry', 'testament to', 'beacon of'.\n` +
         `- GRAMMAR VARIATION: Do not start consecutive sentences with the same grammatical structure (e.g. avoid starting sentences with identical transitional adverbs or gerunds).\n` +
         `- Keep all original citations (e.g., APA/IEEE formatting) and factual claims intact.\n` +
         `- Return ONLY the rewritten text, formatted in standard HTML <p> tags.\n\n` +
@@ -6262,6 +6279,19 @@ export default function Editor() {
             <span>Import</span>
           </label>
 
+          {/* Integrity Check — AI-writing indicators and similarity.
+              Explicit action only: §21 forbids scanning on every edit, because
+              every scan spends provider credits. */}
+          <button
+            onClick={() => setShowIntegrityPanel(true)}
+            disabled={isExporting}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-md border border-indigo-200 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:border-indigo-900 dark:text-indigo-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Check this document for AI-writing indicators and similarity"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Integrity</span>
+          </button>
+
           {/* Humanize — rewrite the document in the author's voice */}
           <button
             onClick={handleHumanize}
@@ -6448,6 +6478,17 @@ export default function Editor() {
                   >
                     <Edit3 className="w-4 h-4" />
                     <span>Generate Full Blueprint</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      setShowIntegrityPanel(true)
+                    }}
+                    disabled={isExporting}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-indigo-500" />
+                    <span>Check Integrity</span>
                   </button>
                   <button
                     onClick={() => {
@@ -7210,7 +7251,15 @@ export default function Editor() {
                     >
                       <span className="flex items-center gap-1.5">
                         <Zap className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>Humanize Selection (Bypass AI Detectors)</span>
+                        {/*
+                          Positioned as a writing-quality tool, not as a way to
+                          defeat a detector. Framing it as "bypass AI detection"
+                          promises something no rewriter can honestly deliver
+                          and invites the user to submit work they have not
+                          reviewed — which is the behaviour the Integrity
+                          Checker exists to discourage.
+                        */}
+                        <span>Improve Originality of Selection</span>
                       </span>
                       <ChevronRight className="w-3 h-3 text-emerald-550 group-hover:translate-x-0.5 transition-transform" />
                     </button>
@@ -8101,6 +8150,23 @@ export default function Editor() {
             </div>
           </div>
         </div>
+      )}
+
+      {/*
+        Integrity Check. `getContent` is a getter rather than a value so the
+        dialog reads the editor's current state at submit time — passing a
+        snapshot would scan whatever the document looked like when the button
+        was pressed, which is not what the user is looking at.
+      */}
+      {showIntegrityPanel && (
+        <IntegrityPanel
+          projectId={activeProjectId || 'unsaved'}
+          title={documentTitle}
+          getContent={() => JSON.stringify(editor ? editor.getJSON() : {})}
+          documentType={projects.find(p => p.id === activeProjectId)?.documentType}
+          academicLevel={projects.find(p => p.id === activeProjectId)?.academicLevel}
+          onClose={() => setShowIntegrityPanel(false)}
+        />
       )}
 
       {/* Finished rewrite from the dashboard: keep the file, or keep editing. */}

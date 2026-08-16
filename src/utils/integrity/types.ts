@@ -100,6 +100,14 @@ export interface PlagiarismResult {
   error?: string
   providerReference?: string
   sandbox?: boolean
+  /**
+   * True when the scan was accepted but its results arrive later by webhook.
+   * The check stays `processing` until the callback lands or the deadline in
+   * `store.ts` passes. Modelled explicitly rather than as an empty result so
+   * the dashboard can say "still scanning" instead of "0% similarity", which
+   * is the same shape but a very different claim.
+   */
+  awaitingCallback?: boolean
 }
 
 /**
