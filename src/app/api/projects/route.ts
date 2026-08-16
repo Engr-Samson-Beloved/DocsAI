@@ -1,68 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
-import { getSupabaseClient } from '../../../utils/supabase'
+/**
+ * `resolveOwner` used to live here as a private helper. It moved to
+ * utils/owner.ts unchanged when the Integrity Checker needed the same answer —
+ * two copies of an ownership check is how one route ends up trusting a caller
+ * the other rejects.
+ */
+import { resolveOwner } from '../../../utils/owner'
 
 const DATA_DIR = path.join(process.cwd(), 'data')
 const PROJECTS_DIR = path.join(DATA_DIR, 'projects')
 const SOURCES_DIR = path.join(DATA_DIR, 'sources')
-
-// Helper to extract bearer token from headers
-function getBearerToken(req: NextRequest): string | undefined {
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return undefined
-  const parts = authHeader.split(' ')
-  if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
-    return parts[1]
-  }
-  return undefined
-}
-
-/**
- * Identifies who a request belongs to, so the on-disk fallback store can be
- * partitioned per user. Without this the disk listing returned every project
- * ever synced to the server to whoever asked, including signed-out guests.
- */
-async function resolveOwner(req: NextRequest): Promise<{
-  ownerKey: string
-  supabase: ReturnType<typeof getSupabaseClient>
-  token?: string
-  user: { id: string; email?: string } | null
-  unauthorized: boolean
-}> {
-  const token = getBearerToken(req)
-  const supabase = getSupabaseClient(token)
-
-  // Offline/local sessions carry their identity in the token itself
-  if (token && token.startsWith('local-token-')) {
-    const encoded = token.split('-').slice(3).join('-')
-    try {
-      const email = Buffer.from(encoded, 'base64').toString('utf-8').trim().toLowerCase()
-      if (email) {
-        return { ownerKey: `local:${email}`, supabase: null, token, user: null, unauthorized: false }
-      }
-    } catch {
-      // fall through to guest
-    }
-    return { ownerKey: 'guest', supabase: null, token, user: null, unauthorized: false }
-  }
-
-  if (supabase && token) {
-    const { data: { user }, error } = await supabase.auth.getUser()
-    if (error || !user) {
-      return { ownerKey: 'guest', supabase, token, user: null, unauthorized: true }
-    }
-    return {
-      ownerKey: `user:${user.id}`,
-      supabase,
-      token,
-      user: { id: user.id, email: user.email },
-      unauthorized: false
-    }
-  }
-
-  return { ownerKey: 'guest', supabase, token, user: null, unauthorized: false }
-}
 
 // Ensure storage directories exist. Returns false on read-only filesystems
 // (serverless hosts) rather than throwing, so cloud writes still get a chance.
