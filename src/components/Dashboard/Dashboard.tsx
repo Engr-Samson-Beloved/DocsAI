@@ -526,7 +526,7 @@ export default function Dashboard({
                   </div>
                 </button>
                 <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-200 truncate">Humanize Text</span>
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Rewrite to sound human</span>
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-[-4px]">Upload .docx or .pdf</span>
               </div>
 
             </div>

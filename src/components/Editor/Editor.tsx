@@ -54,6 +54,7 @@ import { DOCUMENT_ACCEPT } from '../../utils/pdfLoader'
 import {
   pickDocumentFile,
   ingestDocumentFile,
+  stripExtension,
   DocumentIngestError,
   type IngestedDocument,
   type IngestKind
@@ -1694,16 +1695,6 @@ export default function Editor() {
     getSubscription(email).then(sub => setUserSubscription(sub))
   }
 
-  // "Humanize Text" from the dashboard: open a fresh document and point the
-  // user at the tool that does the work, rather than silently creating a blank.
-  const handleDashboardHumanize = () => {
-    createNewProject()
-    setHintNotice({
-      tone: 'info',
-      message: 'Paste or type the text you want rewritten, select it, then choose AI ▸ Humanize Selection.'
-    })
-  }
-
   // Import document and styling modal states
   const [showImportModal, setShowImportModal] = useState(false)
   const [importFileData, setImportFileData] = useState<{
@@ -1715,6 +1706,23 @@ export default function Editor() {
     file?: File
   } | null>(null)
   const [importOption, setImportOption] = useState<'maintain' | 'seminar' | 'apa' | 'ieee' | 'text_only'>('maintain')
+
+  /**
+   * A finished dashboard rewrite, held until the user says what to do with it.
+   *
+   * Kept as a blob rather than being pushed straight into the editor because
+   * both outcomes are legitimate — some people want the file, some want to keep
+   * editing — and a rewrite can run for minutes, so re-running it to offer the
+   * other one is not something we can ask for.
+   */
+  const [humanizeResult, setHumanizeResult] = useState<{
+    /** The rewritten document. Always .docx, whatever format went up. */
+    blob: Blob
+    /** Suggested download name. */
+    name: string
+    /** What the user uploaded, so the modal can name it back to them. */
+    sourceName: string
+  } | null>(null)
 
   // Document Outline Left Sidebar States
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
@@ -4417,6 +4425,114 @@ export default function Editor() {
   }
 
   /**
+   * Turns a humanize failure into one sentence the user can act on.
+   *
+   * Shared by every entry point so the same failure never gets two different
+   * explanations depending on which button started it.
+   */
+  const reportHumanizeFailure = (err: unknown) => {
+    // The user aborted; they already know, and a banner would be noise.
+    if (err instanceof DOMException && err.name === 'AbortError') return
+
+    let message: string
+    if (err instanceof HumanizerUnavailableError || err instanceof HumanizeJobError) {
+      message = err.message
+    } else if (err instanceof DocumentIngestError) {
+      // The rewrite itself worked; we could not read what came back.
+      message = `The rewrite finished but could not be opened: ${err.userMessage}`
+    } else {
+      message = err instanceof Error ? err.message : String(err)
+    }
+
+    console.error('Humanize error:', err)
+    setHintNotice({ tone: 'error', message })
+  }
+
+  /**
+   * Dashboard "Humanize Text": upload a document, rewrite it, then hand the
+   * result back.
+   *
+   * This card used to open a blank project and tell the user to go find the
+   * toolbar action — it promised a rewrite and delivered an empty page, and
+   * never touched the rewriting service at all. The upload IS the flow now:
+   * pick a .docx or .pdf, it goes up to GhostWriter, and the finished document
+   * comes back as something to download or to carry on editing.
+   */
+  const humanizeFromUpload = async () => {
+    // Pick before showing the spinner: an overlay behind the system file dialog
+    // reads as a hang while the user is still browsing.
+    //
+    // .docx and .pdf only — those are the two formats the rewriter accepts, and
+    // finding that out after an upload wastes the round trip.
+    const file = await pickDocumentFile(DOCUMENT_ACCEPT)
+    if (!file) return // dismissed: leave the dashboard exactly as it was
+
+    setLoadingMessage('Preparing your document...')
+    setIsExporting(true)
+    try {
+      // Checked up front so an unreachable service is reported before the user
+      // sits through an upload that is about to be thrown away.
+      if (!(await isHumanizerAvailable())) {
+        throw new HumanizerUnavailableError(
+          'The rewriting service is unreachable right now. Please try again shortly.'
+        )
+      }
+
+      const rewritten = await humanizeFile(file, file.name, { onStage: setLoadingMessage })
+
+      setHumanizeResult({
+        blob: rewritten,
+        // The rewriter answers with Word bytes whatever went up, so a .pdf
+        // upload comes back as a .docx and has to be named like one.
+        name: `${stripExtension(file.name)}-humanized.docx`,
+        sourceName: file.name
+      })
+    } catch (err) {
+      reportHumanizeFailure(err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  /**
+   * Opens a finished rewrite as a project.
+   *
+   * It re-enters through the very same ingest path an upload uses and then
+   * raises the import formatting modal, so a rewritten document can be restyled
+   * with exactly the choices a fresh upload gets.
+   */
+  const openHumanizedInEditor = async () => {
+    if (!humanizeResult) return
+    const { blob, name } = humanizeResult
+
+    setHumanizeResult(null)
+    setLoadingMessage('Formatting the rewritten document...')
+    setIsExporting(true)
+    try {
+      const doc = await ingestDocumentFile(new File([blob], name, { type: DOCX_MIME }))
+      const cleanedHtml = cleanImportedHtml(doc.html, doc.kind)
+
+      // The rewritten file is now the authoritative original for this project:
+      // it is what is on screen, so an untouched export can convert those bytes.
+      createProjectFromIngested(doc, cleanedHtml)
+
+      setImportFileData({ name: doc.name, htmlContent: cleanedHtml, extension: doc.kind })
+      setImportOption('maintain')
+      if (editor) setShowImportModal(true)
+
+      setHintNotice({
+        tone: 'info',
+        message:
+          'Your document has been rewritten in the author’s voice. Read it through before exporting — rewriting can shift meaning.'
+      })
+    } catch (err) {
+      reportHumanizeFailure(err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  /**
    * Humanizer: rewrite the open document in the author's voice.
    *
    * The document goes up as a .docx and comes back as a .docx, then re-enters
@@ -4504,20 +4620,7 @@ export default function Editor() {
           'Your document has been rewritten in the author’s voice. Read it through before exporting — rewriting can shift meaning.'
       })
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-
-      let message: string
-      if (err instanceof HumanizerUnavailableError || err instanceof HumanizeJobError) {
-        message = err.message
-      } else if (err instanceof DocumentIngestError) {
-        // The rewrite itself worked; we could not read what came back.
-        message = `The rewrite finished but could not be opened: ${err.userMessage}`
-      } else {
-        message = err instanceof Error ? err.message : String(err)
-      }
-
-      console.error('Humanize error:', err)
-      setHintNotice({ tone: 'error', message })
+      reportHumanizeFailure(err)
     } finally {
       setIsExporting(false)
     }
@@ -5945,6 +6048,7 @@ export default function Editor() {
             }}
             onImportDocument={handleDashboardImport}
             onGeneratePptx={generatePptxFromUpload}
+            onHumanizeText={humanizeFromUpload}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -5966,7 +6070,7 @@ export default function Editor() {
             }}
             onImportDocument={handleDashboardImport}
             onGeneratePptx={generatePptxFromUpload}
-            onHumanizeText={handleDashboardHumanize}
+            onHumanizeText={humanizeFromUpload}
             onDeleteProject={deleteProject}
             onRenameProject={renameProjectPrompt}
             onLoadProject={loadProject}
@@ -7993,6 +8097,82 @@ export default function Editor() {
                 className="px-5 py-2 bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer"
               >
                 Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finished rewrite from the dashboard: keep the file, or keep editing. */}
+      {humanizeResult && (
+        <div className="fixed inset-0 bg-zinc-950/65 backdrop-blur-md z-50 flex items-center justify-center transition-all p-4 select-none animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-gradient-to-r from-violet-600 to-violet-800 px-6 py-4 text-white">
+              <h3 className="font-bold text-sm flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                <span>Your Document Has Been Humanized</span>
+              </h3>
+              <p className="text-[10px] text-violet-100 mt-0.5">
+                Rewritten in the author&apos;s voice, with headings, lists and tables kept intact.
+              </p>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300">Rewritten from: </span>
+                <span className="italic break-all">{humanizeResult.sourceName}</span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={openHumanizedInEditor}
+                  className="flex items-start gap-3 p-3 border border-zinc-200 dark:border-zinc-800 hover:border-violet-500 dark:hover:border-violet-500 hover:bg-violet-50/10 rounded-lg text-left transition-all cursor-pointer group"
+                >
+                  <div className="p-2 bg-violet-50 dark:bg-violet-950/20 text-violet-600 rounded-md group-hover:bg-violet-100/40">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-850 dark:text-zinc-250">
+                      Open in the Editor (Recommended)
+                    </h4>
+                    <p className="text-[10px] text-zinc-450 mt-0.5">
+                      Parses the rewrite into the canvas so you can edit it and correct the
+                      formatting, then export as .docx or .pdf.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => downloadBlob(humanizeResult.blob, humanizeResult.name)}
+                  className="flex items-start gap-3 p-3 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 dark:hover:border-emerald-500 hover:bg-emerald-50/10 rounded-lg text-left transition-all cursor-pointer group"
+                >
+                  <div className="p-2 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 rounded-md group-hover:bg-emerald-100/40">
+                    <Download className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-850 dark:text-zinc-250">
+                      Download the Word File
+                    </h4>
+                    <p className="text-[10px] text-zinc-450 mt-0.5 break-all">
+                      Saves {humanizeResult.name} to your device. This dialog stays open, so you
+                      can still open it in the editor afterwards.
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                Read the rewrite through before you submit it anywhere — rewriting can shift
+                meaning.
+              </p>
+            </div>
+
+            <div className="bg-zinc-50 dark:bg-zinc-950 px-6 py-4 flex items-center justify-end gap-2 border-t border-zinc-150 dark:border-zinc-850">
+              <button
+                onClick={() => setHumanizeResult(null)}
+                className="px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+              >
+                Done
               </button>
             </div>
           </div>

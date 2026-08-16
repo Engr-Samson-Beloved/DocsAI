@@ -28,6 +28,7 @@ interface MobileDashboardProps {
   onCreateProjectWithTemplate: (type: 'Seminar' | 'Proposal' | 'Project' | 'Custom') => void
   onImportDocument?: () => void
   onGeneratePptx?: () => void
+  onHumanizeText?: () => void
   onDeleteProject: (id: string) => void
   onRenameProject: (id: string) => void
   onLoadProject: (id: string) => void
@@ -53,7 +54,8 @@ export default function MobileDashboard({
   onOpenPricingModal,
   userSubscription,
   onImportDocument,
-  onGeneratePptx
+  onGeneratePptx,
+  onHumanizeText
 }: MobileDashboardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeMenuProjectId, setActiveMenuProjectId] = useState<string | null>(null)
@@ -238,13 +240,13 @@ export default function MobileDashboard({
               </div>
             </button>
             <button
-              onClick={() => onCreateProjectWithTemplate('Custom')}
+              onClick={() => onHumanizeText ? onHumanizeText() : onCreateProjectWithTemplate('Custom')}
               className="flex items-center gap-2 p-2.5 bg-white dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 rounded-xl hover:border-purple-500 text-left active:scale-[0.98] transition-all shadow-xs"
             >
               <span className="w-6.5 h-6.5 rounded-lg bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center text-purple-600 font-bold text-sm">🧠</span>
               <div className="min-w-0">
                 <p className="text-xs font-bold truncate text-zinc-900 dark:text-zinc-100">Humanize Text</p>
-                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Bypass AI Detector</p>
+                <p className="text-[8px] text-zinc-450 dark:text-zinc-500 font-medium">Upload .docx or .pdf</p>
               </div>
             </button>
           </div>
