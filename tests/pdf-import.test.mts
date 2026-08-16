@@ -499,6 +499,62 @@ describe('dashboard document wiring (source checks)', () => {
     )
   })
 
+  it('wires Humanize Text to an upload on both dashboards', () => {
+    assert.match(mobileDashboard(), /onClick=\{\(\) => onHumanizeText/, 'mobile Humanize button is not wired')
+
+    const source = editor()
+    const wirings = source.match(/onHumanizeText=\{[^}]*\}/g) || []
+    assert.equal(wirings.length, 2, 'expected both the mobile and desktop dashboards to be wired')
+    for (const wiring of wirings) {
+      assert.match(
+        wiring,
+        /onHumanizeText=\{humanizeFromUpload\}/,
+        `Humanize Text should open an upload, got: ${wiring}`
+      )
+    }
+  })
+
+  it('sends the humanize upload to the rewrite service instead of opening a blank page', () => {
+    // The card used to call createNewProject() and print a hint telling the user
+    // to go find the toolbar action, so it never reached GhostWriter at all.
+    const source = editor()
+    const handler = source.slice(
+      source.indexOf('const humanizeFromUpload'),
+      source.indexOf('const openHumanizedInEditor')
+    )
+
+    assert.ok(handler.length > 0, 'humanizeFromUpload not found')
+    assert.match(handler, /await pickDocumentFile\(DOCUMENT_ACCEPT\)/, 'the flow never opens a .docx/.pdf picker')
+    assert.match(handler, /if \(!file\) return/, 'a dismissed picker must leave the dashboard untouched')
+    assert.match(handler, /await humanizeFile\(file, file\.name/, 'the upload never reaches the rewrite service')
+    assert.match(handler, /setHumanizeResult\(/, 'the finished rewrite is not offered back to the user')
+    assert.ok(
+      !/createNewProject\(\)/.test(handler),
+      'the humanize flow creates a blank project again instead of using the upload'
+    )
+  })
+
+  it('offers both a download and an editable import for a finished rewrite', () => {
+    const source = editor()
+    const opener = source.slice(
+      source.indexOf('const openHumanizedInEditor'),
+      source.indexOf('const handleHumanize')
+    )
+
+    assert.ok(opener.length > 0, 'openHumanizedInEditor not found')
+    // Re-entering through the shared ingest path is what carries headings,
+    // lists and tables from the rewritten .docx onto the canvas.
+    assert.match(opener, /await ingestDocumentFile\(/, 'the rewrite is not parsed for the editor')
+    assert.match(opener, /createProjectFromIngested\(doc, cleanedHtml\)/, 'the rewrite does not open as a project')
+    assert.match(opener, /setShowImportModal\(true\)/, 'the formatting options are never offered')
+
+    assert.match(
+      source,
+      /downloadBlob\(humanizeResult\.blob, humanizeResult\.name\)/,
+      'the rewritten file cannot be downloaded'
+    )
+  })
+
   it('cleans up the picker element even when the dialog is dismissed', () => {
     // A cancelled import used to leak a detached <input> on every attempt.
     const source = readFileSync(join(ROOT, 'src/utils/documentIngest.ts'), 'utf8')
