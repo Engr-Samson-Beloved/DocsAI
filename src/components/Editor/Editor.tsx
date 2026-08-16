@@ -33,9 +33,16 @@ import {
   saveProjectsBatch,
   clearAllLocalData,
   saveOriginalUpload,
+  getOriginalUpload,
   hashContent
 } from '../../utils/db'
 import { decideExportPath, convertToPdf } from '../../utils/docxConvert'
+import {
+  humanizeFile,
+  isHumanizerAvailable,
+  HumanizerUnavailableError,
+  HumanizeJobError
+} from '../../utils/humanize'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
 import { getSubscription, verifyPaymentCallback, checkAiQuota, incrementDailyUsage } from '../../utils/subscription'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
@@ -94,6 +101,7 @@ import {
   SlidersHorizontal,
   ChevronDown,
   Menu,
+  Sparkles,
   X
 } from 'lucide-react'
 
@@ -3724,9 +3732,24 @@ export default function Editor() {
   }
 
   // Export to Word Document (.docx) using docx.js (dynamic load)
-  const exportToDocx = async (scope: 'full' | 'cover' | 'toc' | 'content' = 'full') => {
-    setLoadingMessage('Compiling Word Document...')
-    setIsExporting(true)
+  /**
+   * Builds a .docx from the editor model.
+   *
+   * `returnBlob` exists for callers that need the bytes rather than a download —
+   * the Humanizer sends this document upstream and re-imports the rewrite. Such
+   * a caller owns the loading overlay and the error reporting for the whole
+   * operation, so in that mode this neither touches the spinner (which would
+   * flash off midway) nor swallows errors in an alert.
+   */
+  const exportToDocx = async (
+    scope: 'full' | 'cover' | 'toc' | 'content' = 'full',
+    options: { returnBlob?: boolean } = {}
+  ): Promise<Blob | void> => {
+    const silent = Boolean(options.returnBlob)
+    if (!silent) {
+      setLoadingMessage('Compiling Word Document...')
+      setIsExporting(true)
+    }
     try {
       const docx = await import('docx')
       const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, TabStopType, LeaderType, PageBreak, ImageRun } = docx
@@ -4147,6 +4170,8 @@ export default function Editor() {
       })
 
       const blob = await Packer.toBlob(doc)
+      if (silent) return blob
+
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
       link.download = `${documentTitle.replace(/\s+/g, '_').toLowerCase()}.docx`
@@ -4154,9 +4179,10 @@ export default function Editor() {
       URL.revokeObjectURL(link.href)
     } catch (err: any) {
       console.error('Word export error:', err)
+      if (silent) throw err
       alert(`Failed to export Word document: ${err.message || err}`)
     } finally {
-      setIsExporting(false)
+      if (!silent) setIsExporting(false)
     }
   }
 
@@ -4385,6 +4411,113 @@ export default function Editor() {
       })
     } catch (err) {
       reportIngestFailure(err, 'PPTX from upload')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  /**
+   * Humanizer: rewrite the open document in the author's voice.
+   *
+   * The document goes up as a .docx and comes back as a .docx, then re-enters
+   * through the very same ingest path an upload uses. Round-tripping a real
+   * Word file is what carries headings, lists and tables through the rewrite;
+   * sending flattened text would return prose we could only re-import as a run
+   * of undifferentiated paragraphs.
+   *
+   * The source bytes are the stored original whenever the import is still
+   * untouched, since those describe the document better than anything we can
+   * rebuild from the editor model. Once the user has edited, the editor model
+   * IS the document, so it gets compiled fresh.
+   */
+  const handleHumanize = async () => {
+    if (!editor) return
+
+    if (!editor.getText().trim()) {
+      setHintNotice({
+        tone: 'error',
+        message: 'There is nothing to humanize yet — add some content first.'
+      })
+      return
+    }
+
+    setLoadingMessage('Preparing your document...')
+    setIsExporting(true)
+
+    try {
+      // Checked up front so an unreachable service is reported before the user
+      // waits through a compile that is about to be thrown away.
+      if (!(await isHumanizerAvailable())) {
+        throw new HumanizerUnavailableError(
+          'The rewriting service is unreachable right now. Please try again shortly.'
+        )
+      }
+
+      const pristine =
+        pristineImportRef.current !== null && pristineImportRef.current === activeProjectId
+
+      let source: Blob | null = null
+      let sourceName = `${documentTitle.replace(/\s+/g, '_').toLowerCase() || 'document'}.docx`
+
+      if (pristine && activeProjectId) {
+        const original = await getOriginalUpload(activeProjectId)
+        if (original) {
+          source = original.blob
+          sourceName = original.name
+        }
+      }
+
+      if (!source) {
+        setLoadingMessage('Compiling your document...')
+        const built = await exportToDocx('full', { returnBlob: true })
+        if (!(built instanceof Blob)) {
+          throw new Error('Could not compile this document for rewriting.')
+        }
+        source = built
+      }
+
+      const rewritten = await humanizeFile(source, sourceName, {
+        onStage: setLoadingMessage
+      })
+
+      setLoadingMessage('Formatting the rewritten document...')
+
+      const humanizedName = `${sourceName.replace(/\.[^.]+$/, '')}.docx`
+      const doc = await ingestDocumentFile(
+        new File([rewritten], humanizedName, { type: DOCX_MIME })
+      )
+
+      editor.commands.setContent(ensurePaginatedHtml(cleanImportedHtml(doc.html, 'docx')))
+      setIsSaved(false)
+
+      // The rewrite replaced the prose, so the stored original no longer
+      // describes what is on screen. Leaving the import marked pristine would
+      // let a later PDF export convert those ORIGINAL bytes and silently ship
+      // the un-humanized document.
+      pristineImportRef.current = null
+
+      setTimeout(() => runPagination(editor), 100)
+
+      setHintNotice({
+        tone: 'info',
+        message:
+          'Your document has been rewritten in the author’s voice. Read it through before exporting — rewriting can shift meaning.'
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+
+      let message: string
+      if (err instanceof HumanizerUnavailableError || err instanceof HumanizeJobError) {
+        message = err.message
+      } else if (err instanceof DocumentIngestError) {
+        // The rewrite itself worked; we could not read what came back.
+        message = `The rewrite finished but could not be opened: ${err.userMessage}`
+      } else {
+        message = err instanceof Error ? err.message : String(err)
+      }
+
+      console.error('Humanize error:', err)
+      setHintNotice({ tone: 'error', message })
     } finally {
       setIsExporting(false)
     }
@@ -6025,6 +6158,17 @@ export default function Editor() {
             <span>Import</span>
           </label>
 
+          {/* Humanize — rewrite the document in the author's voice */}
+          <button
+            onClick={handleHumanize}
+            disabled={isExporting}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-md border border-violet-200 dark:bg-violet-950/40 dark:hover:bg-violet-900/40 dark:border-violet-900 dark:text-violet-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Rewrite this document in the author's voice"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Humanize</span>
+          </button>
+
           {/* Export Actions Menu */}
           <div className="relative" ref={exportMenuRef}>
             <button 
@@ -6200,6 +6344,17 @@ export default function Editor() {
                   >
                     <Edit3 className="w-4 h-4" />
                     <span>Generate Full Blueprint</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowMobileToolsMenu(false)
+                      handleHumanize()
+                    }}
+                    disabled={isExporting}
+                    className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/40 rounded-lg cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Sparkles className="w-4 h-4 text-violet-500" />
+                    <span>Humanize Document</span>
                   </button>
                   <button
                     onClick={() => {
