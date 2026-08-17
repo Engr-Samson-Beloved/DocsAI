@@ -34,9 +34,19 @@ export interface QuotaState {
   feature: MeteredFeature
   label: string
   period: QuotaPeriod
-  limit: number
+  /**
+   * How many units the plan allows, or null for unlimited (owner accounts).
+   *
+   * Null rather than Infinity because this crosses JSON, where Infinity
+   * silently becomes null anyway — making the meaning explicit here beats
+   * having it happen by accident on the wire. Every renderer must check
+   * `unlimited` before formatting these numbers.
+   */
+  limit: number | null
   used: number
-  remaining: number
+  /** Null when `unlimited`. */
+  remaining: number | null
+  unlimited: boolean
   /** The window these numbers were counted over. */
   periodKey: string
 }
@@ -55,6 +65,8 @@ export interface EntitlementSnapshot {
   expiresAt: string | null
   /** True when the account may prompt a model at all. */
   canUseAi: boolean
+  /** True for an account that owns the deployment and is metered by nothing. */
+  owner: boolean
   quotas: Record<MeteredFeature, QuotaState>
 }
 

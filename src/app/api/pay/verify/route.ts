@@ -104,25 +104,24 @@ export async function GET(req: NextRequest) {
     // `subscriptions` table has no RLS.
     const supabase = getSupabaseAdminClient() ?? getSupabaseClient()
 
-    let persisted = false
-    if (supabase && userEmail) {
-      persisted = await saveSubscriptionRow(supabase, {
-        email: userEmail,
-        planTier,
-        amount,
-        reference,
-        cycleStartedAt,
-        expirationDate,
-      })
-    }
+    // Falls back to the on-disk grant store when the cloud write is refused, so
+    // a confirmed payment activates the plan rather than stranding the payer.
+    const outcome = await saveSubscriptionRow(supabase, {
+      email: userEmail,
+      planTier,
+      amount,
+      reference,
+      cycleStartedAt,
+      expirationDate,
+    })
 
-    // The money is taken. If the grant did not land, the payer is on the free
-    // tier with a receipt, so this must never pass silently: it is logged at
-    // error level and the response says who to contact and with what.
-    if (!persisted) {
+    // Only when NOTHING landed. The money is taken and the payer has nothing,
+    // so this must never pass silently: logged at error level, and the response
+    // says what to quote to get it fixed by hand.
+    if (outcome === 'failed') {
       console.error(
         `[Korapay Verify] PAYMENT TAKEN BUT NOT GRANTED. reference=${reference} email=${userEmail} ` +
-          `tier=${planTier} amount=${amount}. Check SUPABASE_SERVICE_ROLE_KEY and migrations/002_entitlements.sql.`
+          `tier=${planTier} amount=${amount}. Set SUPABASE_SERVICE_ROLE_KEY and apply migrations/002_entitlements.sql.`
       )
       return NextResponse.json({
         success: false,
@@ -132,6 +131,13 @@ export async function GET(req: NextRequest) {
           `Nothing further is owed. Please contact support quoting reference ${reference} and it will be applied by hand.`,
         reference,
       }, { status: 202 })
+    }
+
+    if (outcome === 'local') {
+      console.warn(
+        `[Korapay Verify] ${reference} granted from the local fallback store. The plan is active for ` +
+          `${userEmail} on this deployment, but will not survive a redeploy until the cloud write works.`
+      )
     }
 
     return NextResponse.json({

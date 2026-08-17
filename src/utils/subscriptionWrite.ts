@@ -27,6 +27,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PlanTier } from './plans'
+import { recordGrant } from './entitlements/grantStore'
 
 /** PostgREST's "no such column", i.e. migrations/002 has not been applied. */
 const MISSING_COLUMN = 'PGRST204'
@@ -38,12 +39,60 @@ export interface SubscriptionGrant {
   reference: string | null
   cycleStartedAt: Date
   expirationDate: Date
+  /** Set when an admin comped the plan rather than it being paid for. */
+  grantedBy?: string | null
+}
+
+/**
+ * Where the grant ended up.
+ *
+ *   cloud  the subscription row was written; everything works normally
+ *   local  the cloud write was refused, so it went to the on-disk fallback.
+ *          The payer HAS their plan — `loadSubscription` reads this — but it
+ *          lives on one machine and will not survive a redeploy.
+ *   failed nothing landed. The caller owes the payer a manual grant.
+ */
+export type GrantOutcome = 'cloud' | 'local' | 'failed'
+
+/**
+ * The last resort under a refused cloud write.
+ *
+ * Returning 'local' rather than 'failed' is a deliberate call: the alternative
+ * is telling someone who has just paid that they have nothing. A degraded grant
+ * that works on this deployment beats a correct refusal every time here.
+ */
+function fallbackToDisk(grant: SubscriptionGrant, reason: string): GrantOutcome {
+  const stored = recordGrant({
+    email: grant.email.trim().toLowerCase(),
+    planTier: grant.planTier,
+    amount: grant.amount,
+    korapayReference: grant.reference,
+    cycleStartedAt: grant.cycleStartedAt.toISOString(),
+    expirationDate: grant.expirationDate.toISOString(),
+    grantedBy: grant.grantedBy ?? null,
+    createdAt: Date.now(),
+  })
+
+  if (stored) {
+    console.warn(
+      `Subscription for ${grant.email} was granted from the local fallback store because the cloud ` +
+        `write was refused (${reason}). Set SUPABASE_SERVICE_ROLE_KEY and apply ` +
+        `migrations/002_entitlements.sql so grants persist properly.`
+    )
+    return 'local'
+  }
+
+  return 'failed'
 }
 
 export async function saveSubscriptionRow(
-  supabase: SupabaseClient,
+  supabase: SupabaseClient | null,
   grant: SubscriptionGrant
-): Promise<boolean> {
+): Promise<GrantOutcome> {
+  if (!supabase) {
+    return fallbackToDisk(grant, 'Supabase is not configured')
+  }
+
   const base = {
     email: grant.email,
     plan_tier: grant.planTier,
@@ -54,17 +103,23 @@ export async function saveSubscriptionRow(
     updated_at: new Date().toISOString(),
   }
 
+  const withMigration: Record<string, unknown> = {
+    ...base,
+    // Opens a fresh quota window — see utils/entitlements/period.ts.
+    cycle_started_at: grant.cycleStartedAt.toISOString(),
+  }
+  if (grant.grantedBy) withMigration.granted_by = grant.grantedBy
+
   const upsert = (row: Record<string, unknown>) =>
     supabase.from('subscriptions').upsert(row, { onConflict: 'email' })
 
   try {
-    // Opens a fresh quota window — see utils/entitlements/period.ts.
-    const { error } = await upsert({ ...base, cycle_started_at: grant.cycleStartedAt.toISOString() })
-    if (!error) return true
+    const { error } = await upsert(withMigration)
+    if (!error) return 'cloud'
 
     if (error.code !== MISSING_COLUMN) {
       console.error('Subscription grant rejected:', error)
-      return false
+      return fallbackToDisk(grant, error.message || String(error.code))
     }
 
     console.warn(
@@ -75,11 +130,11 @@ export async function saveSubscriptionRow(
     const retry = await upsert(base)
     if (retry.error) {
       console.error('Subscription grant rejected on retry:', retry.error)
-      return false
+      return fallbackToDisk(grant, retry.error.message || String(retry.error.code))
     }
-    return true
+    return 'cloud'
   } catch (e) {
     console.error('Subscription grant threw:', e)
-    return false
+    return fallbackToDisk(grant, e instanceof Error ? e.message : 'unknown error')
   }
 }

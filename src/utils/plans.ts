@@ -194,3 +194,39 @@ export const CYCLE_DAYS = 30
 export function formatNaira(amount: number): string {
   return `₦${amount.toLocaleString('en-NG')}`
 }
+
+/* ── owner accounts ───────────────────────────────────────────────── */
+
+/**
+ * The accounts that own this deployment, and are metered by nothing.
+ *
+ * Configured with OWNER_EMAILS (comma-separated), defaulting to ADMIN_EMAIL so
+ * the person who runs the dashboard does not also have to buy a plan to use
+ * their own product.
+ *
+ * Server-side only by construction: neither variable is NEXT_PUBLIC_, so this
+ * returns an empty list in the browser and no client can decide it is an owner.
+ * That is deliberate — see `isOwnerEmail`.
+ */
+export function ownerEmails(): string[] {
+  const raw = process.env.OWNER_EMAILS || process.env.ADMIN_EMAIL || ''
+  return raw
+    .split(',')
+    .map(entry => entry.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/**
+ * Whether this address owns the deployment.
+ *
+ * CALLERS MUST HAVE VERIFIED THE ADDRESS FIRST. This compares strings; it does
+ * not authenticate. The only safe input is the email on a confirmed Supabase
+ * session (`user:` in utils/owner.ts). An offline `local:` token carries its own
+ * email in its body, so passing one of those here would let anybody mint
+ * `local-token-<base64 of the owner address>` and take unlimited access.
+ * `service.ts:resolveOwnerAccess` is the one caller and enforces that.
+ */
+export function isOwnerEmail(email: string | null | undefined): boolean {
+  if (!email) return false
+  return ownerEmails().includes(email.trim().toLowerCase())
+}

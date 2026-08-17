@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '../../../../utils/supabase'
+import { findGrant } from '../../../../utils/entitlements/grantStore'
+import { isOwnerEmail, PLANS } from '../../../../utils/plans'
 
 function getBearerToken(req: NextRequest): string | undefined {
   const authHeader = req.headers.get('Authorization')
@@ -71,6 +73,42 @@ export async function GET(req: NextRequest) {
           }
         })
       }
+    }
+
+    // No cloud row does not mean no plan. A payment whose cloud write was
+    // refused is granted to the on-disk fallback instead, and without this the
+    // header would keep reading "Free" to someone who has just paid.
+    const grant = findGrant(targetEmail)
+    if (grant && new Date(grant.expirationDate).getTime() > Date.now()) {
+      return NextResponse.json({
+        subscription: {
+          user_id: targetEmail,
+          email: targetEmail,
+          plan_tier: grant.planTier,
+          amount: grant.amount,
+          status: 'active',
+          korapay_reference: grant.korapayReference ?? undefined,
+          expiration_date: grant.expirationDate,
+          updated_at: new Date(grant.createdAt).toISOString()
+        }
+      })
+    }
+
+    // An owner is never on the free tier, whatever the subscription table says.
+    // Display only — the real decision is made server-side against a VERIFIED
+    // session in utils/entitlements/service.ts, not against this response.
+    if (isOwnerEmail(targetEmail)) {
+      return NextResponse.json({
+        subscription: {
+          user_id: targetEmail,
+          email: targetEmail,
+          plan_tier: 'enterprise',
+          amount: PLANS.enterprise.amount,
+          status: 'active',
+          expiration_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      })
     }
 
     return NextResponse.json({

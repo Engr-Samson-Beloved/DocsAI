@@ -21,9 +21,12 @@ export interface QuotaState {
   feature: MeteredFeature
   label: string
   period: 'cycle' | 'day'
-  limit: number
+  /** Null means unlimited (an owner account). Check `unlimited` before formatting. */
+  limit: number | null
   used: number
-  remaining: number
+  /** Null when `unlimited`. */
+  remaining: number | null
+  unlimited: boolean
   periodKey: string
 }
 
@@ -35,6 +38,8 @@ export interface EntitlementSnapshot {
   status: 'active' | 'expired' | 'free'
   expiresAt: string | null
   canUseAi: boolean
+  /** True for an account that owns the deployment and is metered by nothing. */
+  owner: boolean
   quotas: Record<MeteredFeature, QuotaState>
 }
 
@@ -181,6 +186,7 @@ export async function consumeFeature(
 /** A short "2 of 4 left" style line for a toolbar or menu item. */
 export function describeQuota(quota: QuotaState | undefined): string {
   if (!quota) return ''
+  if (quota.unlimited) return 'Unlimited'
   if (quota.limit === 0) return 'Not on your plan'
   const window = quota.period === 'day' ? 'today' : 'this cycle'
   return `${quota.remaining} of ${quota.limit} left ${window}`

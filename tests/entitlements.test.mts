@@ -234,6 +234,110 @@ describe('the paywall is server-side', () => {
   })
 })
 
+describe('owner accounts', () => {
+  it('recognises the configured owner addresses', async () => {
+    const previous = process.env.OWNER_EMAILS
+    process.env.OWNER_EMAILS = 'Owner@Example.com, second@example.com'
+
+    try {
+      const { isOwnerEmail, ownerEmails } = await plans()
+
+      assert.deepEqual(ownerEmails(), ['owner@example.com', 'second@example.com'])
+      assert.equal(isOwnerEmail('owner@example.com'), true)
+      assert.equal(isOwnerEmail('OWNER@EXAMPLE.COM'), true, 'matching is case-insensitive')
+      assert.equal(isOwnerEmail('  owner@example.com  '), true, 'and whitespace-insensitive')
+      assert.equal(isOwnerEmail('someone@example.com'), false)
+      assert.equal(isOwnerEmail(null), false)
+      assert.equal(isOwnerEmail(''), false)
+    } finally {
+      process.env.OWNER_EMAILS = previous
+    }
+  })
+
+  it('falls back to the admin address when no owner list is set', async () => {
+    const previousOwner = process.env.OWNER_EMAILS
+    const previousAdmin = process.env.ADMIN_EMAIL
+    process.env.OWNER_EMAILS = ''
+    process.env.ADMIN_EMAIL = 'boss@example.com'
+
+    try {
+      const { ownerEmails } = await plans()
+      assert.deepEqual(ownerEmails(), ['boss@example.com'])
+    } finally {
+      process.env.OWNER_EMAILS = previousOwner
+      process.env.ADMIN_EMAIL = previousAdmin
+    }
+  })
+
+  it('only trusts a verified session for owner access', () => {
+    const source = read('src/utils/entitlements/service.ts')
+
+    // The security property this whole feature rests on. `emailForOwner` will
+    // return the address out of a self-asserted `local:` token, so unlimited
+    // access must be gated on the ownerKey being a verified `user:` identity —
+    // otherwise anyone can mint local-token-<base64 of the owner address>.
+    const guard = source.slice(
+      source.indexOf('export function isOwnerRequest'),
+      source.indexOf('export async function loadSubscription')
+    )
+
+    assert.ok(guard.length > 0, 'isOwnerRequest must exist')
+    assert.match(guard, /startsWith\('user:'\)/, 'owner access requires a verified Supabase session')
+    assert.ok(
+      !guard.includes('emailForOwner'),
+      'isOwnerRequest must not read the email out of a self-asserted local token'
+    )
+    assert.match(guard, /owner\.user\?\.email/, 'the address must come from the verified session')
+  })
+
+  it('never gates an owner in the quota check', () => {
+    const source = read('src/utils/entitlements/service.ts')
+    assert.match(
+      source,
+      /!snapshot\.owner &&/,
+      'checkFeature must short-circuit before the remaining-credits arithmetic'
+    )
+  })
+
+  it('keeps the owner list off the browser bundle', () => {
+    const source = read('src/utils/plans.ts')
+    // NEXT_PUBLIC_ would ship the owner addresses to every visitor and let a
+    // client decide it was one.
+    assert.ok(!source.includes('NEXT_PUBLIC_OWNER'), 'owner config must stay server-side')
+    assert.ok(!source.includes('NEXT_PUBLIC_ADMIN'), 'admin config must stay server-side')
+  })
+})
+
+describe('a confirmed payment always grants something', () => {
+  it('falls back to the local store when the cloud write is refused', () => {
+    const source = read('src/utils/subscriptionWrite.ts')
+
+    // Money taken with nothing given is the worst failure this app has, so a
+    // refused cloud write must not be the end of the road.
+    assert.match(source, /fallbackToDisk/, 'a refused cloud write must fall back to disk')
+    assert.match(source, /'cloud' \| 'local' \| 'failed'/, 'the outcome must be reported precisely')
+  })
+
+  it('reads that fallback back when resolving entitlements', () => {
+    const source = read('src/utils/entitlements/service.ts')
+
+    // Granting to the fallback is pointless if nothing reads it: the payer
+    // would still resolve to the free tier on the very next request.
+    assert.match(source, /findGrant/, 'loadSubscription must consult the local grant store')
+    assert.match(
+      source,
+      /if \(error \|\| !data\) return localRecord\(email\)/,
+      'a missing cloud row must fall through to the local grant'
+    )
+  })
+
+  it('only reports failure when nothing landed at all', () => {
+    const verify = read('src/app/api/pay/verify/route.ts')
+    assert.match(verify, /outcome === 'failed'/, 'success must not depend on the cloud write alone')
+    assert.match(verify, /PAYMENT TAKEN BUT NOT GRANTED/, 'a total failure must still be loud')
+  })
+})
+
 describe('admin surface', () => {
   it('has no built-in credentials to fall back to', () => {
     const source = read('src/utils/adminAuth.ts')

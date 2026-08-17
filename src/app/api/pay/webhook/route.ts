@@ -92,8 +92,8 @@ export async function POST(req: NextRequest) {
       // row and a paid subscription would never activate.
       const supabase = getSupabaseAdminClient() ?? getSupabaseClient()
 
-      if (supabase && email) {
-        const granted = await saveSubscriptionRow(supabase, {
+      if (email) {
+        const outcome = await saveSubscriptionRow(supabase, {
           email,
           planTier,
           amount,
@@ -102,8 +102,11 @@ export async function POST(req: NextRequest) {
           expirationDate,
         })
 
-        if (granted) {
-          console.log(`[Korapay Webhook] Successfully activated ${planTier} subscription for ${email}`)
+        if (outcome !== 'failed') {
+          console.log(
+            `[Korapay Webhook] Successfully activated ${planTier} subscription for ${email}` +
+              (outcome === 'local' ? ' (from the local fallback store)' : '')
+          )
         } else {
           // Answering non-2xx makes Korapay retry, which is what we want: the
           // charge is real and the grant is missing, so another attempt is

@@ -33,10 +33,13 @@ import {
   FEATURE_PERIOD,
   METERED_FEATURES,
   PLANS,
+  isOwnerEmail,
+  ownerEmails,
   planFor,
   type MeteredFeature,
   type PlanTier,
 } from '../plans'
+import { findGrant } from './grantStore'
 import { cycleKey, periodKeyFor, type CycleSource } from './period'
 import { countUsage, countUsageByFeature, recordFailureEntry, recordUsage } from './store'
 import type { EntitlementSnapshot, QuotaDecision, QuotaState } from './types'
@@ -69,17 +72,62 @@ export function emailForOwner(owner: RequestOwner): string | null {
 }
 
 /**
+ * Whether this caller is an owner of the deployment, and so metered by nothing.
+ *
+ * Only a VERIFIED Supabase session counts. `emailForOwner` will happily return
+ * the address out of a `local:` token, but that token carries its own email in
+ * its body — it is an identity for partitioning storage, not an authentication
+ * claim (see utils/owner.ts). Trusting it here would mean anyone could mint
+ * `local-token-<timestamp>-<base64 of the owner address>` and hand themselves
+ * unlimited access to every paid feature.
+ *
+ * So the check is deliberately narrow: `user:` identities only. An owner in
+ * offline mode gets the free tier, which is the right way round — unlimited
+ * access is an authorisation decision and must rest on a verified identity.
+ */
+export function isOwnerRequest(owner: RequestOwner): boolean {
+  if (!owner.ownerKey.startsWith('user:')) return false
+  return isOwnerEmail(owner.user?.email ?? null)
+}
+
+/**
  * Reads the live subscription for this caller.
  *
  * Expiry is applied here rather than trusted from the row, because nothing
  * sweeps `subscriptions` when a cycle lapses — the row keeps saying 'active'
  * with a date in the past until the next payment overwrites it.
  */
+/**
+ * The plan granted on disk when the cloud write was refused.
+ *
+ * Read only as a fallback — a cloud row always wins — so the two stores cannot
+ * disagree about an account that exists in both.
+ */
+function localRecord(email: string | null): SubscriptionRecord {
+  const grant = findGrant(email)
+  if (!grant) return FREE_RECORD
+
+  const lapsed = new Date(grant.expirationDate).getTime() < Date.now()
+  if (lapsed) {
+    return { ...FREE_RECORD, status: 'expired', expirationDate: grant.expirationDate }
+  }
+
+  return {
+    planTier: grant.planTier,
+    status: 'active',
+    expirationDate: grant.expirationDate,
+    korapayReference: grant.korapayReference,
+    cycleStartedAt: grant.cycleStartedAt,
+    amount: grant.amount,
+  }
+}
+
 export async function loadSubscription(
   email: string | null,
   supabase: SupabaseClient | null
 ): Promise<SubscriptionRecord> {
-  if (!email || !supabase) return FREE_RECORD
+  if (!email) return FREE_RECORD
+  if (!supabase) return localRecord(email)
 
   try {
     const { data, error } = await supabase
@@ -88,13 +136,21 @@ export async function loadSubscription(
       .ilike('email', email)
       .maybeSingle()
 
-    if (error || !data) return FREE_RECORD
+    // No row is not the same as no plan: the payment may have been granted to
+    // the on-disk fallback because RLS refused the cloud write. Checking here
+    // is what stops a successful payment reading as "free" on the next request.
+    if (error || !data) return localRecord(email)
 
     const expirationDate: string | null = data.expiration_date ?? null
     const lapsed = expirationDate ? new Date(expirationDate).getTime() < Date.now() : true
     const rowActive = String(data.status ?? '') === 'active'
 
     if (!rowActive || lapsed) {
+      // A stale cloud row must not mask a newer local grant — that is exactly
+      // the shape of "they renewed, and the renewal could not be written".
+      const local = localRecord(email)
+      if (local.status === 'active') return local
+
       return {
         ...FREE_RECORD,
         status: rowActive || data.status === 'expired' ? 'expired' : 'free',
@@ -112,7 +168,7 @@ export async function loadSubscription(
     }
   } catch (e) {
     console.warn('Could not read the subscription for entitlement checks:', e)
-    return FREE_RECORD
+    return localRecord(email)
   }
 }
 
@@ -130,15 +186,17 @@ function quotaState(
   feature: MeteredFeature,
   limit: number,
   used: number,
-  periodKey: string
+  periodKey: string,
+  unlimited = false
 ): QuotaState {
   return {
     feature,
     label: FEATURE_LABELS[feature],
     period: FEATURE_PERIOD[feature],
-    limit,
+    limit: unlimited ? null : limit,
     used,
-    remaining: Math.max(0, limit - used),
+    remaining: unlimited ? null : Math.max(0, limit - used),
+    unlimited,
     periodKey,
   }
 }
@@ -151,8 +209,12 @@ function quotaState(
  */
 export async function getEntitlements(owner: RequestOwner): Promise<EntitlementSnapshot> {
   const email = emailForOwner(owner)
+  const isOwner = isOwnerRequest(owner)
   const record = await loadSubscription(email, owner.supabase)
-  const plan = planFor(record.planTier)
+
+  // An owner is shown the top plan's name, but is metered by nothing — the
+  // quotas below are unlimited regardless of what the subscription row says.
+  const plan = isOwner ? PLANS.enterprise : planFor(record.planTier)
   const source = cycleSource(email, record)
 
   const periodKeys = {} as Record<MeteredFeature, string>
@@ -164,19 +226,26 @@ export async function getEntitlements(owner: RequestOwner): Promise<EntitlementS
 
   const quotas = {} as Record<MeteredFeature, QuotaState>
   for (const feature of METERED_FEATURES) {
-    quotas[feature] = quotaState(feature, plan.quotas[feature], used[feature] ?? 0, periodKeys[feature])
+    quotas[feature] = quotaState(
+      feature,
+      plan.quotas[feature],
+      used[feature] ?? 0,
+      periodKeys[feature],
+      isOwner
+    )
   }
 
   return {
     ownerKey: owner.ownerKey,
     email,
     planTier: plan.tier,
-    planName: plan.name,
-    status: record.status,
-    expiresAt: record.expirationDate,
+    planName: isOwner ? 'Owner' : plan.name,
+    status: isOwner ? 'active' : record.status,
+    expiresAt: isOwner ? null : record.expirationDate,
     // "Can prompt a model at all" — the free tier's single integrity check is
     // a scan, not a generation, so it does not make this true.
-    canUseAi: plan.quotas.report > 0 || plan.quotas.assist > 0,
+    canUseAi: isOwner || plan.quotas.report > 0 || plan.quotas.assist > 0,
+    owner: isOwner,
     quotas,
   }
 }
@@ -189,7 +258,7 @@ function refusalMessage(
 ): string {
   const label = FEATURE_LABELS[feature].toLowerCase()
 
-  if (state.limit === 0) {
+  if (state.limit === 0 || state.limit === null) {
     if (planTier === 'free') {
       return (
         `${FEATURE_LABELS[feature]} is a paid feature. Formatting, importing and exporting stay ` +
@@ -208,6 +277,11 @@ function refusalMessage(
   )
 }
 
+/** Re-exported for the admin dashboard, which shows owner accounts as such. */
+export function ownerAccountsConfigured(): boolean {
+  return ownerEmails().length > 0
+}
+
 /**
  * Decides whether one unit of `feature` may be spent, without spending it.
  *
@@ -223,7 +297,10 @@ export async function checkFeature(
   const snapshot = await getEntitlements(owner)
   const state = snapshot.quotas[feature]
 
-  if (state.remaining < quantity) {
+  // An owner is never refused. Checked before the arithmetic rather than by
+  // giving them a very large number, so there is no ceiling to reach and no
+  // subtraction that could put them back under one.
+  if (!snapshot.owner && (state.remaining ?? 0) < quantity) {
     return {
       allowed: false,
       state,

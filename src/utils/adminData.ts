@@ -23,7 +23,9 @@ import {
 } from './plans'
 import { cycleKey } from './entitlements/period'
 import { countUsageByFeature, listFailures, listUsage } from './entitlements/store'
-import { METERED_FEATURES } from './plans'
+import { listGrants } from './entitlements/grantStore'
+import { saveSubscriptionRow } from './subscriptionWrite'
+import { isOwnerEmail, METERED_FEATURES } from './plans'
 
 export interface AdminSubscriber {
   email: string
@@ -42,6 +44,10 @@ export interface AdminSubscriber {
   /** Present only when the account exists in Supabase Auth. */
   lastSignInAt?: string | null
   createdAt?: string | null
+  /** True when the plan lives only in the on-disk fallback store. */
+  localOnly?: boolean
+  /** True for an account that owns the deployment and is metered by nothing. */
+  owner?: boolean
 }
 
 export interface DegradableResult<T> {
@@ -127,6 +133,34 @@ export async function listSubscribers(
     console.warn('Admin subscriber query failed:', e)
   }
 
+  // Plans granted to the on-disk fallback because the cloud write was refused.
+  // Without this the dashboard would show a paying customer as free — which is
+  // the one thing an operator diagnosing "I paid and nothing happened" needs to
+  // see. A cloud row always wins where both exist.
+  for (const grant of listGrants()) {
+    if (options.search && !grant.email.includes(options.search.toLowerCase())) continue
+    if (byEmail.has(grant.email)) continue
+
+    const plan = planFor(grant.planTier)
+    const lapsed = new Date(grant.expirationDate).getTime() < Date.now()
+
+    byEmail.set(grant.email, {
+      email: grant.email,
+      userId: null,
+      planTier: lapsed ? 'free' : plan.tier,
+      planName: lapsed ? PLANS.free.name : plan.name,
+      status: lapsed ? 'expired' : 'active',
+      amount: grant.amount,
+      expiresAt: grant.expirationDate,
+      grantedBy: grant.grantedBy ?? null,
+      note: 'Granted locally — not written to Supabase',
+      updatedAt: new Date(grant.createdAt).toISOString(),
+      used: {},
+      quotas: lapsed ? PLANS.free.quotas : plan.quotas,
+      localOnly: true,
+    })
+  }
+
   // Free accounts have no subscription row at all, so they only appear here.
   if (admin) {
     try {
@@ -169,6 +203,13 @@ export async function listSubscribers(
   }
 
   const subscribers = Array.from(byEmail.values())
+
+  // Owner accounts are metered by nothing, so their per-feature numbers below
+  // are activity rather than consumption. Flagged so the table can say so
+  // instead of showing a used/limit ratio that means nothing.
+  for (const subscriber of subscribers) {
+    if (isOwnerEmail(subscriber.email)) subscriber.owner = true
+  }
 
   // Usage is counted per account against its OWN current window, so a
   // subscriber mid-cycle and a free account mid-month are both accurate.
@@ -217,21 +258,6 @@ export async function grantPlan(input: {
   grantedBy: string
   note?: string | null
 }): Promise<{ ok: boolean; error?: string; warning?: string }> {
-  // Service role only, and not merely because RLS rejects the anon key here:
-  // if the anon key COULD write this table, any browser holding it could put
-  // itself on the Elite plan. A grant is an authorisation decision and belongs
-  // to a credential the browser never sees.
-  const client = getSupabaseAdminClient()
-  if (!client) {
-    return {
-      ok: false,
-      error:
-        'Changing a plan needs SUPABASE_SERVICE_ROLE_KEY. The subscriptions table is protected by row level security, ' +
-        'so the public key cannot write to it — which is what stops a browser granting itself a plan. ' +
-        'Set the key in .env.local and restart.',
-    }
-  }
-
   const email = input.email.trim().toLowerCase()
   if (!email) return { ok: false, error: 'An email address is required.' }
 
@@ -242,59 +268,43 @@ export async function grantPlan(input: {
   const expires = new Date(now)
   expires.setDate(expires.getDate() + (input.days ?? CYCLE_DAYS))
 
-  const base = {
+  // Goes through the same writer the payment paths use, so an admin grant and a
+  // paid grant land the same way and degrade the same way. Prefers the
+  // service-role client — under RLS the anon key cannot write `subscriptions`,
+  // which is exactly what stops a browser granting itself a plan — and falls
+  // back to the on-disk store when neither is available.
+  const outcome = await saveSubscriptionRow(getSupabaseAdminClient(), {
     email,
-    plan_tier: plan.tier,
+    planTier: plan.tier,
     amount: plan.amount,
-    status: plan.tier === 'free' ? 'free' : 'active',
-    // Not a payment, so no korapay_reference: clearing it keeps a comped
-    // account from inheriting the previous payment's quota window.
-    korapay_reference: null,
-    expiration_date: plan.tier === 'free' ? now.toISOString() : expires.toISOString(),
-    updated_at: now.toISOString(),
+    // Not a payment, so no reference: clearing it keeps a comped account from
+    // inheriting the previous payment's quota window.
+    reference: null,
+    cycleStartedAt: now,
+    expirationDate: plan.tier === 'free' ? now : expires,
+    grantedBy: input.grantedBy,
+  })
+
+  if (outcome === 'failed') {
+    return {
+      ok: false,
+      error:
+        'Could not apply the plan. Set SUPABASE_SERVICE_ROLE_KEY in .env.local and restart — the subscriptions ' +
+        'table is protected by row level security, so the public key cannot write to it, and the local ' +
+        'fallback store is not writable on this deployment either.',
+    }
   }
 
-  const withMigration = {
-    ...base,
-    cycle_started_at: now.toISOString(),
-    granted_by: input.grantedBy,
-    note: input.note ?? null,
-  }
-
-  const upsert = (row: Record<string, unknown>) =>
-    client.from('subscriptions').upsert(row, { onConflict: 'email' })
-
-  try {
-    const { error } = await upsert(withMigration)
-    if (!error) return { ok: true }
-
-    // PGRST204 is PostgREST's "no such column". It means migrations/002 has not
-    // been applied to this project yet. Granting a plan is the core admin
-    // action and refusing it over three optional columns would be the wrong
-    // call — so retry with the columns that predate the migration and say what
-    // is degraded. `cycleKey` already falls back to expiration_date, so the
-    // grant still opens a working quota window without cycle_started_at.
-    if (error.code !== 'PGRST204') throw error
-
-    const retry = await upsert(base)
-    if (retry.error) throw retry.error
-
+  if (outcome === 'local') {
     return {
       ok: true,
       warning:
-        'Applied, but migrations/002_entitlements.sql has not been run on this Supabase project, ' +
-        'so the grant is not marked as comped and will be counted as revenue. Run the migration and re-apply.',
+        'Applied to this deployment only. SUPABASE_SERVICE_ROLE_KEY is not set, so the grant was written to ' +
+        'the local store instead of Supabase and will not survive a redeploy. Set the key to make it permanent.',
     }
-  } catch (e: unknown) {
-    console.error('Admin plan grant failed:', e)
-    // Supabase returns a PostgrestError, which is not an Error instance — the
-    // `instanceof` check alone swallowed the only useful part of the message.
-    const detail =
-      (e as { message?: string })?.message ??
-      (e instanceof Error ? e.message : null) ??
-      'Could not update the plan.'
-    return { ok: false, error: detail }
   }
+
+  return { ok: true }
 }
 
 /**

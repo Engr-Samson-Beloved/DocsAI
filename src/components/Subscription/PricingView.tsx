@@ -262,13 +262,23 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 count — this is the same data the paywall decides on. */}
             {entitlements && entitlements.planTier !== 'free' && (
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4">
-                <div className="text-xs font-bold mb-3">Credits left on your {entitlements.planName}</div>
+                <div className="text-xs font-bold mb-3">
+                  {entitlements.owner
+                    ? 'Owner account — every feature is unmetered'
+                    : `Credits left on your ${entitlements.planName}`}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   {Object.values(entitlements.quotas).map(quota => (
                     <div key={quota.feature} className="text-center">
                       <div className="text-lg font-extrabold">
-                        {quota.remaining}
-                        <span className="text-xs text-zinc-400 font-bold"> / {quota.limit}</span>
+                        {quota.unlimited ? (
+                          <span className="text-emerald-600 dark:text-emerald-400">∞</span>
+                        ) : (
+                          <>
+                            {quota.remaining}
+                            <span className="text-xs text-zinc-400 font-bold"> / {quota.limit}</span>
+                          </>
+                        )}
                       </div>
                       <div className="text-[10px] font-semibold text-zinc-500 leading-tight mt-0.5">
                         {quota.label}

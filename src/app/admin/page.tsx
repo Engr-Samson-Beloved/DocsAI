@@ -47,6 +47,8 @@ interface Subscriber {
   quotas: Record<string, number>
   lastSignInAt?: string | null
   createdAt?: string | null
+  localOnly?: boolean
+  owner?: boolean
 }
 
 interface FailureRow {
@@ -89,8 +91,14 @@ function when(ts: number | string | null | undefined): string {
   return date.toLocaleString()
 }
 
-/** `quota` panels read better as "3 / 6" than as two separate numbers. */
-function ratio(used: number | undefined, limit: number | undefined): string {
+/**
+ * `quota` panels read better as "3 / 6" than as two separate numbers.
+ *
+ * An owner has no ceiling, so showing a ratio would invent one — their usage is
+ * activity, not consumption, and is shown as a bare count.
+ */
+function ratio(used: number | undefined, limit: number | undefined, unlimited = false): string {
+  if (unlimited) return `${used ?? 0} · ∞`
   if (!limit) return '—'
   return `${used ?? 0} / ${limit}`
 }
@@ -671,24 +679,35 @@ function AccountsTab({
                   <td className="px-4 py-2.5">
                     <span
                       className={`inline-block px-2 py-0.5 rounded-lg font-bold ${
-                        user.status === 'active'
+                        user.owner
+                          ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
+                          : user.status === 'active'
                           ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
                           : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
                       }`}
                     >
-                      {user.planName}
+                      {user.owner ? 'Owner · unmetered' : user.planName}
                     </span>
-                    {user.grantedBy && <div className="text-[10px] text-amber-600 mt-0.5">Comped</div>}
+                    {user.grantedBy && !user.owner && (
+                      <div className="text-[10px] text-amber-600 mt-0.5">Comped</div>
+                    )}
+                    {user.localOnly && (
+                      <div className="text-[10px] text-purple-600 mt-0.5" title="Not written to Supabase">
+                        Local grant only
+                      </div>
+                    )}
                   </td>
-                  <td className="px-4 py-2.5 text-zinc-500">{when(user.expiresAt)}</td>
-                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.report, user.quotas.report)}</td>
-                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.humanize, user.quotas.humanize)}</td>
-                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.powerpoint, user.quotas.powerpoint)}</td>
-                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.integrity, user.quotas.integrity)}</td>
+                  <td className="px-4 py-2.5 text-zinc-500">{user.owner ? '—' : when(user.expiresAt)}</td>
+                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.report, user.quotas.report, user.owner)}</td>
+                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.humanize, user.quotas.humanize, user.owner)}</td>
+                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.powerpoint, user.quotas.powerpoint, user.owner)}</td>
+                  <td className="px-4 py-2.5 font-mono">{ratio(user.used.integrity, user.quotas.integrity, user.owner)}</td>
                   <td className="px-4 py-2.5">
                     <select
                       value={user.planTier}
-                      disabled={busy}
+                      // An owner's access comes from OWNER_EMAILS, not from a
+                      // subscription row, so changing this would do nothing.
+                      disabled={busy || user.owner}
                       onChange={e => onGrant(user.email, e.target.value as PlanTier)}
                       className="text-[11px] px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 outline-none cursor-pointer"
                     >

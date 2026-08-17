@@ -6769,14 +6769,20 @@ export default function Editor() {
                               <span className="text-zinc-500 dark:text-zinc-400 truncate">{quota.label}</span>
                               <span
                                 className={`font-bold tabular-nums ${
-                                  quota.limit === 0
+                                  quota.unlimited
+                                    ? 'text-emerald-600 dark:text-emerald-400'
+                                    : quota.limit === 0
                                     ? 'text-zinc-400'
                                     : quota.remaining === 0
                                     ? 'text-red-500'
                                     : 'text-zinc-800 dark:text-zinc-200'
                                 }`}
                               >
-                                {quota.limit === 0 ? '—' : `${quota.remaining}/${quota.limit}`}
+                                {quota.unlimited
+                                  ? '∞'
+                                  : quota.limit === 0
+                                  ? '—'
+                                  : `${quota.remaining}/${quota.limit}`}
                               </span>
                             </div>
                           )
@@ -6790,7 +6796,13 @@ export default function Editor() {
                         className="w-full flex items-center gap-2 p-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg cursor-pointer transition-colors font-semibold"
                       >
                         <Crown className="w-3.5 h-3.5" />
-                        <span>{entitlements.planTier === 'free' ? 'Upgrade plan' : 'Manage plan'}</span>
+                        <span>
+                          {entitlements.owner
+                            ? 'Owner account'
+                            : entitlements.planTier === 'free'
+                            ? 'Upgrade plan'
+                            : 'Manage plan'}
+                        </span>
                       </button>
                       <div className="border-t border-zinc-150 dark:border-zinc-800 my-2"></div>
                     </>
