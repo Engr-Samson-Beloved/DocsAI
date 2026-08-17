@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -45,7 +45,16 @@ import {
 } from '../../utils/humanize'
 import IntegrityPanel from '../Integrity/IntegrityPanel'
 import { chunkDocument, retrieveRelevantChunks } from '../../utils/rag'
-import { getSubscription, verifyPaymentCallback, checkAiQuota, incrementDailyUsage } from '../../utils/subscription'
+import { getSubscription, verifyPaymentCallback } from '../../utils/subscription'
+import {
+  authHeaders as aiAuthHeaders,
+  checkFeatureAccess,
+  consumeFeature,
+  fetchEntitlements,
+  invalidateEntitlements,
+  type EntitlementSnapshot,
+} from '../../utils/entitlementsClient'
+import type { MeteredFeature } from '../../utils/plans'
 import { extractSectionTarget, extractSectionFromHtml, replaceSectionInHtml, buildDocumentOutline } from '../../utils/chatIntelligence'
 import { exportPdfReact } from '../../utils/reactPdf'
 import { exportPresentationPptx } from '../../utils/pptxExporter'
@@ -1574,6 +1583,14 @@ export default function Editor() {
   const [showPricingModal, setShowPricingModal] = useState(false)
   const [showPricingView, setShowPricingView] = useState(false)
   const [userSubscription, setUserSubscription] = useState<any>(null)
+  /**
+   * Remaining credits, as the server last reported them.
+   *
+   * Display only — the toolbar reads it to say "2 of 4 left" and to disable
+   * what the plan does not cover. Never consulted to decide whether an action
+   * may run; that answer comes from the route.
+   */
+  const [entitlements, setEntitlements] = useState<EntitlementSnapshot | null>(null)
   const [paymentNotice, setPaymentNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
   const [quotaNotice, setQuotaNotice] = useState<string | null>(null)
   const [hintNotice, setHintNotice] = useState<{ tone: 'info' | 'error'; message: string } | null>(null)
@@ -1594,8 +1611,17 @@ export default function Editor() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
+  /** Re-reads the plan and remaining credits from the server. */
+  const refreshEntitlements = useCallback(async () => {
+    const snapshot = await fetchEntitlements({ refresh: true })
+    setEntitlements(snapshot)
+    return snapshot
+  }, [])
+
   useEffect(() => {
     if (typeof window === 'undefined') return
+
+    refreshEntitlements()
 
     const savedEmail = localStorage.getItem('wordpi-user-email')
     if (savedEmail) {
@@ -1616,6 +1642,10 @@ export default function Editor() {
       if (!result.checked) return
       if (result.success && result.subscription) {
         setUserSubscription(result.subscription)
+        // A settled payment opens a fresh quota cycle, so the cached counts are
+        // now wrong in the user's favour and must be re-read before anything
+        // renders them.
+        refreshEntitlements()
       }
       setPaymentNotice({ tone: result.success ? 'success' : 'error', message: result.message })
     })
@@ -1676,6 +1706,8 @@ export default function Editor() {
 
     setUserEmail(null)
     setUserSubscription(null)
+    setEntitlements(null)
+    invalidateEntitlements()
     setProjects([])
     setActiveProjectId(null)
     setDocumentTitle('Untitled Document')
@@ -1695,6 +1727,8 @@ export default function Editor() {
       setProjects(list || [])
     })
     getSubscription(email).then(sub => setUserSubscription(sub))
+    // The signed-out snapshot belonged to nobody; this account has its own.
+    refreshEntitlements()
   }
 
   // Import document and styling modal states
@@ -2361,6 +2395,36 @@ export default function Editor() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [projects])
+
+  /**
+   * Runs a deep-linked action once its project is open.
+   *
+   * The integrity dashboard links back here as
+   * `/?project=<id>&action=improve-originality`, so "review this flagged
+   * section" lands the user in the rewriter rather than on a page where they
+   * have to find it again. The parameter is stripped afterwards so a refresh
+   * does not silently start a second rewrite.
+   */
+  useEffect(() => {
+    if (!activeProjectId || showDashboard) return
+
+    const params = new URLSearchParams(window.location.search)
+    const action = params.get('action')
+    if (!action) return
+
+    params.delete('action')
+    const query = params.toString()
+    window.history.replaceState({}, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
+
+    if (action === 'improve-originality') {
+      handleHumanize()
+    } else if (action === 'integrity') {
+      setShowIntegrityPanel(true)
+    }
+    // handleHumanize is stable enough for this one-shot dispatch; adding it to
+    // the deps would re-fire the action on every render that redefines it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId, showDashboard])
 
   // Toggle dark/light theme
   useEffect(() => {
@@ -4214,7 +4278,19 @@ export default function Editor() {
    * freshly parsed upload, before the editor has taken the content — the caller
    * owns the loading state and error reporting.
    */
-  const exportPptxFromHtml = async (html: string, title: string) => {
+  const exportPptxFromHtml = async (html: string, title: string): Promise<boolean> => {
+    // Deck generation is a plan feature (4 / 8 / 12 per cycle). Unlike the
+    // other three it runs entirely in this browser and spends no provider
+    // credit, so the count is enforced here rather than by a route — checked
+    // before the build and charged only once slides actually came out. See the
+    // note in /api/entitlements about what that does and does not protect.
+    const verdict = await checkFeatureAccess('powerpoint')
+    if (!verdict.allowed) {
+      setQuotaNotice(verdict.message)
+      if (verdict.code === 'signin_required') setShowAuthModal(true)
+      return false
+    }
+
     // Values are passed through only when the user actually supplied them.
     // The exporter reads the document's own cover page first and prompts for
     // whatever is missing; filling the gaps with "STUDENT NAME" or a default
@@ -4232,6 +4308,12 @@ export default function Editor() {
       // The footer is opt-in. It defaults to empty rather than to a product name.
       docFooter,
     })
+
+    // Charged after the file was produced. A build that threw is free, which is
+    // why this is not in a `finally`.
+    await consumeFeature('powerpoint', { projectId: activeProjectId, metadata: { title } })
+    refreshEntitlements()
+    return true
   }
 
   const exportToPptx = async () => {
@@ -4423,12 +4505,16 @@ export default function Editor() {
       setLoadingMessage('Building your PowerPoint slides...')
       // Build from the parsed HTML rather than editor.getHTML(): setContent has
       // not necessarily flushed yet, and the deck must reflect the upload.
-      await exportPptxFromHtml(cleanedHtml, doc.title)
+      const built = await exportPptxFromHtml(cleanedHtml, doc.title)
 
-      setHintNotice({
-        tone: 'info',
-        message: `Slides generated from "${doc.name}". The document is open here — edit it and export again anytime.`
-      })
+      // The document is open either way — only the deck was gated — so the
+      // paywall banner speaks for itself and this success note is suppressed.
+      if (built) {
+        setHintNotice({
+          tone: 'info',
+          message: `Slides generated from "${doc.name}". The document is open here — edit it and export again anytime.`
+        })
+      }
     } catch (err) {
       reportIngestFailure(err, 'PPTX from upload')
     } finally {
@@ -4476,6 +4562,10 @@ export default function Editor() {
     //
     // .docx and .pdf only — those are the two formats the rewriter accepts, and
     // finding that out after an upload wastes the round trip.
+    // Before the file dialog: being told the plan does not cover this is much
+    // less annoying than being told it after picking a document.
+    if (!(await ensureAiAllowed('humanize'))) return
+
     const file = await pickDocumentFile(DOCUMENT_ACCEPT)
     if (!file) return // dismissed: leave the dashboard exactly as it was
 
@@ -4499,6 +4589,8 @@ export default function Editor() {
         name: `${stripExtension(file.name)}-humanized.docx`,
         sourceName: file.name
       })
+      // A credit was spent server-side; the cached count is now stale.
+      refreshEntitlements()
     } catch (err) {
       reportHumanizeFailure(err)
     } finally {
@@ -4569,6 +4661,10 @@ export default function Editor() {
       return
     }
 
+    // Checked before the document is compiled: building a .docx of a full
+    // thesis is not cheap, and the route would refuse the upload anyway.
+    if (!(await ensureAiAllowed('humanize'))) return
+
     setLoadingMessage('Preparing your document...')
     setIsExporting(true)
 
@@ -4625,6 +4721,9 @@ export default function Editor() {
       pristineImportRef.current = null
 
       setTimeout(() => runPagination(editor), 100)
+
+      // A credit was spent server-side; the cached count is now stale.
+      refreshEntitlements()
 
       setHintNotice({
         tone: 'info',
@@ -4732,27 +4831,62 @@ export default function Editor() {
 
   // Phase 2 AI Prompt execution (Streams response from WordPI AI route proxy)
   /**
-   * Gate an AI generation on the caller's remaining daily quota. Returns false
-   * when the limit is spent, after surfacing the upgrade prompt.
+   * Pre-flight for a metered AI action.
+   *
+   * A MIRROR of the server's decision, not the decision itself — every route
+   * re-checks before it spends anything. This exists so a blocked action fails
+   * immediately with the reason, instead of after the user has watched a
+   * spinner or, in the report case, been left with an empty project in the
+   * dashboard.
+   *
+   * Nothing is charged here. The credit is spent by the route that does the
+   * work, and only if the work succeeded.
    */
-  const consumeAiQuota = async (): Promise<boolean> => {
-    try {
-      const quota = await checkAiQuota(userEmail)
-      if (!quota.allowed) {
-        setQuotaNotice(quota.message)
-        return false
-      }
-      incrementDailyUsage(userEmail || 'guest')
-      return true
-    } catch (e) {
-      // Never hard-block writing because the quota lookup itself failed
-      console.error('Quota check failed, allowing generation:', e)
-      return true
+  const ensureAiAllowed = async (feature: MeteredFeature): Promise<boolean> => {
+    const verdict = await checkFeatureAccess(feature)
+    if (verdict.allowed) return true
+
+    setQuotaNotice(verdict.message)
+    if (verdict.code === 'signin_required') setShowAuthModal(true)
+    return false
+  }
+
+  /**
+   * Renders a refused AI request.
+   *
+   * The metered routes all answer a paywall refusal with the same JSON, so the
+   * message is already written for the user and only needs somewhere to go.
+   * Routed to the quota banner rather than the inline AI result panel, because
+   * the banner is the thing with an Upgrade button on it.
+   */
+  const handleAiResponseRefusal = async (response: Response): Promise<boolean> => {
+    if (response.status !== 401 && response.status !== 402 && response.status !== 429) {
+      return false
     }
+
+    let message = 'This action is not available on your current plan.'
+    let code = ''
+    try {
+      const body = await response.json()
+      if (body?.error) message = body.error
+      code = body?.code || ''
+    } catch {
+      /* keep the default */
+    }
+
+    // The plan may have changed under us — a lapsed cycle looks exactly like
+    // this — so the next check reads fresh rather than from the session cache.
+    invalidateEntitlements()
+    refreshEntitlements()
+
+    setQuotaNotice(message)
+    if (code === 'signin_required' || response.status === 401) setShowAuthModal(true)
+    setIsSimulatingAI(false)
+    return true
   }
 
   const handleAiAction = async (action: string, promptOverride?: string) => {
-    if (!(await consumeAiQuota())) return
+    if (!(await ensureAiAllowed('assist'))) return
 
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
@@ -4904,15 +5038,21 @@ export default function Editor() {
       const activeProject = projects.find(p => p.id === activeProjectId)
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiAuthHeaders(true),
         body: JSON.stringify({
           prompt: promptText,
           context: unifiedContext,
           academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
           documentType: activeProject?.documentType || wizardDocType || 'Custom',
-          modelTarget: aiEngine
+          modelTarget: aiEngine,
+          // An in-editor edit, charged to the daily allowance rather than to
+          // one of the handful of full reports the plan includes.
+          feature: 'assist',
+          projectId: activeProjectId
         })
       })
+
+      if (await handleAiResponseRefusal(response)) return
 
       if (!response.ok) {
         let errMsg = 'Failed to generate content.'
@@ -5069,7 +5209,7 @@ export default function Editor() {
     const finalPrompt = presetPrompt || popupPrompt
     if (!finalPrompt.trim()) return
 
-    if (!(await consumeAiQuota())) return
+    if (!(await ensureAiAllowed('assist'))) return
 
     setIsSimulatingAI(true)
     setSimulatedAiResult('')
@@ -5104,15 +5244,21 @@ export default function Editor() {
       const activeProject = projects.find(p => p.id === activeProjectId)
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiAuthHeaders(true),
         body: JSON.stringify({
           prompt: promptText,
           context: unifiedContext,
           academicLevel: activeProject?.academicLevel || wizardAcademicLevel || 'Undergraduate',
           documentType: activeProject?.documentType || wizardDocType || 'Custom',
-          modelTarget: aiEngine
+          modelTarget: aiEngine,
+          // An in-editor edit, charged to the daily allowance rather than to
+          // one of the handful of full reports the plan includes.
+          feature: 'assist',
+          projectId: activeProjectId
         })
       })
+
+      if (await handleAiResponseRefusal(response)) return
 
       if (!response.ok) {
         let errMsg = 'Failed.'
@@ -5369,7 +5515,7 @@ export default function Editor() {
   const handleWizardComplete = async (choice: 'import' | 'ai_blueprint' | 'blank') => {
     // Check the quota before creating the project, so a blocked generation does
     // not leave an empty document stranded in the dashboard.
-    if (choice === 'ai_blueprint' && !(await consumeAiQuota())) return
+    if (choice === 'ai_blueprint' && !(await ensureAiAllowed('report'))) return
 
     const finalTitle = wizardTopic.trim() || 'Untitled Project'
 
@@ -5559,7 +5705,7 @@ export default function Editor() {
       try {
         const response = await fetch('/api/generate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: aiAuthHeaders(true),
           body: JSON.stringify({
             prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
             
@@ -5572,9 +5718,14 @@ export default function Editor() {
             context: contextText,
             academicLevel: wizardAcademicLevel || 'Undergraduate',
             documentType: wizardDocType || 'Custom',
-            modelTarget: aiEngine
+            modelTarget: aiEngine,
+            // A whole multi-chapter document: one of the plan's full reports.
+            feature: 'report',
+            projectId: newProjId
           })
         })
+
+        if (await handleAiResponseRefusal(response)) return
 
         if (!response.ok) throw new Error('API request failed')
 
@@ -5736,7 +5887,7 @@ export default function Editor() {
   }
 
   const generateFullDocumentBlueprint = async () => {
-    if (!(await consumeAiQuota())) return
+    if (!(await ensureAiAllowed('report'))) return
 
     const finalTitle = documentTitle.trim() || 'Untitled Project'
     setIsSimulatingAI(true)
@@ -5839,7 +5990,7 @@ export default function Editor() {
 
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiAuthHeaders(true),
         body: JSON.stringify({
           prompt: `You are a scholarly research writing assistant. Generate a highly comprehensive, fully realized academic project document blueprint/guideline based on the topic: "${finalTitle}".
           
@@ -5853,9 +6004,17 @@ export default function Editor() {
           academicLevel: wizardAcademicLevel || 'Undergraduate',
           academicTone: wizardAcademicTone || 'Analytical',
           documentType: wizardDocType || 'Custom',
-          modelTarget: aiEngine
+          modelTarget: aiEngine,
+          // A whole multi-chapter document: one of the plan's full reports.
+          feature: 'report',
+          projectId: activeProjectId
         })
       })
+
+      if (await handleAiResponseRefusal(response)) {
+        setIsExporting(false)
+        return
+      }
 
       if (!response.ok) throw new Error('API request failed')
 
@@ -6591,6 +6750,51 @@ export default function Editor() {
                     Cloud Sync Active
                   </div>
                   <div className="border-t border-zinc-150 dark:border-zinc-800 my-2"></div>
+
+                  {/* Remaining credits, straight from the server. Shown here so
+                      the paywall is never the first time someone learns their
+                      plan is spent. */}
+                  {entitlements && (
+                    <>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1.5">
+                        {entitlements.planName}
+                      </div>
+                      <div className="space-y-1 mb-2">
+                        {(['report', 'humanize', 'powerpoint', 'integrity'] as const).map(feature => {
+                          const quota = entitlements.quotas[feature]
+                          if (!quota) return null
+                          return (
+                            <div key={feature} className="flex items-center justify-between text-[11px]">
+                              <span className="text-zinc-500 dark:text-zinc-400 truncate">{quota.label}</span>
+                              <span
+                                className={`font-bold tabular-nums ${
+                                  quota.limit === 0
+                                    ? 'text-zinc-400'
+                                    : quota.remaining === 0
+                                    ? 'text-red-500'
+                                    : 'text-zinc-800 dark:text-zinc-200'
+                                }`}
+                              >
+                                {quota.limit === 0 ? '—' : `${quota.remaining}/${quota.limit}`}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShowHeaderProfileDropdown(false)
+                          setShowPricingView(true)
+                        }}
+                        className="w-full flex items-center gap-2 p-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg cursor-pointer transition-colors font-semibold"
+                      >
+                        <Crown className="w-3.5 h-3.5" />
+                        <span>{entitlements.planTier === 'free' ? 'Upgrade plan' : 'Manage plan'}</span>
+                      </button>
+                      <div className="border-t border-zinc-150 dark:border-zinc-800 my-2"></div>
+                    </>
+                  )}
+
                   <button
                     onClick={handleSignOut}
                     className="w-full flex items-center gap-2 p-1.5 text-xs text-red-650 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg cursor-pointer transition-colors"

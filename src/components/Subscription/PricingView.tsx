@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React, { useState, useEffect } from 'react'
 import {
@@ -14,11 +14,21 @@ import {
   CreditCard
 } from 'lucide-react'
 import {
-  PLAN_DETAILS,
   UserSubscription,
   getSubscription,
   verifyPaymentCallback
 } from '../../utils/subscription'
+import {
+  PAID_TIERS,
+  PLANS,
+  formatNaira,
+  planFor,
+  type PlanTier
+} from '../../utils/plans'
+import {
+  fetchEntitlements,
+  type EntitlementSnapshot
+} from '../../utils/entitlementsClient'
 
 interface PricingViewProps {
   onBack: () => void
@@ -40,6 +50,8 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [redirectingUrl, setRedirectingUrl] = useState<string | null>(null)
+  /** Remaining credits, straight from the server — the same numbers the paywall uses. */
+  const [entitlements, setEntitlements] = useState<EntitlementSnapshot | null>(null)
 
   // Guests cannot be charged: the payment has to be linked to an account or the
   // subscription has nowhere to land once Korapay confirms it.
@@ -48,6 +60,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const loadSubscriptionAndTokens = async () => {
     const sub = await getSubscription(userEmail)
     setCurrentSub(sub)
+    setEntitlements(await fetchEntitlements({ refresh: true }))
 
     if (typeof window !== 'undefined') {
       const storedTokens = localStorage.getItem(`wordpi_tokens_${userEmail || 'guest'}`)
@@ -76,7 +89,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userEmail])
 
-  const handleSelectPlan = async (tier: 'basic' | 'pro' | 'enterprise') => {
+  const handleSelectPlan = async (tier: Exclude<PlanTier, 'free'>) => {
     setErrorMessage(null)
     setSuccessMessage(null)
     setRedirectingUrl(null)
@@ -150,9 +163,9 @@ export const PricingView: React.FC<PricingViewProps> = ({
                   currentSub?.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                 }`} />
                 <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                  {currentSub?.status === 'active' 
-                    ? `Active Plan: ${PLAN_DETAILS[currentSub.plan_tier]?.name || 'Pro'}` 
-                    : 'Free Tier (5 daily AI generations)'}
+                  {currentSub?.status === 'active'
+                    ? `Active plan: ${planFor(currentSub.plan_tier).name}`
+                    : 'Free tier — unlimited formatting, no AI writing'}
                 </span>
               </div>
             </div>
@@ -243,180 +256,146 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
         {/* ━━━ TAB 1: Monthly Subscription Plans ━━━ */}
         {activeTab === 'subscription' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            
-            {/* Basic Plan */}
-            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between space-y-4 hover:border-indigo-400 transition-all">
-              <div className="space-y-3">
-                <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Basic</span>
-                <h3 className="text-lg font-bold">Standard Research</h3>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-extrabold">₦5,000</span>
-                  <span className="text-xs text-zinc-400 font-semibold">/ month</span>
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  50 AI generations per day. Ideal for undergraduate term papers and seminar reports.
-                </p>
-                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>50 AI generations daily</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>DOCX & PDF export</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Standard academic tone</span>
-                  </div>
+          <div className="space-y-5">
+
+            {/* What is left on the current plan. Server numbers, not a local
+                count — this is the same data the paywall decides on. */}
+            {entitlements && entitlements.planTier !== 'free' && (
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4">
+                <div className="text-xs font-bold mb-3">Credits left on your {entitlements.planName}</div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {Object.values(entitlements.quotas).map(quota => (
+                    <div key={quota.feature} className="text-center">
+                      <div className="text-lg font-extrabold">
+                        {quota.remaining}
+                        <span className="text-xs text-zinc-400 font-bold"> / {quota.limit}</span>
+                      </div>
+                      <div className="text-[10px] font-semibold text-zinc-500 leading-tight mt-0.5">
+                        {quota.label}
+                      </div>
+                      <div className="text-[9px] text-zinc-400 uppercase tracking-wider mt-0.5">
+                        {quota.period === 'day' ? 'per day' : 'this cycle'}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              
-              <button
-                onClick={() => handleSelectPlan('basic')}
-                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'basic')}
-                className="w-full py-3 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-900 rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loadingTier === 'basic' ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    <span>Starting checkout…</span>
-                  </>
-                ) : currentSub?.plan_tier === 'basic' && currentSub?.status === 'active' ? (
-                  <span>Current Plan</span>
-                ) : isGuest ? (
-                  <>
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Sign in to pay ₦5,000</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-3.5 h-3.5" />
-                    <span>Pay ₦5,000</span>
-                  </>
-                )}
-              </button>
+            )}
+
+            {/* What the free tier actually includes, so the paywall is never a
+                surprise: formatting was and stays free. */}
+            {(!entitlements || entitlements.planTier === 'free') && (
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                <strong className="text-zinc-900 dark:text-zinc-100">You are on the Free tier.</strong>{' '}
+                Formatting, importing, restyling, paginating and exporting are unlimited and always
+                free, and you get one integrity check a month. Writing with AI, humanizing a document
+                and generating slides need a plan.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {PAID_TIERS.map(tier => {
+                const plan = PLANS[tier]
+                const featured = tier === 'pro'
+                const current = currentSub?.status === 'active' && currentSub?.plan_tier === tier
+
+                return (
+                  <div
+                    key={tier}
+                    className={`bg-white dark:bg-zinc-900 rounded-3xl p-6 flex flex-col justify-between space-y-4 transition-all ${
+                      featured
+                        ? 'border-2 border-indigo-500 dark:border-indigo-600 shadow-md relative overflow-hidden'
+                        : 'border border-zinc-200 dark:border-zinc-800 shadow-sm hover:border-indigo-400'
+                    }`}
+                  >
+                    {featured && (
+                      <div className="absolute top-0 right-0 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[10px] font-extrabold uppercase px-3 py-1 rounded-bl-xl tracking-wider">
+                        Most Popular
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <span
+                        className={`text-xs font-extrabold uppercase tracking-wider flex items-center gap-1 ${
+                          tier === 'basic'
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : tier === 'pro'
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-purple-600 dark:text-purple-400'
+                        }`}
+                      >
+                        {featured && <Crown className="w-3.5 h-3.5 fill-indigo-500" />}
+                        {plan.name}
+                      </span>
+
+                      <div className="flex items-baseline gap-1">
+                        <span
+                          className={`text-2xl font-extrabold ${
+                            featured ? 'text-indigo-600 dark:text-indigo-400' : ''
+                          }`}
+                        >
+                          {formatNaira(plan.amount)}
+                        </span>
+                        <span className="text-xs text-zinc-400 font-semibold">/ month</span>
+                      </div>
+
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                        {plan.tagline}
+                      </p>
+
+                      <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2 text-xs">
+                        {plan.features.map(feature => (
+                          <div
+                            key={feature}
+                            className="flex items-start gap-2 text-zinc-700 dark:text-zinc-300 font-medium"
+                          >
+                            <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                            <span>{feature}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleSelectPlan(tier)}
+                      disabled={loadingTier !== null || current}
+                      className={`w-full py-3 rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-default flex items-center justify-center gap-2 ${
+                        tier === 'pro'
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'
+                          : tier === 'enterprise'
+                          ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-md'
+                          : 'bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white text-white dark:text-zinc-900'
+                      }`}
+                    >
+                      {loadingTier === tier ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          <span>Starting checkout…</span>
+                        </>
+                      ) : current ? (
+                        <span>Current Plan</span>
+                      ) : isGuest ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Sign in to pay {formatNaira(plan.amount)}</span>
+                        </>
+                      ) : (
+                        <>
+                          {tier === 'pro' ? (
+                            <Zap className="w-3.5 h-3.5 fill-current" />
+                          ) : tier === 'enterprise' ? (
+                            <Crown className="w-3.5 h-3.5" />
+                          ) : (
+                            <CreditCard className="w-3.5 h-3.5" />
+                          )}
+                          <span>Pay {formatNaira(plan.amount)}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )
+              })}
             </div>
-
-            {/* Pro Plan (Featured) */}
-            <div className="bg-white dark:bg-zinc-900 border-2 border-indigo-500 dark:border-indigo-600 rounded-3xl p-6 shadow-md flex flex-col justify-between space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-[10px] font-extrabold uppercase px-3 py-1 rounded-bl-xl tracking-wider">
-                Most Popular
-              </div>
-
-              <div className="space-y-3">
-                <span className="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1">
-                  <Crown className="w-3.5 h-3.5 fill-indigo-500" /> Pro Plan
-                </span>
-                <h3 className="text-lg font-bold">Thesis & Multi-Chapter</h3>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">₦7,000</span>
-                  <span className="text-xs text-zinc-400 font-semibold">/ month</span>
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  200 AI generations per day. Built for Master&apos;s thesis &amp; multi-chapter academic projects.
-                </p>
-                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>200 AI generations daily</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Full multi-chapter outline wizard</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>DOCX, PDF & PPTX exports</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Fast stream model response</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleSelectPlan('pro')}
-                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'pro')}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loadingTier === 'pro' ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Starting checkout…</span>
-                  </>
-                ) : currentSub?.plan_tier === 'pro' && currentSub?.status === 'active' ? (
-                  <span>Current Plan</span>
-                ) : isGuest ? (
-                  <>
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Sign in to pay ₦7,000</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 fill-current" />
-                    <span>Pay ₦7,000</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Enterprise Plan */}
-            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between space-y-4 hover:border-purple-400 transition-all">
-              <div className="space-y-3">
-                <span className="text-xs font-extrabold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Enterprise</span>
-                <h3 className="text-lg font-bold">Unlimited Research</h3>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-extrabold">₦10,000</span>
-                  <span className="text-xs text-zinc-400 font-semibold">/ month</span>
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                  Unlimited AI generations per day. Maximum priority speed & all AI models (Gemini, Groq, Grok).
-                </p>
-                <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-2 text-xs">
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Unlimited AI generations</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>Priority model failover</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300 font-medium">
-                    <Check className="w-4 h-4 text-emerald-500" />
-                    <span>All export formats & templates</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => handleSelectPlan('enterprise')}
-                disabled={loadingTier !== null || (currentSub?.status === 'active' && currentSub?.plan_tier === 'enterprise')}
-                className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loadingTier === 'enterprise' ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Starting checkout…</span>
-                  </>
-                ) : currentSub?.plan_tier === 'enterprise' && currentSub?.status === 'active' ? (
-                  <span>Current Plan</span>
-                ) : isGuest ? (
-                  <>
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Sign in to pay ₦10,000</span>
-                  </>
-                ) : (
-                  <>
-                    <Crown className="w-3.5 h-3.5" />
-                    <span>Pay ₦10,000</span>
-                  </>
-                )}
-              </button>
-            </div>
-
           </div>
         )}
 

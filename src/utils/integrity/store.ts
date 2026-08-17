@@ -17,6 +17,8 @@
  * storage bucket. A bucket would be the better answer at volume, but it would
  * mean this feature could not run until someone provisioned one — and these
  * reports are tens of kilobytes. The column is documented in the migration.
+ *
+ * Cloud schema: migrations/001_integrity_checks.sql
  */
 
 import fs from 'fs'

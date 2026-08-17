@@ -27,6 +27,7 @@ import {
 } from '../../../../utils/integrity/runner'
 import { findCachedCheck, listChecks, saveCheck } from '../../../../utils/integrity/store'
 import { configuredProviders, providerAvailability } from '../../../../utils/integrity/providers/registry'
+import { checkFeature, commitUsage, recordFailure } from '../../../../utils/entitlements/service'
 import { callbackUrlFor } from '../webhookToken'
 import type { CheckedDocument, IntegrityCheck } from '../../../../utils/integrity/types'
 
@@ -86,6 +87,21 @@ export async function POST(req: NextRequest) {
   const owner = await resolveOwner(req)
   if (owner.unauthorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // A scan is billed per page at Copyleaks, so it needs an account to bill it
+  // to. The free allowance is one scan per calendar month per ACCOUNT — a guest
+  // cannot have one, because every signed-out browser resolves to the same
+  // `guest` owner key (see utils/owner.ts) and would share one allowance
+  // between all of them.
+  if (owner.ownerKey === 'guest') {
+    return NextResponse.json(
+      {
+        error: 'Sign in to run an integrity check. Every account gets one free check each month.',
+        code: 'signin_required',
+      },
+      { status: 401 }
+    )
   }
 
   let body: {
@@ -177,6 +193,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Deliberately after the cache lookup: re-reading an unchanged document's
+  // previous result spends no provider credit, so it must not spend a plan
+  // credit either. §21 already made that free of charge upstream.
+  const decision = await checkFeature(owner, 'integrity')
+  if (!decision.allowed) {
+    await recordFailure(owner, {
+      feature: 'integrity',
+      stage: 'quota',
+      message: decision.message,
+      statusCode: decision.statusCode,
+    })
+    return NextResponse.json(
+      {
+        error: decision.message,
+        code: decision.statusCode === 402 ? 'plan_required' : 'quota_exhausted',
+        feature: 'integrity',
+        quota: decision.state,
+        planTier: decision.snapshot.planTier,
+      },
+      { status: decision.statusCode }
+    )
+  }
+
   const document: CheckedDocument = {
     projectId: body.projectId,
     title: body.title?.trim() || 'Untitled document',
@@ -193,11 +232,25 @@ export async function POST(req: NextRequest) {
     await saveCheck(check, owner.supabase)
   } catch (error) {
     console.error('Could not create the integrity check:', error)
+    await recordFailure(owner, {
+      feature: 'integrity',
+      stage: 'storage',
+      message: error instanceof Error ? error.message : String(error),
+      statusCode: 503,
+    })
     return NextResponse.json(
       { error: 'Could not start the integrity check. Storage is unavailable.' },
       { status: 503 }
     )
   }
+
+  // The scan is about to be dispatched to Copyleaks/GPTZero in `after()`, which
+  // spends real provider credit whether or not the browser waits for it. That
+  // is the moment the plan credit is spent too.
+  await commitUsage(decision.reservation!, owner, {
+    projectId: body.projectId,
+    metadata: { checkId: check.id, wordCount: prepared.wordCount },
+  })
 
   const supabase = owner.supabase
   const sandbox = body.sandbox === true
@@ -210,6 +263,12 @@ export async function POST(req: NextRequest) {
       await runCheck(check, prepared, supabase, { sandbox, webhookUrl })
     } catch (error) {
       console.error('Integrity run failed:', error)
+      await recordFailure(owner, {
+        feature: 'integrity',
+        stage: 'provider',
+        message: error instanceof Error ? error.message : String(error),
+        metadata: { checkId: check.id },
+      })
       check.status = 'failed'
       check.error = 'Integrity check could not be completed. Please try again.'
       check.completedAt = Date.now()

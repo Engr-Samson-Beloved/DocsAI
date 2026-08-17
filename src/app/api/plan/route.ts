@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextRequest } from 'next/server'
+import { requireAiAccess } from '../../../utils/entitlements/service'
 
 /**
  * POST /api/plan
@@ -12,9 +13,16 @@ import { NextRequest } from 'next/server'
  * Kept intentionally lean — Gemini with model failover. On any error it
  * returns 500 and the client falls back to keyword classification, so
  * chat never hard-breaks.
+ *
+ * Gated but NOT metered: routing one chat turn is a Gemini call, so a free
+ * account cannot make it, but the credit is charged by /api/generate when the
+ * turn actually produces something. See requireAiAccess for the reasoning.
+ *
+ * Node rather than Edge, for the same reason as /api/generate: the entitlement
+ * store falls back to the filesystem, which Edge has no access to.
  */
 
-export const runtime = 'edge'
+export const runtime = 'nodejs'
 
 const PLANNER_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
 
@@ -27,6 +35,9 @@ export async function POST(req: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
       })
     }
+
+    const access = await requireAiAccess(req)
+    if (!access.ok) return access.response
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {

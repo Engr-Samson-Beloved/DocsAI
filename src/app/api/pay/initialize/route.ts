@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { PAID_TIERS, PLANS, formatNaira, isPaidTier } from '../../../../utils/plans'
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,19 +21,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const tierAmounts: Record<string, number> = {
-      basic: 5000,
-      pro: 7000,
-      enterprise: 10000
-    }
-
-    const amount = tierAmounts[planTier]
-    if (!amount) {
+    // Priced from the catalogue rather than a local table, so the amount
+    // charged can never disagree with the amount advertised on the pricing
+    // page or granted by the entitlement check (src/utils/plans.ts).
+    if (!isPaidTier(planTier)) {
+      const options = PAID_TIERS.map(t => `${t} (${formatNaira(PLANS[t].amount)})`).join(', ')
       return NextResponse.json(
-        { error: 'Invalid planTier specified. Must be basic (5k), pro (7k), or enterprise (10k).' },
+        { error: `Invalid planTier specified. Must be one of: ${options}.` },
         { status: 400 }
       )
     }
+
+    const amount = PLANS[planTier].amount
 
     const korapaySecret = process.env.KORAPAY_SECRET_KEY
     const korapayPublic = process.env.NEXT_PUBLIC_KORAPAY_PUBLIC_KEY

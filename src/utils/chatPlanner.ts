@@ -141,11 +141,24 @@ export async function planChatAction(
 ): Promise<ToolCall | null> {
   try {
     const prompt = buildPlannerPrompt(message, history, metadata)
+    // The route is gated (a free account may not prompt a model), so the
+    // session has to travel with the request. Without it every chat turn would
+    // resolve to `guest` and fall back to the keyword classifier — the chat
+    // would still work, but never route intelligently for anyone.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('wordpi-session-token')
+      if (token) headers['Authorization'] = `Bearer ${token}`
+    }
+
     const res = await fetch('/api/plan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ prompt }),
     })
+    // A paywall refusal falls back to keyword classification like any other
+    // failure. The generation the turn leads to is refused too, with a message
+    // the user can act on, so there is no need to surface it twice.
     if (!res.ok) return null
     const data = await res.json()
     return parseToolCall(data?.text || '')

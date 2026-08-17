@@ -1,6 +1,36 @@
-import { getSupabaseClient } from './supabase'
+"use client"
 
-export type SubscriptionTier = 'free' | 'basic' | 'pro' | 'enterprise'
+/**
+ * The subscription a browser thinks it has.
+ *
+ * WHAT CHANGED, AND WHY IT MATTERS
+ *
+ * This module used to be the paywall: it kept a per-day generation counter in
+ * localStorage, and `/api/generate` accepted anonymous requests without ever
+ * consulting it. Clearing site data reset the quota; posting to the route
+ * directly skipped it entirely. Anything the browser can edit is not a paywall.
+ *
+ * Entitlement decisions now live server-side in `utils/entitlements/*` and are
+ * re-checked inside every route that can spend money at a provider. What is
+ * left here is display state — which plan the user is on, when it expires, and
+ * settling the redirect Korapay sends them back on. Read
+ * `utils/entitlementsClient.ts` for remaining credits; this file no longer
+ * counts anything.
+ *
+ * Plan prices and quotas come from `utils/plans.ts`, shared with the server, so
+ * a pricing card and the paywall cannot disagree.
+ */
+
+import { getSupabaseClient } from './supabase'
+import {
+  PLANS,
+  planFor,
+  type PlanDefinition,
+  type PlanTier,
+} from './plans'
+import { invalidateEntitlements } from './entitlementsClient'
+
+export type SubscriptionTier = PlanTier
 
 export interface UserSubscription {
   user_id: string
@@ -13,93 +43,23 @@ export interface UserSubscription {
   updated_at: string
 }
 
-export interface QuotaStatus {
-  allowed: boolean
-  planTier: SubscriptionTier
-  status: 'active' | 'expired' | 'free'
-  remainingGenerations: number | 'unlimited'
-  dailyFreeLimit: number
-  usedToday: number
-  message: string
-}
-
-export const PLAN_DETAILS = {
-  free: {
-    name: 'Free Trial / Fallback',
-    amount: 0,
-    dailyLimit: 5,
-    description: '5 free AI generations per day when subscription expires or for guest users.',
-    features: ['5 AI generations per day', 'Basic DOCX export', 'Standard speed generation']
-  },
-  basic: {
-    name: 'Basic Plan',
-    amount: 5000,
-    dailyLimit: 50,
-    description: '50 AI generations per day. Perfect for undergraduate term papers & essays.',
-    features: ['50 AI generations per day', 'DOCX & PDF export', 'Standard academic research assistant']
-  },
-  pro: {
-    name: 'Pro Plan',
-    amount: 7000,
-    dailyLimit: 200,
-    description: '200 AI generations per day. Ideal for Master’s theses & multi-chapter projects.',
-    features: ['200 AI generations per day', 'Full multi-chapter outline wizard', 'DOCX, PDF & PPTX exports', 'Fast stream AI response']
-  },
-  enterprise: {
-    name: 'Enterprise Plan',
-    amount: 10000,
-    dailyLimit: 9999,
-    description: 'Unlimited AI generations per day. Priority speed & dedicated support for research leads.',
-    features: ['Unlimited AI generations', 'Priority model failover (Gemini, Groq, Grok)', 'All export formats & templates', 'Dedicated support']
-  }
-}
+/**
+ * Kept as an alias rather than a second table.
+ *
+ * The pricing screens were written against this name; pointing it at the shared
+ * catalogue means a price change is one edit in `plans.ts` and not three.
+ */
+export const PLAN_DETAILS: Record<PlanTier, PlanDefinition> = PLANS
 
 const STORAGE_SUB_KEY = 'docuai_user_subscription'
-const STORAGE_USAGE_KEY = 'docuai_daily_usage'
 
 /**
- * Gets local usage count for today
- */
-export function getDailyUsage(emailOrId: string = 'guest'): { date: string; count: number } {
-  if (typeof window === 'undefined') return { date: getTodayDateString(), count: 0 }
-  
-  try {
-    const raw = localStorage.getItem(`${STORAGE_USAGE_KEY}_${emailOrId}`)
-    if (!raw) return { date: getTodayDateString(), count: 0 }
-    
-    const parsed = JSON.parse(raw)
-    const today = getTodayDateString()
-    
-    if (parsed.date !== today) {
-      const resetData = { date: today, count: 0 }
-      localStorage.setItem(`${STORAGE_USAGE_KEY}_${emailOrId}`, JSON.stringify(resetData))
-      return resetData
-    }
-    
-    return parsed
-  } catch (e) {
-    return { date: getTodayDateString(), count: 0 }
-  }
-}
-
-/**
- * Increments daily usage count
- */
-export function incrementDailyUsage(emailOrId: string = 'guest'): number {
-  if (typeof window === 'undefined') return 1
-  
-  const current = getDailyUsage(emailOrId)
-  const updated = { date: getTodayDateString(), count: current.count + 1 }
-  localStorage.setItem(`${STORAGE_USAGE_KEY}_${emailOrId}`, JSON.stringify(updated))
-  return updated.count
-}
-
-function getTodayDateString(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
-/**
- * Fetches user subscription from Supabase or Local Storage
+ * Fetches the subscription from the API, falling back to Supabase and then to
+ * the last known value cached on this device.
+ *
+ * The cached copy exists so the header does not flash "Free" on every reload
+ * while the request is in flight. It is never trusted for an entitlement
+ * decision — the server does not read it.
  */
 export async function getSubscription(userEmail?: string | null): Promise<UserSubscription> {
   const defaultSub: UserSubscription = {
@@ -190,87 +150,28 @@ export async function getSubscription(userEmail?: string | null): Promise<UserSu
 }
 
 /**
- * Checks if user is allowed to make an AI generation call
- */
-export async function checkAiQuota(userEmail?: string | null): Promise<QuotaStatus> {
-  const sub = await getSubscription(userEmail)
-  const usage = getDailyUsage(userEmail || 'guest')
-  
-  const planInfo = PLAN_DETAILS[sub.plan_tier] || PLAN_DETAILS.free
-  const dailyLimit = sub.status === 'active' ? planInfo.dailyLimit : PLAN_DETAILS.free.dailyLimit
-
-  if (sub.status === 'expired') {
-    const remaining = Math.max(0, PLAN_DETAILS.free.dailyLimit - usage.count)
-    return {
-      allowed: remaining > 0,
-      planTier: 'free',
-      status: 'expired',
-      remainingGenerations: remaining,
-      dailyFreeLimit: PLAN_DETAILS.free.dailyLimit,
-      usedToday: usage.count,
-      message: remaining > 0
-        ? `Your previous subscription has expired. You are using the Free Fallback Quota (${usage.count}/${PLAN_DETAILS.free.dailyLimit} used today). Upgrade your plan to unlock full access.`
-        : `Your subscription has expired and you have used your 5 free AI generations today. Please upgrade your plan to continue.`
-    }
-  }
-
-  if (sub.plan_tier === 'enterprise' && sub.status === 'active') {
-    return {
-      allowed: true,
-      planTier: 'enterprise',
-      status: 'active',
-      remainingGenerations: 'unlimited',
-      dailyFreeLimit: 9999,
-      usedToday: usage.count,
-      message: 'Active Enterprise Plan - Unlimited AI generations available.'
-    }
-  }
-
-  const remaining = Math.max(0, dailyLimit - usage.count)
-  const isAllowed = remaining > 0
-
-  return {
-    allowed: isAllowed,
-    planTier: sub.plan_tier,
-    status: sub.status as any,
-    remainingGenerations: remaining,
-    dailyFreeLimit: dailyLimit,
-    usedToday: usage.count,
-    message: isAllowed
-      ? `Active ${planInfo.name}: ${remaining} AI generations remaining today (${usage.count}/${dailyLimit} used).`
-      : `Daily limit of ${dailyLimit} AI generations reached for ${planInfo.name}. Upgrade your plan to get more generations.`
-  }
-}
-
-/**
- * Saves subscription locally and in Supabase
+ * Caches a subscription on this device.
+ *
+ * Local only. It deliberately no longer writes to the `subscriptions` table:
+ * that row decides what the server lets the account do, and a browser must not
+ * be able to set it. Only the verified Korapay paths (`/api/pay/verify`,
+ * `/api/pay/webhook`) and an admin grant write there now.
  */
 export async function saveSubscription(sub: UserSubscription): Promise<void> {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_SUB_KEY, JSON.stringify(sub))
   }
-
-  const supabase = getSupabaseClient()
-  if (supabase && sub.email) {
-    try {
-      await supabase.from('subscriptions').upsert({
-        user_id: sub.user_id,
-        email: sub.email,
-        plan_tier: sub.plan_tier,
-        amount: sub.amount,
-        status: sub.status,
-        korapay_reference: sub.korapay_reference,
-        expiration_date: sub.expiration_date,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'email' })
-    } catch (e) {
-      console.warn('Failed to persist subscription to Supabase:', e)
-    }
-  }
+  invalidateEntitlements()
 }
 
 /**
- * Verifies returning payment references from Korapay redirect URLs
+ * Settles the payment Korapay redirected back with.
+ *
+ * The activation itself happens server-side in `/api/pay/verify`, which reads
+ * the settled amount from Korapay and writes the subscription row. What comes
+ * back here is a report of that, not a grant — the tier and amount below are
+ * read from the server's answer rather than from the URL the browser arrived
+ * on.
  */
 export async function verifyPaymentCallback(userEmail?: string | null): Promise<{
   checked: boolean
@@ -283,7 +184,7 @@ export async function verifyPaymentCallback(userEmail?: string | null): Promise<
 
   const params = new URLSearchParams(window.location.search)
   const reference = params.get('reference')
-  const tier = (params.get('tier') || 'basic') as 'basic' | 'pro' | 'enterprise'
+  const tierParam = params.get('tier') || 'basic'
   const email = userEmail || 'user@docuai.app'
 
   if (!reference) {
@@ -293,21 +194,29 @@ export async function verifyPaymentCallback(userEmail?: string | null): Promise<
   console.log(`[Payment Verification] Verifying payment reference from URL: ${reference}`)
 
   try {
-    const res = await fetch(`/api/pay/verify?reference=${reference}&tier=${tier}&email=${encodeURIComponent(email)}`)
+    const res = await fetch(
+      `/api/pay/verify?reference=${encodeURIComponent(reference)}&tier=${encodeURIComponent(tierParam)}&email=${encodeURIComponent(email)}`
+    )
     const data = await res.json()
 
     // Clean up URL query parameters to avoid duplicate verification loops
     window.history.replaceState({}, document.title, window.location.pathname)
 
     if (res.ok && data.success && data.status === 'active') {
+      const granted = data.subscription ?? {}
+      // The server's tier, not the URL's — see the note above.
+      const tier = (granted.plan_tier ?? 'basic') as PlanTier
+      const plan = planFor(tier)
+
       const newSub: UserSubscription = {
         user_id: email,
-        email: email,
+        email: granted.email || email,
         plan_tier: tier,
-        amount: tier === 'enterprise' ? 10000 : tier === 'pro' ? 7000 : 5000,
+        amount: Number(granted.amount ?? plan.amount),
         status: 'active',
         korapay_reference: reference,
-        expiration_date: data.subscription?.expiration_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        expiration_date:
+          granted.expiration_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         updated_at: new Date().toISOString()
       }
 
@@ -316,16 +225,18 @@ export async function verifyPaymentCallback(userEmail?: string | null): Promise<
         checked: true,
         success: true,
         status: 'active',
-        message: `✅ Payment Verified! Your ${PLAN_DETAILS[tier].name} is active for 30 days.`,
+        message: `✅ Payment verified. Your ${plan.name} is active for 30 days.`,
         subscription: newSub
       }
-    } else {
-      return {
-        checked: true,
-        success: false,
-        status: (data.status as any) || 'failed',
-        message: `❌ Payment Incomplete or Declined: Korapay reports this transaction was not completed. Your account remains on the Free fallback tier.`
-      }
+    }
+
+    return {
+      checked: true,
+      success: false,
+      status: (data.status as any) || 'failed',
+      message:
+        data.message ||
+        '❌ Payment incomplete or declined: Korapay reports this transaction was not completed. Your account remains on the Free tier.'
     }
   } catch (err: any) {
     window.history.replaceState({}, document.title, window.location.pathname)
@@ -333,7 +244,7 @@ export async function verifyPaymentCallback(userEmail?: string | null): Promise<
       checked: true,
       success: false,
       status: 'failed',
-      message: `❌ Verification Error: Could not confirm transaction status. If debited, your subscription will be auto-activated via webhook shortly.`
+      message: `❌ Verification error: could not confirm the transaction. If you were debited, your subscription will activate via webhook shortly.`
     }
   }
 }

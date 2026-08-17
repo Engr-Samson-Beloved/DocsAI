@@ -72,11 +72,31 @@ async function errorFrom(res: Response, fallback: string): Promise<string> {
   return fallback
 }
 
+/** Thrown when the account's plan does not cover this rewrite. */
+export class HumanizeNotAllowedError extends Error {}
+
 async function submitJob(body: FormData): Promise<string> {
-  const res = await fetch('/api/humanize', { method: 'POST', body })
+  // A rewrite is a metered feature, so the session travels with the upload.
+  // The Content-Type header is deliberately NOT set: fetch has to generate the
+  // multipart boundary itself.
+  const headers: Record<string, string> = {}
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('wordpi-session-token')
+    if (token) headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const res = await fetch('/api/humanize', { method: 'POST', body, headers })
 
   if (res.status === 501) {
     throw new HumanizerUnavailableError('Humanizing is not configured on this deployment.')
+  }
+  // 401 needs an account, 402 needs a plan, 429 means the plan's rewrites are
+  // spent. All three already carry a message written for the user, so it is
+  // passed through rather than replaced with a transport-level one.
+  if (res.status === 401 || res.status === 402 || res.status === 429) {
+    throw new HumanizeNotAllowedError(
+      await errorFrom(res, 'Humanizing is not available on your current plan.')
+    )
   }
   if (!res.ok) {
     throw new Error(await errorFrom(res, `Could not start the rewrite (${res.status}).`))

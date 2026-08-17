@@ -14,7 +14,8 @@
  * mount it.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -67,17 +68,22 @@ export default function IntegrityPanel({
   const [estimate, setEstimate] = useState<UsageEstimate | null>(null)
   const [history, setHistory] = useState<CheckSummary[]>([])
   const [downloading, setDownloading] = useState(false)
-  const [wordCount, setWordCount] = useState(0)
 
   const abort = useRef<AbortController | null>(null)
 
-  // Word count for the estimate, computed with the same extractor the server
-  // uses so the number shown is the number that will be billed against.
-  useEffect(() => {
+  /**
+   * Word count for the estimate, derived with the same extractor the server
+   * uses, so the number the user sees before pressing the button is the number
+   * they will actually be billed against.
+   *
+   * Derived rather than stored: putting this in state and filling it from an
+   * effect makes the dialog render once with a misleading zero.
+   */
+  const wordCount = useMemo(() => {
     try {
-      setWordCount(extractDocumentText(getContent()).wordCount)
+      return extractDocumentText(getContent()).wordCount
     } catch {
-      setWordCount(0)
+      return 0
     }
   }, [getContent])
 
@@ -232,7 +238,7 @@ export default function IntegrityPanel({
                   </h3>
                   <div className="mt-2 space-y-1.5">
                     {history.slice(0, 5).map(entry => (
-                      <a
+                      <Link
                         key={entry.id}
                         href={`/integrity/${entry.id}`}
                         className="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 text-xs transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50"
@@ -248,7 +254,7 @@ export default function IntegrityPanel({
                           {entry.assessment ? assessmentLabel(entry.assessment as never) : entry.status}
                           <ExternalLink className="w-3 h-3 text-zinc-400" />
                         </span>
-                      </a>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -330,12 +336,12 @@ export default function IntegrityPanel({
               ) : null}
 
               <div className="mt-5 flex gap-2">
-                <a
+                <Link
                   href={`/integrity/${check.id}`}
                   className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-center text-sm font-semibold text-white transition-colors hover:bg-indigo-700"
                 >
                   View Results
-                </a>
+                </Link>
                 <button
                   onClick={handleDownload}
                   disabled={!check.reportGenerated || downloading}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '../../../../utils/supabase'
+import { CYCLE_DAYS, isPaidTier, tierForAmount, type PlanTier } from '../../../../utils/plans'
 
 export async function GET(req: NextRequest) {
   try {
@@ -63,12 +64,36 @@ export async function GET(req: NextRequest) {
 
     // Payment is CONFIRMED SUCCESSFUL by Korapay API!
     const userEmail = transactionData.customer?.email || emailParam || 'user@docuai.app'
-    const amount = transactionData.amount || 5000
-    const planTier: 'basic' | 'pro' | 'enterprise' = transactionData.metadata?.plan_tier || tierParam ||
-      (amount >= 10000 ? 'enterprise' : amount >= 7000 ? 'pro' : 'basic')
+    const amount = Number(transactionData.amount) || 0
 
-    const expirationDate = new Date()
-    expirationDate.setDate(expirationDate.getDate() + 30) // 30 days valid
+    // The amount Korapay confirms is the only authority on which plan was
+    // bought. The `tier` query parameter rides on a redirect URL the user can
+    // edit, and charge metadata is echoed from the initialize call — trusting
+    // either would let ?tier=enterprise on a Base-plan redirect grant the top
+    // plan for ₦15,000.
+    const planTier: PlanTier = tierForAmount(amount)
+
+    if (!isPaidTier(planTier)) {
+      console.warn(
+        `[Korapay Verify] ${reference} settled for ₦${amount}, below the lowest plan. Not activating.`
+      )
+      return NextResponse.json({
+        success: false,
+        status: 'failed',
+        message:
+          'The amount received is below the price of any plan, so no subscription was activated. Please contact support with your payment reference.'
+      }, { status: 400 })
+    }
+
+    if (isPaidTier(tierParam || '') && tierParam !== planTier) {
+      console.warn(
+        `[Korapay Verify] ${reference} requested tier '${tierParam}' but ₦${amount} buys '${planTier}'. Granting '${planTier}'.`
+      )
+    }
+
+    const cycleStartedAt = new Date()
+    const expirationDate = new Date(cycleStartedAt)
+    expirationDate.setDate(expirationDate.getDate() + CYCLE_DAYS)
 
     const supabase = getSupabaseClient()
     if (supabase && userEmail) {
@@ -79,6 +104,8 @@ export async function GET(req: NextRequest) {
           amount: amount,
           status: 'active',
           korapay_reference: reference,
+          // Opens a fresh quota window — see utils/entitlements/period.ts.
+          cycle_started_at: cycleStartedAt.toISOString(),
           expiration_date: expirationDate.toISOString(),
           updated_at: new Date().toISOString()
         }, { onConflict: 'email' })

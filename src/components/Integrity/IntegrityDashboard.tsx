@@ -16,7 +16,8 @@
  * storing the text would have given us, and it costs one IndexedDB read.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -124,51 +125,56 @@ export default function IntegrityDashboard({ checkId }: Props) {
   const [documentText, setDocumentText] = useState<string | null>(null)
   const [selected, setSelected] = useState<SectionDetectionResult | null>(null)
 
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const abandoned = useRef(false)
-
   /* ── load, then poll while the check is still running ───────────── */
 
-  const load = useCallback(async () => {
-    try {
-      const snapshot = await fetchStatus(checkId)
-      if (abandoned.current) return
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
 
-      setStages(snapshot.stages)
+    // Declared inside the effect and re-scheduled by tail call rather than as
+    // a useCallback that references itself — a self-referencing callback reads
+    // its own binding before initialisation.
+    const tick = async () => {
+      try {
+        const snapshot = await fetchStatus(checkId)
+        if (cancelled) return
 
-      if (snapshot.status === 'completed') {
-        setCheck(await fetchCheck(checkId))
+        setStages(snapshot.stages)
+
+        if (snapshot.status === 'completed') {
+          const full = await fetchCheck(checkId)
+          if (cancelled) return
+          setCheck(full)
+          setLoading(false)
+          return
+        }
+
+        if (snapshot.status === 'failed') {
+          setError(snapshot.error || 'Integrity check could not be completed.')
+          setLoading(false)
+          return
+        }
+
         setLoading(false)
-        return
-      }
-
-      if (snapshot.status === 'failed') {
-        setError(snapshot.error || 'Integrity check could not be completed.')
+        timer = setTimeout(tick, 2000)
+      } catch (err) {
+        if (cancelled) return
+        setError(
+          err instanceof IntegrityCheckError
+            ? err.message
+            : 'Could not load this integrity check.'
+        )
         setLoading(false)
-        return
       }
+    }
 
-      setLoading(false)
-      pollTimer.current = setTimeout(load, 2000)
-    } catch (err) {
-      if (abandoned.current) return
-      setError(
-        err instanceof IntegrityCheckError
-          ? err.message
-          : 'Could not load this integrity check.'
-      )
-      setLoading(false)
+    tick()
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
     }
   }, [checkId])
-
-  useEffect(() => {
-    abandoned.current = false
-    load()
-    return () => {
-      abandoned.current = true
-      if (pollTimer.current) clearTimeout(pollTimer.current)
-    }
-  }, [load])
 
   /* ── re-derive the text locally so offsets can be resolved ──────── */
 
@@ -242,13 +248,13 @@ export default function IntegrityDashboard({ checkId }: Props) {
             <span>We couldn&apos;t complete the integrity check.</span>
           </div>
           <p className="mt-2 text-sm text-red-700/80 dark:text-red-300/80">{error}</p>
-          <a
+          <Link
             href="/"
             className="mt-4 inline-flex items-center gap-2 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Try Again
-          </a>
+          </Link>
         </div>
       </Shell>
     )
@@ -270,13 +276,13 @@ export default function IntegrityDashboard({ checkId }: Props) {
     <Shell>
       {/* ── header ─────────────────────────────────────────────── */}
       <header className="mb-6">
-        <a
+        <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to WordPI
-        </a>
+        </Link>
 
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -315,13 +321,13 @@ export default function IntegrityDashboard({ checkId }: Props) {
               )}
               Download PDF
             </button>
-            <a
+            <Link
               href={`/?project=${encodeURIComponent(check.document.projectId)}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             >
               <FileText className="w-3.5 h-3.5" />
               Open in Editor
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -621,25 +627,34 @@ export default function IntegrityDashboard({ checkId }: Props) {
           </ol>
 
           <div className="mt-5 flex flex-wrap gap-2">
-            <a
+            <Link
               href={`/?project=${encodeURIComponent(check.document.projectId)}`}
               className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             >
               Review Writing
-            </a>
-            <a
-              href={`/?project=${encodeURIComponent(check.document.projectId)}&action=humanize`}
+            </Link>
+            {/*
+              Opens the project and starts the rewriter. Labelled for what it
+              does to the writing, not for what it might do to a detector —
+              §13. There is deliberately no "Add Citation" button here: the
+              editor has no citation flow to open, and a button that only
+              re-opens the document while promising something else is worse
+              than the recommendation text above it.
+            */}
+            <Link
+              href={`/?project=${encodeURIComponent(check.document.projectId)}&action=improve-originality`}
               className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-900/40"
               title="Improve originality and natural academic expression"
             >
               Improve Originality
-            </a>
-            <a
-              href={`/?project=${encodeURIComponent(check.document.projectId)}&action=references`}
-              className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            </Link>
+            <Link
+              href={`/?project=${encodeURIComponent(check.document.projectId)}&action=integrity`}
+              className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+              title="Check the document again after editing it"
             >
-              Add Citation
-            </a>
+              Re-check After Editing
+            </Link>
           </div>
 
           <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-400">

@@ -1,7 +1,20 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextRequest } from 'next/server'
+import { requireFeature } from '../../../utils/entitlements/service'
+import type { MeteredFeature } from '../../../utils/plans'
 
-export const runtime = 'edge' // Enable Edge Runtime for lightweight and high performance streaming
+/**
+ * Node rather than Edge.
+ *
+ * This route used to run on the Edge runtime for streaming. It now has to make
+ * a paywall decision first, and the entitlement store falls back to the
+ * filesystem when Supabase is not configured — `fs` does not exist on Edge, and
+ * an install with no cloud backend would have had no way to count usage at all.
+ * Streaming still works here: the handler returns the same ReadableStream, and
+ * Node's runtime streams it the same way.
+ */
+export const runtime = 'nodejs'
+export const maxDuration = 60
 
 // Prioritized list of Gemini models to support automatic failover on 503 / 404
 const PRIORITIZED_MODELS = [
@@ -10,9 +23,23 @@ const PRIORITIZED_MODELS = [
   'gemini-1.5-flash'
 ]
 
+/**
+ * Which bucket this generation is charged to.
+ *
+ * A full report is one of only two a Base subscriber gets per cycle, so it must
+ * not be spent on a request to rephrase one paragraph. The client says which it
+ * is asking for, and anything unrecognised is charged as an `assist` — the
+ * cheap bucket — so a caller cannot dodge metering by omitting the field, and
+ * cannot be over-charged by sending a bad one.
+ */
+function featureFor(value: unknown): MeteredFeature {
+  return value === 'report' ? 'report' : 'assist'
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, context, academicLevel, documentType, modelTarget, userEmail } = await req.json()
+    const body = await req.json()
+    const { prompt, context, academicLevel, documentType, modelTarget, projectId } = body
 
     if (!prompt) {
       return new Response(
@@ -21,11 +48,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // The paywall, before a single token is bought. Free accounts have a quota
+    // of 0 on both buckets and are refused here (§ utils/plans.ts).
+    const grant = await requireFeature(req, featureFor(body.feature))
+    if (!grant.ok) return grant.response
+
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
+      await grant.fail('config', 'GEMINI_API_KEY is not configured', 500)
       return new Response(
-        JSON.stringify({ 
-          error: 'GEMINI_API_KEY environment variable is missing. Please create a .env.local file in the project root and add GEMINI_API_KEY=your_key_here.' 
+        JSON.stringify({
+          error: 'GEMINI_API_KEY environment variable is missing. Please create a .env.local file in the project root and add GEMINI_API_KEY=your_key_here.'
         }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       )
@@ -195,17 +228,35 @@ export async function POST(req: NextRequest) {
     }
 
     if (!activeModelName) {
+      // Nothing was generated, so nothing is charged.
+      await grant.fail(
+        'upstream',
+        `All providers failed: ${lastError?.message || lastError || 'unknown'}`,
+        503
+      )
       return new Response(
-        JSON.stringify({ 
-          error: `All configured models returned errors. Last error details: ${lastError?.message || lastError || 'Unknown Error'}. Please retry shortly or verify your key access.` 
+        JSON.stringify({
+          error: `All configured models returned errors. Last error details: ${lastError?.message || lastError || 'Unknown Error'}. Please retry shortly or verify your key access.`
         }),
         { status: 503, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
     const encoder = new TextEncoder()
+
+    // Charged only once the model has actually produced text. A stream that
+    // dies before its first token cost the user nothing and must not cost them
+    // one of two monthly reports either.
+    let deliveredText = false
+
     const readableStream = new ReadableStream({
       async start(controller) {
+        /** Every text delta goes through here, so the charge flag cannot be missed. */
+        const sendText = (text: string) => {
+          deliveredText = true
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
+        }
+
         try {
           // Enqueue active model name as initial meta event
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ meta: { model: activeModelName } })}\n\n`))
@@ -235,9 +286,7 @@ export async function POST(req: NextRequest) {
                     try {
                       const parsed = JSON.parse(cleanLine.substring(6))
                       const text = parsed.choices?.[0]?.delta?.content
-                      if (text) {
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
-                      }
+                      if (text) sendText(text)
                     } catch (e) {
                       // Skip parsing errors on incomplete JSON segments
                     }
@@ -250,9 +299,7 @@ export async function POST(req: NextRequest) {
                 try {
                   const parsed = JSON.parse(finalLine.substring(6))
                   const text = parsed.choices?.[0]?.delta?.content
-                  if (text) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`))
-                  }
+                  if (text) sendText(text)
                 } catch (e) {}
               }
             } finally {
@@ -262,15 +309,21 @@ export async function POST(req: NextRequest) {
             // Stream from Gemini API
             for await (const chunk of responseStream.stream) {
               const chunkText = chunk.text()
-              if (chunkText) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunkText })}\n\n`))
-              }
+              if (chunkText) sendText(chunkText)
             }
           }
         } catch (error: any) {
           console.error('Streaming chunk delivery failure:', error)
+          await grant.fail('upstream', error?.message || 'Stream delivery failed', 502)
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: error.message || 'Stream error encountered during delivery.' })}\n\n`))
         } finally {
+          // The charge lands here rather than before the stream opened, so a
+          // generation that produced nothing is free. A partial stream is
+          // charged in full: the tokens were bought either way, and the user
+          // keeps whatever prose arrived.
+          if (deliveredText) {
+            await grant.commit({ projectId: projectId ?? null, metadata: { model: activeModelName } })
+          }
           controller.enqueue(encoder.encode(`data: [DONE]\n\n`))
           controller.close()
         }
@@ -285,7 +338,7 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('Edge generate handler root error:', error)
+    console.error('Generate handler root error:', error)
     return new Response(
       JSON.stringify({ error: error.message || 'Failed to initialize generation stream' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

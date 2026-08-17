@@ -314,14 +314,36 @@ describe('provider credentials never reach the browser', () => {
     assert.deepEqual(offenders, [], 'a "use client" module is bundled and shipped to the browser')
   })
 
-  it('the service-role key has exactly one importer', () => {
+  it('the service-role key is imported only where it is unavoidable', () => {
+    // It bypasses row-level security entirely, so every importer is listed here
+    // by hand and has to justify itself. Adding one is a deliberate act, which
+    // is the point of pinning the list rather than counting it.
+    const allowed = [
+      // Copyleaks calls back with no user session attached, so RLS cannot be
+      // satisfied any other way.
+      'src/app/api/integrity/webhook/[id]/route.ts',
+      // Metering falls back to this when a usage row has to be written for an
+      // owner whose own client cannot reach the table.
+      'src/utils/entitlements/store.ts',
+      // The admin dashboard reads across every account, which no user-scoped
+      // client may do, and mints accounts via auth.admin.
+      'src/utils/adminData.ts',
+      // Reports whether the key is present, so the dashboard can say that its
+      // view is partial instead of showing an empty list as though it were whole.
+      'src/app/api/admin/failures/route.ts',
+    ]
+
     const importers = sourceFiles('src').filter(file =>
       /supabaseAdmin/.test(read(file)) && !file.endsWith('supabaseAdmin.ts')
     )
 
-    // It bypasses row-level security entirely, so the blast radius is kept to
-    // the one route that genuinely cannot authenticate: the webhook.
-    assert.deepEqual(importers, ['src/app/api/integrity/webhook/[id]/route.ts'])
+    assert.deepEqual(importers.slice().sort(), allowed.slice().sort())
+
+    // The property that actually matters: whatever the list contains, none of
+    // it may be bundled into the browser.
+    for (const file of importers) {
+      assert.ok(!isClientModule(read(file)), `${file} imports the service-role key and is a client module`)
+    }
   })
 
   it('provider adapters run only on the server', () => {

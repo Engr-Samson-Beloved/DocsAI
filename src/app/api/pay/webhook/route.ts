@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { getSupabaseClient } from '../../../../utils/supabase'
+import { CYCLE_DAYS, isPaidTier, tierForAmount } from '../../../../utils/plans'
 
 export async function POST(req: NextRequest) {
   try {
@@ -66,14 +67,23 @@ export async function POST(req: NextRequest) {
     if (event === 'charge.success' || event === 'subscription.create') {
       const email = data.customer?.email
       const reference = data.reference
-      const amount = data.amount || 5000
+      const amount = Number(data.amount) || 0
 
-      const metadataPlan = data.metadata?.plan_tier
-      const planTier: 'basic' | 'pro' | 'enterprise' = metadataPlan ||
-        (amount >= 10000 ? 'enterprise' : amount >= 7000 ? 'pro' : 'basic')
+      // Derived from the settled amount, never from the echoed metadata: the
+      // signature proves Korapay sent this envelope, not that the plan name
+      // inside it matches what was paid. Same reasoning as /api/pay/verify.
+      const planTier = tierForAmount(amount)
 
-      const expirationDate = new Date()
-      expirationDate.setDate(expirationDate.getDate() + 30) // 30 days active
+      if (!isPaidTier(planTier)) {
+        console.warn(
+          `[Korapay Webhook] ${reference} settled for ₦${amount}, below the lowest plan. Not activating.`
+        )
+        return NextResponse.json({ status: 'success', received: true, activated: false })
+      }
+
+      const cycleStartedAt = new Date()
+      const expirationDate = new Date(cycleStartedAt)
+      expirationDate.setDate(expirationDate.getDate() + CYCLE_DAYS)
 
       const supabase = getSupabaseClient()
       if (supabase && email) {
@@ -83,6 +93,8 @@ export async function POST(req: NextRequest) {
           amount: amount,
           status: 'active',
           korapay_reference: reference,
+          // Opens a fresh quota window — see utils/entitlements/period.ts.
+          cycle_started_at: cycleStartedAt.toISOString(),
           expiration_date: expirationDate.toISOString(),
           updated_at: new Date().toISOString()
         }, { onConflict: 'email' })

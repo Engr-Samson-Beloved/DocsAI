@@ -23,6 +23,7 @@ import {
   describeUpstreamError,
   unreachable,
 } from './upstream'
+import { requireFeature } from '../../../utils/entitlements/service'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -65,6 +66,13 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const base = humanizerBaseUrl()
+
+  // Metered before the upload is read: a rewrite is one of a Base subscriber's
+  // two per cycle, and the check costs nothing while parsing a 20 MB multipart
+  // body does. Charged at the bottom, once the job is accepted upstream — a
+  // submission the rewriter rejected must not spend a credit.
+  const grant = await requireFeature(request, 'humanize')
+  if (!grant.ok) return grant.response
 
   let form: FormData
   try {
@@ -132,8 +140,10 @@ export async function POST(request: Request) {
     const body = await res.json().catch(() => null)
 
     if (!res.ok) {
+      const message = describeUpstreamError(body, res.status)
+      await grant.fail('upstream', message, res.status)
       return Response.json(
-        { error: describeUpstreamError(body, res.status) },
+        { error: message },
         // 4xx is the caller's fault and is passed through; anything else is a
         // failure of the upstream, which is a bad gateway from here.
         { status: res.status >= 400 && res.status < 500 ? res.status : 502 }
@@ -142,17 +152,24 @@ export async function POST(request: Request) {
 
     const jobId = (body as { job_id?: unknown } | null)?.job_id
     if (typeof jobId !== 'string' || !jobId) {
+      await grant.fail('upstream', 'Rewriter accepted the job but returned no job id', 502)
       return Response.json(
         { error: 'The rewriter accepted the job but returned no job id.' },
         { status: 502 }
       )
     }
 
+    // The job is running upstream and its output is the user's. Charged here
+    // rather than on download: the rewrite is already being paid for at
+    // GhostWriter whether or not the browser comes back to collect it.
+    await grant.commit({ metadata: { jobId, mode: file ? 'file' : 'draft' } })
+
     return Response.json(
       { jobId, status: (body as { status?: string }).status || 'running' },
       { status: 202 }
     )
   } catch (err) {
+    await grant.fail('upstream', err instanceof Error ? err.message : String(err), 502)
     return unreachable(err)
   }
 }
