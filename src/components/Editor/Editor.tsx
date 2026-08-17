@@ -114,6 +114,7 @@ import {
   Menu,
   Sparkles,
   ShieldCheck,
+  Crown,
   X
 } from 'lucide-react'
 
