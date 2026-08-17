@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseClient } from '../../../../utils/supabase'
+import { getSupabaseAdminClient } from '../../../../utils/supabaseAdmin'
 import { CYCLE_DAYS, isPaidTier, tierForAmount, type PlanTier } from '../../../../utils/plans'
+import { saveSubscriptionRow } from '../../../../utils/subscriptionWrite'
 
 export async function GET(req: NextRequest) {
   try {
@@ -95,23 +97,41 @@ export async function GET(req: NextRequest) {
     const expirationDate = new Date(cycleStartedAt)
     expirationDate.setDate(expirationDate.getDate() + CYCLE_DAYS)
 
-    const supabase = getSupabaseClient()
+    // Service role first. This request carries no user session — it is settled
+    // from a Korapay redirect — so under row-level security the anon key cannot
+    // write the subscription row, and a confirmed payment would leave the payer
+    // on the free tier. Falls back to the anon client for installs whose
+    // `subscriptions` table has no RLS.
+    const supabase = getSupabaseAdminClient() ?? getSupabaseClient()
+
+    let persisted = false
     if (supabase && userEmail) {
-      try {
-        await supabase.from('subscriptions').upsert({
-          email: userEmail,
-          plan_tier: planTier,
-          amount: amount,
-          status: 'active',
-          korapay_reference: reference,
-          // Opens a fresh quota window — see utils/entitlements/period.ts.
-          cycle_started_at: cycleStartedAt.toISOString(),
-          expiration_date: expirationDate.toISOString(),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'email' })
-      } catch (e) {
-        console.warn('Supabase subscription save warning:', e)
-      }
+      persisted = await saveSubscriptionRow(supabase, {
+        email: userEmail,
+        planTier,
+        amount,
+        reference,
+        cycleStartedAt,
+        expirationDate,
+      })
+    }
+
+    // The money is taken. If the grant did not land, the payer is on the free
+    // tier with a receipt, so this must never pass silently: it is logged at
+    // error level and the response says who to contact and with what.
+    if (!persisted) {
+      console.error(
+        `[Korapay Verify] PAYMENT TAKEN BUT NOT GRANTED. reference=${reference} email=${userEmail} ` +
+          `tier=${planTier} amount=${amount}. Check SUPABASE_SERVICE_ROLE_KEY and migrations/002_entitlements.sql.`
+      )
+      return NextResponse.json({
+        success: false,
+        status: 'pending',
+        message:
+          `Your payment went through, but we could not activate the plan on this account automatically. ` +
+          `Nothing further is owed. Please contact support quoting reference ${reference} and it will be applied by hand.`,
+        reference,
+      }, { status: 202 })
     }
 
     return NextResponse.json({

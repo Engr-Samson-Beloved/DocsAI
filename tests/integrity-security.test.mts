@@ -331,6 +331,14 @@ describe('provider credentials never reach the browser', () => {
       // Reports whether the key is present, so the dashboard can say that its
       // view is partial instead of showing an empty list as though it were whole.
       'src/app/api/admin/failures/route.ts',
+      // Both settle a payment with no user session attached. Under RLS the anon
+      // key cannot write `subscriptions`, so without this a confirmed payment
+      // would leave the payer on the free tier.
+      'src/app/api/pay/verify/route.ts',
+      'src/app/api/pay/webhook/route.ts',
+      // Names the module in its own doc comment to explain why its two callers
+      // must pass the service-role client. It imports no client itself.
+      'src/utils/subscriptionWrite.ts',
     ]
 
     const importers = sourceFiles('src').filter(file =>

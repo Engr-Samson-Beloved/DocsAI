@@ -216,10 +216,20 @@ export async function grantPlan(input: {
   days?: number
   grantedBy: string
   note?: string | null
-}): Promise<{ ok: boolean; error?: string }> {
-  const client = getSupabaseAdminClient() ?? getSupabaseClient()
+}): Promise<{ ok: boolean; error?: string; warning?: string }> {
+  // Service role only, and not merely because RLS rejects the anon key here:
+  // if the anon key COULD write this table, any browser holding it could put
+  // itself on the Elite plan. A grant is an authorisation decision and belongs
+  // to a credential the browser never sees.
+  const client = getSupabaseAdminClient()
   if (!client) {
-    return { ok: false, error: 'Supabase is not configured on this deployment.' }
+    return {
+      ok: false,
+      error:
+        'Changing a plan needs SUPABASE_SERVICE_ROLE_KEY. The subscriptions table is protected by row level security, ' +
+        'so the public key cannot write to it — which is what stops a browser granting itself a plan. ' +
+        'Set the key in .env.local and restart.',
+    }
   }
 
   const email = input.email.trim().toLowerCase()
@@ -232,30 +242,58 @@ export async function grantPlan(input: {
   const expires = new Date(now)
   expires.setDate(expires.getDate() + (input.days ?? CYCLE_DAYS))
 
-  try {
-    const { error } = await client.from('subscriptions').upsert(
-      {
-        email,
-        plan_tier: plan.tier,
-        amount: plan.amount,
-        status: plan.tier === 'free' ? 'free' : 'active',
-        // Not a payment, so no korapay_reference: clearing it keeps a comped
-        // account from inheriting the previous payment's quota window.
-        korapay_reference: null,
-        cycle_started_at: now.toISOString(),
-        expiration_date: plan.tier === 'free' ? now.toISOString() : expires.toISOString(),
-        granted_by: input.grantedBy,
-        note: input.note ?? null,
-        updated_at: now.toISOString(),
-      },
-      { onConflict: 'email' }
-    )
+  const base = {
+    email,
+    plan_tier: plan.tier,
+    amount: plan.amount,
+    status: plan.tier === 'free' ? 'free' : 'active',
+    // Not a payment, so no korapay_reference: clearing it keeps a comped
+    // account from inheriting the previous payment's quota window.
+    korapay_reference: null,
+    expiration_date: plan.tier === 'free' ? now.toISOString() : expires.toISOString(),
+    updated_at: now.toISOString(),
+  }
 
-    if (error) throw error
-    return { ok: true }
-  } catch (e) {
+  const withMigration = {
+    ...base,
+    cycle_started_at: now.toISOString(),
+    granted_by: input.grantedBy,
+    note: input.note ?? null,
+  }
+
+  const upsert = (row: Record<string, unknown>) =>
+    client.from('subscriptions').upsert(row, { onConflict: 'email' })
+
+  try {
+    const { error } = await upsert(withMigration)
+    if (!error) return { ok: true }
+
+    // PGRST204 is PostgREST's "no such column". It means migrations/002 has not
+    // been applied to this project yet. Granting a plan is the core admin
+    // action and refusing it over three optional columns would be the wrong
+    // call — so retry with the columns that predate the migration and say what
+    // is degraded. `cycleKey` already falls back to expiration_date, so the
+    // grant still opens a working quota window without cycle_started_at.
+    if (error.code !== 'PGRST204') throw error
+
+    const retry = await upsert(base)
+    if (retry.error) throw retry.error
+
+    return {
+      ok: true,
+      warning:
+        'Applied, but migrations/002_entitlements.sql has not been run on this Supabase project, ' +
+        'so the grant is not marked as comped and will be counted as revenue. Run the migration and re-apply.',
+    }
+  } catch (e: unknown) {
     console.error('Admin plan grant failed:', e)
-    return { ok: false, error: e instanceof Error ? e.message : 'Could not update the plan.' }
+    // Supabase returns a PostgrestError, which is not an Error instance — the
+    // `instanceof` check alone swallowed the only useful part of the message.
+    const detail =
+      (e as { message?: string })?.message ??
+      (e instanceof Error ? e.message : null) ??
+      'Could not update the plan.'
+    return { ok: false, error: detail }
   }
 }
 

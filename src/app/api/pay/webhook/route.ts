@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { getSupabaseClient } from '../../../../utils/supabase'
+import { getSupabaseAdminClient } from '../../../../utils/supabaseAdmin'
 import { CYCLE_DAYS, isPaidTier, tierForAmount } from '../../../../utils/plans'
+import { saveSubscriptionRow } from '../../../../utils/subscriptionWrite'
 
 export async function POST(req: NextRequest) {
   try {
@@ -85,24 +87,35 @@ export async function POST(req: NextRequest) {
       const expirationDate = new Date(cycleStartedAt)
       expirationDate.setDate(expirationDate.getDate() + CYCLE_DAYS)
 
-      const supabase = getSupabaseClient()
-      if (supabase && email) {
-        const { error } = await supabase.from('subscriptions').upsert({
-          email: email,
-          plan_tier: planTier,
-          amount: amount,
-          status: 'active',
-          korapay_reference: reference,
-          // Opens a fresh quota window — see utils/entitlements/period.ts.
-          cycle_started_at: cycleStartedAt.toISOString(),
-          expiration_date: expirationDate.toISOString(),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'email' })
+      // Service role first: this request comes from Korapay's servers with no
+      // user session, so under row-level security the anon key cannot write the
+      // row and a paid subscription would never activate.
+      const supabase = getSupabaseAdminClient() ?? getSupabaseClient()
 
-        if (error) {
-          console.error('[Korapay Webhook] Supabase upsert failed:', error)
-        } else {
+      if (supabase && email) {
+        const granted = await saveSubscriptionRow(supabase, {
+          email,
+          planTier,
+          amount,
+          reference,
+          cycleStartedAt,
+          expirationDate,
+        })
+
+        if (granted) {
           console.log(`[Korapay Webhook] Successfully activated ${planTier} subscription for ${email}`)
+        } else {
+          // Answering non-2xx makes Korapay retry, which is what we want: the
+          // charge is real and the grant is missing, so another attempt is
+          // strictly better than dropping it. The operator also sees this in
+          // the admin failure history.
+          console.error(
+            `[Korapay Webhook] PAYMENT TAKEN BUT NOT GRANTED. reference=${reference} email=${email} tier=${planTier}`
+          )
+          return NextResponse.json(
+            { error: 'Could not persist the subscription; please retry this webhook.' },
+            { status: 503 }
+          )
         }
       }
     }

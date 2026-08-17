@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 })
     }
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, warning: result.warning ?? null })
   }
 
   return NextResponse.json({ error: "Unknown action. Use 'create' or 'grant'." }, { status: 400 })
